@@ -1,4 +1,5 @@
 import './cy.css'
+import _defaultAvatar from '../../assets/avatar-default.jpg'
 import cytoscape from 'cytoscape';
 import Layers, { LayersPlugin } from 'cytoscape-layers';
 import fcose from 'cytoscape-fcose';
@@ -348,8 +349,6 @@ export type NodeData = expandedNodeData | normalNodeData;
 export function isExpandedNodeData(data: NodeData): data is expandedNodeData {
     return data.nodeType === "expanded";
 }
-
-const _defaultAvatar = "/assets/avatar-default.jpg";
 
 export function addExpandedNode(cyobj: jotmindFrontend, data: expandedNodeData): nodeInfoInCy {
     let cy = cyobj.cy;
