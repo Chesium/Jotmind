@@ -1,0 +1,203 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #ffffff;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+  color:#888;
+}
+
+#app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.vanilla:hover {
+  filter: drop-shadow(0 0 2em #3178c6aa);
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+
+.profile-card {
+  width: 300px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 12px;
+  font-family: sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.name {
+  font-size: 20px;
+  color: black;
+  font-family: "SF Pro Rounded";
+  font-weight: 600;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  font-family: "SF Pro Rounded";
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: white;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Color presets */
+.tag.blue { background-color: #1976d2; }
+.tag.orange { background-color: #f57c00; }
+.tag.brown { background-color: #795548; }
+.tag.green { background-color: #43a047; }
+.tag.purple { background-color: #8e24aa; }
+.tag.red { background-color: #d32f2f; }
+
+.footer {
+  font-family: "SF Pro Rounded";
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: gray;
+}
+
+.circle-node {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+  /* 内发光 */
+  box-shadow: inset 0 0 20px 6px rgba(100, 149, 237, 0.5), 
+              0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* 头像部分 */
+.avatar-circle {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-bottom: 0px;
+}
+
+/* 名称部分：自动调整字体大小以适应圆形区域 */
+.name {
+  color: gray;
+  font-weight: 600;
+  text-align: center;
+  max-width: 70%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "SF Pro Rounded";
+  font-weight: 600;
+  font-size: clamp(1px, 4vw, 20px); /* 自适应字体大小 */
+}

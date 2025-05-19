@@ -1,0 +1,23 @@
+{
+  "name": "jotmind-proto1",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/cytoscape-fcose": "^2.2.4",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "cytoscape": "^3.32.0",
+    "cytoscape-fcose": "^2.2.0",
+    "cytoscape-layers": "^3.0.0",
+    "neo4j-driver": "^5.28.1",
+    "uuid": "^11.1.0"
+  }
+}
