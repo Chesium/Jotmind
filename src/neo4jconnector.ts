@@ -2,12 +2,17 @@ import neo4j, { Driver } from 'neo4j-driver'
 import { _defaultTagColor, _defaultTagTextColor } from './cytoscapejsTest/cy.js'
 import type { expandedNodeData, normalNodeData, NodeData, TagData, EdgeData } from './cytoscapejsTest/cy.js'
 
-export async function connectToNeo4j() {
+export async function connectToNeo4j(url:string,username:string,password:string): Promise<Driver> {
+    // const driver = neo4j.driver(
+    //     'neo4j+s://1ddf08c9.databases.neo4j.io', // (1)
+    //     // 'neo4j://localhost:7687/', // (1)
+    //     neo4j.auth.basic('neo4j', 'Wnb-ife2WhLvtK3n2RHNVbMCz9Jvhq3m9wNLQZEFYQY'), // (2)
+    //     { disableLosslessIntegers: true } // (3)
+    // );
     const driver = neo4j.driver(
-        'neo4j+s://1ddf08c9.databases.neo4j.io', // (1)
-        // 'neo4j://localhost:7687/', // (1)
-        neo4j.auth.basic('neo4j', 'Wnb-ife2WhLvtK3n2RHNVbMCz9Jvhq3m9wNLQZEFYQY'), // (2)
-        { disableLosslessIntegers: true } // (3)
+        url,
+        neo4j.auth.basic(username, password),
+        { disableLosslessIntegers: true }
     );
 
     console.log("waiting for connection...");
@@ -272,7 +277,7 @@ export async function retrieveEdgeInfo(driver: Driver): Promise<EdgeData[]> {
         edges_tmp.forEach((edge) => {
             var index = edges.findIndex((e) => e.source == edge.source && e.target == edge.target);
             var index2 = edges.findIndex((e) => e.source == edge.target && e.target == edge.source);
-            // 全部视作双向边
+            // consider all edges as bidirectional
             if (index == -1 && index2 == -1) {
                 edges.push({
                     source: edge.source,

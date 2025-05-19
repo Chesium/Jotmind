@@ -1,38 +1,47 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + TS</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <!-- <div class="profile-card">
-      <div class="profile-header">
-        <img src="/assets/avatar.jpg" alt="Avatar" class="avatar">
-        <div class="name">CHEN SHIMIN</div>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jotmind POC</title>
+  <style>
+  </style>
+</head>
+
+<body>
+  <div class="banner">
+    <img src="/assets/logo.svg" alt="logo" />
+  </div>
+  <div class="main">
+    <div class="sidebar">
+      <h3>Log in to Database</h3>
+      <div class="login-group">
+        <h4>link</h4>
+        <input id="link" placeholder="Link" />
+        <h4>username</h4>
+        <input id="username" placeholder="Username" />
+        <h4>password</h4>
+        <input id="password" type="password" placeholder="Password" />
+        <button id="login-btn" class="login-button">Log in</button>
       </div>
-      <div class="tags">
-        <span class="tag blue">M</span>
-        <span class="tag orange">NUS</span>
-        <span class="tag brown">EE</span>
-        <span class="tag green">Y1</span>
-        <span class="tag orange">Birthday: 11/22</span>
-        <span class="tag purple">INTJ</span>
-        <span class="tag red">CHN</span>
-      </div>
-      <div class="footer">
-        <span class="left-note">14@260</span>
-        <span class="right-note">last update: 2d</span>
-      </div>
-    </div> -->
-    <!-- <div class="circle-node">
-      <img src="/assets/avatar-hardy.jpg" alt="Avatar" class="avatar-circle">
-      <div class="name">Hardy</div>
-    </div> -->
-    <br/>
-    <div id="cy"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+    </div>
+
+    <div class="graph-container">
+      <div id="cy"></div>
+    </div>
+
+    <div class="rightbar">
+      <!-- Future tools -->
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+
+  <!-- <script type="module">
+    // TypeScript logic
+    
+  </script> -->
+</body>
+
 </html>

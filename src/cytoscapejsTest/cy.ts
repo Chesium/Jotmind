@@ -53,7 +53,7 @@ const _originalCyStyle: cytoscape.StylesheetJsonBlock[] = [{
 {
     selector: '.hidden',
     css: {
-        "opacity": 0.0001 // 奇技淫巧，为0时会消失
+        "opacity": 0.0001 // magical trick to make the node background disappear
     }
 },
 {
@@ -269,6 +269,11 @@ export function initalizeCy(): jotmindFrontend {
             fit: false,
         }
     });
+    window.addEventListener('resize', () => {
+        document.getElementById('cy')?.style.setProperty('width', `${window.innerWidth-500}px`);
+        cy.resize();
+    });
+    console.log("cy initialized");
     const layers: LayersPlugin = (cy as any).layers();
 
     // layers.renderPerNode(layers.append('html'), (elem, node) => {
