@@ -1,5 +1,4 @@
 import './cy.css'
-import type { NodeDefinition, EdgeDefinition, StylesheetJsonBlock, Position } from 'cytoscape';
 import cytoscape from 'cytoscape';
 import Layers, { LayersPlugin } from 'cytoscape-layers';
 import fcose from 'cytoscape-fcose';
@@ -76,17 +75,17 @@ const _originalCyStyle: cytoscape.StylesheetJsonBlock[] = [{
     }
 }];
 
-const _originalNodes: NodeDefinition[] = [
-    { data: { id: 'a', parent: 'b' }, position: { x: 215, y: 85 }, grabbable: false, selectable: false },
-    { data: { id: 'b' } },
-    { data: { id: 'c', parent: 'b' }, position: { x: 300, y: 85 }, grabbable: false, selectable: false },
-    { data: { id: 'd' }, position: { x: 215, y: 175 }, classes: 'hidden circle' },
-    { data: { id: 'f' }, position: { x: 450, y: 230 }, classes: 'hidden' }
-];
+// const _originalNodes: NodeDefinition[] = [
+//     { data: { id: 'a', parent: 'b' }, position: { x: 215, y: 85 }, grabbable: false, selectable: false },
+//     { data: { id: 'b' } },
+//     { data: { id: 'c', parent: 'b' }, position: { x: 300, y: 85 }, grabbable: false, selectable: false },
+//     { data: { id: 'd' }, position: { x: 215, y: 175 }, classes: 'hidden circle' },
+//     { data: { id: 'f' }, position: { x: 450, y: 230 }, classes: 'hidden' }
+// ];
 
-const _originalEdges: EdgeDefinition[] = [
-    { data: { id: 'ad', source: 'a', target: 'd' } },
-    { data: { id: 'eb', source: 'f', target: 'b' } }];
+// const _originalEdges: EdgeDefinition[] = [
+//     { data: { id: 'ad', source: 'a', target: 'd' } },
+//     { data: { id: 'eb', source: 'f', target: 'b' } }];
 
 // function expandedNodeStyle(): StylesheetJsonBlock[] {
 //     return [{
@@ -456,7 +455,7 @@ export function addEdges(cyobj: jotmindFrontend, edges: EdgeData[]): void {
             }
         ]);
     });
-    cyobj.cy.layout({ name: 'fcose',fit:false,idealEdgeLength: edge => 100,padding:0 }as FcoseLayoutOptions).run();
+    cyobj.cy.layout({ name: 'fcose',fit:false,idealEdgeLength: _ => 100,padding:0 }as FcoseLayoutOptions).run();
 }
 
 export interface EdgeData {
