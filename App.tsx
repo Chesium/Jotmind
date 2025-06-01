@@ -12,6 +12,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Button } from '@react-navigation/elements';
 import PersonCard from './src/personCard'
 import type {expandedNodeData} from './src/dataType';
+import PersonCardView from './src/personCardView';
 
 function TestScreen(){
   var testExpandedNodeData: expandedNodeData = {
@@ -30,10 +31,13 @@ function TestScreen(){
     lFootnote: "14@260",
     rFootnote: "last update: 2d",
 }
+  // return (
+  //   <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+  //     <PersonCard data={testExpandedNodeData}></PersonCard>
+  //   </View>
+  // )
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <PersonCard data={testExpandedNodeData}></PersonCard>
-    </View>
+    <PersonCardView data={new Array(8).fill(testExpandedNodeData)}></PersonCardView>
   )
 }
 
