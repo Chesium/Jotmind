@@ -10,6 +10,8 @@ import {Button} from '@react-navigation/elements';
 import PersonCard from './src/personCard';
 import type {expandedNodeData} from './src/dataType';
 import PersonCardView, {PersonCardViewFromNeo4j} from './src/personCardView';
+import type {Properties} from './src/propertyEditor/PropertiesEditor';
+import {PropertiesEditor} from './src/propertyEditor/PropertiesEditor';
 
 function TestScreen() {
   var testExpandedNodeData: expandedNodeData = {
@@ -46,6 +48,30 @@ function TestScreen() {
   );
 }
 
+function TestScreen2() {
+  var testProperties: Properties = {
+    hometown: 'Beijing',
+    nationality: 'CHN',
+    major: 'CS',
+    gender: 'M',
+    school: 'NUS',
+    yearOfStudy: 'Y1',
+  };
+  return (
+    <PropertiesEditor
+      properties={testProperties}
+      onChangeProperty={(o, n) => {
+        console.log(n);
+      }}
+      onSetPropertyKey={(o, n) => {
+        console.log(`change key: ${o}=>${n}`);
+      }}
+      onSetPropertyValue={(k, v) => {
+        console.log(`change value: Prop[${k}]<-${v}`);
+      }}></PropertiesEditor>
+  );
+}
+
 function ProfileScreen() {
   return (
     <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
@@ -77,7 +103,7 @@ function MessagesScreen() {
 
 const HomeTabs = createBottomTabNavigator({
   screens: {
-    Feed: TestScreen,
+    Feed: TestScreen2,
     Messages: MessagesScreen,
   },
 });
