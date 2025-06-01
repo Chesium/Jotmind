@@ -15,9 +15,9 @@ function PersonCardTag({data}: {data: TagData}) {
     purple: '#8e24aa',
     red: '#d32f2f',
   };
-  var bgcolor = data.color !== undefined ? _colorMap[data.color] : '#000000';
+  var bgcolor = data.color !== undefined ? _colorMap[data.color] || data.color : '#000000';
   var textcolor =
-    data.textColor !== undefined ? _colorMap[data.textColor] : '#ffffff';
+    data.textColor !== undefined ? _colorMap[data.textColor] || data.textColor : '#ffffff';
   return (
     <View style={[style.tagContainer, {backgroundColor: bgcolor}]}>
       <Text style={[style.tag, {color: textcolor}]}>{data.tag}</Text>
@@ -95,7 +95,6 @@ const style = StyleSheet.create({
   },
   tag: {
     borderRadius: 0,
-    color: 'white',
     fontSize: 15,
     gap: 10,
     //! font

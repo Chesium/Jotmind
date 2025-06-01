@@ -50,3 +50,17 @@ export type NodeData = expandedNodeData | normalNodeData;
 export function isExpandedNodeData(data: NodeData): data is expandedNodeData {
     return data.nodeType === "expanded";
 }
+
+export interface EdgeData {
+    source: Neo4jId;
+    target: Neo4jId;
+    bidirectional: boolean;
+    weight: number;
+    description: string;
+}
+
+export interface neo4jLoginInfo {
+    url:string;
+    username:string;
+    password:string;
+}
