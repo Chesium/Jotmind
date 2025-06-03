@@ -1,6 +1,6 @@
 type UUID = string;
 type cyID = UUID;
-type Neo4jId = string;
+export type Neo4jId = string;
 
 interface CyMap {
     [index: cyID]: nodeInfoInCy;

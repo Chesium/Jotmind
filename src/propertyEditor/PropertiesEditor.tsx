@@ -3,7 +3,7 @@ import {View, StyleSheet} from 'react-native';
 import {PropertyPairEditor} from './PropertyPairEditor';
 
 export interface Properties {
-  [Key: string]: string;
+  [Key: string]: string|undefined;
 }
 
 export type OnChangeProperty = (

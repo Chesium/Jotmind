@@ -1,6 +1,6 @@
 import * as React from 'react';
-import {Text, View, Image, StyleSheet} from 'react-native';
-import type {expandedNodeData, TagData} from './dataType';
+import {Text, View, Image, StyleSheet, TouchableOpacity} from 'react-native';
+import type {expandedNodeData, Neo4jId, TagData} from './dataType';
 
 interface colorMap {
   [Key: string]: string;
@@ -15,9 +15,12 @@ function PersonCardTag({data}: {data: TagData}) {
     purple: '#8e24aa',
     red: '#d32f2f',
   };
-  var bgcolor = data.color !== undefined ? _colorMap[data.color] || data.color : '#000000';
+  var bgcolor =
+    data.color !== undefined ? _colorMap[data.color] || data.color : '#000000';
   var textcolor =
-    data.textColor !== undefined ? _colorMap[data.textColor] || data.textColor : '#ffffff';
+    data.textColor !== undefined
+      ? _colorMap[data.textColor] || data.textColor
+      : '#ffffff';
   return (
     <View style={[style.tagContainer, {backgroundColor: bgcolor}]}>
       <Text style={[style.tag, {color: textcolor}]}>{data.tag}</Text>
@@ -25,19 +28,19 @@ function PersonCardTag({data}: {data: TagData}) {
   );
 }
 
-export default function PersonCard({data}: {data: expandedNodeData}) {
+export type OnFocus = (elementId:Neo4jId) => void;
+
+export default function PersonCard({data,onFocus}: {data: expandedNodeData,onFocus:OnFocus}) {
   const defaultAvatar = './assets/avatar-default.jpg';
   return (
-    <View style={[style.profileCard, style.shadowAndroid]}>
+    <TouchableOpacity style={[style.profileCard, style.shadowAndroid]} onPress={(e)=>onFocus(data.neo4jId)}>
       <View style={style.profileHeader}>
         {/* <Image
           style={style.avatar}
           source={require(data.avatar !== undefined
             ? data.avatar
             : defaultAvatar)}></Image> */}
-        <Image
-          style={style.avatar}
-          source={require(defaultAvatar)}></Image>
+        <Image style={style.avatar} source={require(defaultAvatar)}></Image>
         <Text style={style.namefield}>{data.name}</Text>
       </View>
       <View style={style.tags}>
@@ -49,7 +52,7 @@ export default function PersonCard({data}: {data: expandedNodeData}) {
         <Text style={style.leftNote}>{data.lFootnote}</Text>
         <Text style={style.rightNote}>{data.rFootnote}</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
