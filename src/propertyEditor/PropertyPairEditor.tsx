@@ -5,6 +5,7 @@ import type {
   Properties,
   OnSetPropertyKey,
   OnSetPropertyValue,
+  OnDeleteProperty,
 } from './PropertiesEditor';
 import {PersonNodeData} from '../neo4jconnector';
 
@@ -13,11 +14,13 @@ export function PropertyPairEditor({
   keyname,
   onSetPropertyKey,
   onSetPropertyValue,
+  onDeleteProperty,
 }: {
   data: PersonNodeData;
   keyname: string;
   onSetPropertyKey: OnSetPropertyKey;
   onSetPropertyValue: OnSetPropertyValue;
+  onDeleteProperty: OnDeleteProperty;
 }) {
   const [currentKey, setCurrentKey] = React.useState(keyname);
   const [currentValue, setCurrentValue] = React.useState(
@@ -51,7 +54,14 @@ export function PropertyPairEditor({
           onSetPropertyValue(currentKey, newValue);
           setCurrentValue(newValue);
         }}></TextInput>
-      <X style={style.addProperyIcon} size={20} color="#666666" />
+      <X
+        style={style.addProperyIcon}
+        size={20}
+        color="#666666"
+        onPress={e => {
+          onDeleteProperty(keyname);
+        }}
+      />
     </View>
   );
 }
