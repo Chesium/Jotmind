@@ -429,9 +429,9 @@ export async function updateNodeProperties(
 ): Promise<void> {
   const varname = 'u';
   const changeClause = Object.keys(newProp)
-    .map(k => `remove ${varname}.${k} set ${varname}.${k} = "${newProp[k]}"`)
+    .map(k => `set ${varname}.${k} = "${newProp[k]}"`)
     .join(' ');
-  var command = `MATCH (${varname}:Person) WHERE elementId(${varname}) = "${elementId}" ${changeClause}`;
+  var command = `MATCH (${varname}:Person) WHERE elementId(${varname}) = "${elementId}" set ${varname}={} ${changeClause}`;
   console.log(`UPD: ${command}`);
   var res = await query(session, command);
 }
