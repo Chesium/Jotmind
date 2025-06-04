@@ -3,7 +3,7 @@ import {View, StyleSheet} from 'react-native';
 import {PropertyPairEditor} from './PropertyPairEditor';
 
 export interface Properties {
-  [Key: string]: string|undefined;
+  [Key: string]: string | undefined;
 }
 
 export type OnChangeProperty = (
@@ -26,28 +26,25 @@ export function PropertiesEditor({
   onSetPropertyKey: OnSetPropertyKey;
   onSetPropertyValue: OnSetPropertyValue;
 }) {
-  const [currentProp, setCurrentProp] = React.useState(properties);
   return (
     <View style={style.propertiesEditor}>
-      {Object.keys(properties).map((k,i) => (
+      {Object.keys(properties).map((k, i) => (
         <PropertyPairEditor
           key={`PropertyPairEditor-${i}`}
           properties={properties}
           keyname={k}
           onSetPropertyKey={(o, n) => {
             onSetPropertyKey(o, n);
-            let tmpProp = currentProp;
+            let tmpProp = Object.assign(properties, {});
             tmpProp[n] = tmpProp[o];
             delete tmpProp[o];
-            onChangeProperty(currentProp,tmpProp);
-            setCurrentProp(tmpProp);
+            onChangeProperty(properties, tmpProp);
           }}
           onSetPropertyValue={(k, v) => {
             onSetPropertyValue(k, v);
-            let tmpProp = currentProp;
+            let tmpProp = Object.assign(properties, {});
             tmpProp[k] = v;
-            onChangeProperty(currentProp,tmpProp);
-            setCurrentProp(tmpProp);
+            onChangeProperty(properties, tmpProp);
           }}></PropertyPairEditor>
       ))}
     </View>

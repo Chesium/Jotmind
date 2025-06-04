@@ -1,4 +1,4 @@
-import neo4j, {Driver} from 'neo4j-driver';
+import neo4j, {Driver, Session} from 'neo4j-driver';
 // import { _defaultTagColor, _defaultTagTextColor } from './cytoscapejsTest/cy.js'
 import type {
   expandedNodeData,
@@ -58,6 +58,15 @@ export async function testQuery(driver: Driver, cypher: string, params: any) {
   }
 }
 
+export async function query(session: Session, cypher: string) {
+  try {
+    const res = await session.run(cypher, {}, {timeout: 3000});
+    return res;
+  } catch {
+    // Handle any errors
+  }
+}
+
 type MBTI =
   | 'INTJ'
   | 'INTP'
@@ -78,11 +87,11 @@ type MBTI =
 
 interface PersonNodeProperties {
   [Key: string]: string | undefined;
-  name: string;
+  name?: string;
   hometown?: string;
   nationality?: string;
   major?: string;
-  gender: 'M' | 'F';
+  gender?: 'M' | 'F';
   school?: string;
   year_of_study?: string;
   alias?: string;
@@ -265,7 +274,7 @@ export function PersonNodeDataToCy(
   tagMap: TagMap,
   nodeType: 'expanded' | 'normal',
 ): NodeData {
-  console.log("PersonNodeDataToCy");
+  console.log('PersonNodeDataToCy');
   console.log(data);
   var entryStat = calcEntryStat(data);
   if (nodeType == 'expanded') {
@@ -280,8 +289,8 @@ export function PersonNodeDataToCy(
         tagMap,
       ),
     };
-    
-    console.log("END PersonNodeDataToCy");
+
+    console.log('END PersonNodeDataToCy');
     return expandedNodeData;
   } else {
     var normalNodeData: normalNodeData = {
@@ -395,14 +404,13 @@ export async function retrieveInfo(driver: Driver): Promise<NodeData[]> {
 }
 
 export async function getNodeByElementId(
-  driver: Driver,
+  session: Session,
   elementId: Neo4jId,
 ): Promise<PersonNodeData | null> {
   const varname = 'u';
-  var res = await testQuery(
-    driver,
+  var res = await query(
+    session,
     `MATCH (${varname}:Person) WHERE elementId(${varname}) = "${elementId}" RETURN ${varname}`,
-    {},
   );
   if (res === undefined) {
     console.log('ERR: res is undefined');
@@ -411,7 +419,7 @@ export async function getNodeByElementId(
     var people: PersonNodeData[] = res.records.map(
       record => record.get(varname) as PersonNodeData,
     );
-    console.log("getNodeByElementId result");
+    console.log('getNodeByElementId result');
     console.log(people.length);
     console.log(people);
     return people[0];
@@ -419,7 +427,7 @@ export async function getNodeByElementId(
 }
 
 export async function updateNodeProperties(
-  driver: Driver,
+  session: Session,
   elementId: Neo4jId,
   newProp: Properties,
 ): Promise<void> {
@@ -427,9 +435,7 @@ export async function updateNodeProperties(
   const changeClause = Object.keys(newProp)
     .map(k => `remove ${varname}.${k} set ${varname}.${k} = "${newProp[k]}"`)
     .join(' ');
-  var res = await testQuery(
-    driver,
-    `MATCH (${varname}:Person) WHERE elementId(${varname}) = "${elementId}" ${changeClause}`,
-    {},
-  );
+  var command = `MATCH (${varname}:Person) WHERE elementId(${varname}) = "${elementId}" ${changeClause}`;
+  console.log(`UPD: ${command}`);
+  var res = await query(session, command);
 }

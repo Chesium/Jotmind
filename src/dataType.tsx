@@ -30,7 +30,7 @@ export interface expandedNodeData {
     nodeType: "expanded";
     neo4jId: Neo4jId;
     // pos: Position;
-    name: string;
+    name?: string;
     tags: TagData[];
     lFootnote: string;
     rFootnote: string;
@@ -41,7 +41,7 @@ export interface normalNodeData {
     id?: string;
     nodeType: "normal";
     neo4jId: Neo4jId;
-    name: string;
+    name?: string;
     avatar?: string;
 }
 

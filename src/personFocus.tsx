@@ -1,4 +1,4 @@
-import {Driver} from 'neo4j-driver';
+import {Session} from 'neo4j-driver';
 import type {expandedNodeData, Neo4jId} from './dataType';
 import {useEffect, useState} from 'react';
 import {ScrollView, StyleSheet, View} from 'react-native';
@@ -14,46 +14,51 @@ import {
   getNodeByElementId,
   updateNodeProperties,
 } from './neo4jconnector';
-import {StaticScreenProps} from '@react-navigation/native';
+import {StaticScreenProps, useNavigation} from '@react-navigation/native';
+import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 export type PersonFocusProps = StaticScreenProps<{
-  driver: Driver | null;
+  session: Session | null;
   elementId: Neo4jId;
 }>;
 
 export function PersonFocus({route}: PersonFocusProps) {
-  var testPersonNodeData: PersonNodeData = {
+  var emptyPersonNodeData: PersonNodeData = {
     identity: 0,
     labels: [],
-    properties: {name: 'null', gender: 'F'},
+    properties: {},
     elementId: '',
   };
-  const [data, setData] = useState<PersonNodeData>(testPersonNodeData);
-  const [dataProp, setdataProp] = useState<Properties>({});
+  const [data, setData] = useState<PersonNodeData>(emptyPersonNodeData);
+  const [dataProp, setDataProp] = useState<Properties>({});
+  const navigation = useNavigation<NativeStackNavigationProp<any>>();
 
   useEffect(() => {
+    navigation.addListener('beforeRemove', async e => {
+      await route.params.session?.close();
+    });
     async function fetchData() {
-      if (route.params.driver == null) {
+      if (route.params.session == null) {
         return;
       }
-      console.log("fetch data");
+      console.log('fetch data');
       var queryResult = await getNodeByElementId(
-        route.params.driver,
+        route.params.session,
         route.params.elementId,
       );
-      console.log("getNodeByElementId result");
+      console.log('getNodeByElementId result');
       console.log(queryResult);
       if (queryResult !== null) {
         setData(queryResult);
       }
     }
     async function updateData(newProp: Properties) {
-      if (route.params.driver == null) {
+      if (route.params.session == null) {
         return;
       }
-      console.log("update data");
+      console.log('update data');
       await updateNodeProperties(
-        route.params.driver,
+        route.params.session,
         route.params.elementId,
         newProp,
       );
@@ -82,7 +87,7 @@ export function PersonFocus({route}: PersonFocusProps) {
       <PropertiesEditor
         properties={data.properties}
         onChangeProperty={(o, n) => {
-          setdataProp(n);
+          setDataProp(n);
           console.log(n);
         }}
         onSetPropertyKey={(o, n) => {

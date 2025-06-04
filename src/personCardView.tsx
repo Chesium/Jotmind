@@ -16,7 +16,7 @@ import {
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {Button} from '@react-navigation/elements';
 import {PersonFocus} from './personFocus';
-import {Driver} from 'neo4j-driver';
+import {Driver,Session} from 'neo4j-driver';
 
 export default function PersonCardView({
   data,
@@ -65,7 +65,7 @@ export function PersonCardViewFromNeo4j({route}: PersonCardViewFromNeo4jProps) {
     <PersonCardView
       data={data}
       onFocus={neo4jId => {
-        navigation.navigate('Focus', {driver: driver, elementId: neo4jId});
+        navigation.navigate('Focus', {session: driver?.session(), elementId: neo4jId});
       }}></PersonCardView>
   );
 }
