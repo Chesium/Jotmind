@@ -123,7 +123,13 @@ export function PersonFocus({route}: PersonFocusProps) {
           size={20}
           color="#666666"
           onPress={e => {
-            console.log('Press Plus');
+            var i = 1;
+            while (dataProp[`newProp${i}`] !== undefined) {
+              i++;
+            }
+            var nprop: Properties = {};
+            nprop[`newProp${i}`] = '';
+            setDataProp(Object.assign({...nprop}, dataProp));
           }}
         />
       </View>
