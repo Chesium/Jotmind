@@ -1,10 +1,9 @@
 import * as React from 'react';
-import {Text, View, Image, StyleSheet, ScrollView} from 'react-native';
-import type {expandedNodeData, TagData, neo4jLoginInfo} from './dataType';
+import {StyleSheet, ScrollView} from 'react-native';
+import type {expandedNodeData, neo4jLoginInfo} from './dataType';
 import PersonCard, {OnFocus} from './personCard';
-import {connectToNeo4j, retrieveInfo, retrieveEdgeInfo} from './neo4jconnector';
+import {connectToNeo4j, retrieveInfo} from './neo4jconnector';
 import {
-  createStaticNavigation,
   StaticParamList,
   StaticScreenProps,
   useNavigation,
@@ -13,10 +12,8 @@ import {
   createNativeStackNavigator,
   NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
-import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
-import {Button} from '@react-navigation/elements';
 import {PersonFocus} from './personFocus';
-import {Driver,Session} from 'neo4j-driver';
+import {Session} from 'neo4j-driver';
 
 export default function PersonCardView({
   data,
@@ -43,14 +40,15 @@ export type PersonCardViewFromNeo4jProps = StaticScreenProps<{
 
 export function PersonCardViewFromNeo4j({route}: PersonCardViewFromNeo4jProps) {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
-  var [driver, setDriver] = React.useState<Driver | null>(null);
+  var [session, setSession] = React.useState<Session | null>(null);
   var [data, setdata] = React.useState<expandedNodeData[]>([]);
 
   React.useEffect(() => {
     async function init() {
-      var myDriver = await connectToNeo4j(route.params.neo4jinfo);
-      setDriver(myDriver);
-      var nodelist = (await retrieveInfo(myDriver)) as expandedNodeData[];
+      var driver = await connectToNeo4j(route.params.neo4jinfo);
+      var currentSession = driver.session();
+      setSession(currentSession);
+      var nodelist = (await retrieveInfo(currentSession)) as expandedNodeData[];
       console.log(nodelist);
       setdata(nodelist);
     }
@@ -65,7 +63,7 @@ export function PersonCardViewFromNeo4j({route}: PersonCardViewFromNeo4jProps) {
     <PersonCardView
       data={data}
       onFocus={neo4jId => {
-        navigation.navigate('Focus', {session: driver?.session(), elementId: neo4jId});
+        navigation.navigate('Focus', {session: session, elementId: neo4jId});
       }}></PersonCardView>
   );
 }

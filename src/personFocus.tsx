@@ -34,9 +34,9 @@ export function PersonFocus({route}: PersonFocusProps) {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
 
   useEffect(() => {
-    navigation.addListener('beforeRemove', async e => {
-      await route.params.session?.close();
-    });
+    // navigation.addListener('beforeRemove', async e => {
+    //   await route.params.session?.close();
+    // });
     async function fetchData() {
       if (route.params.session == null) {
         return;

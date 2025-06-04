@@ -384,12 +384,11 @@ export async function retrieveEdgeInfo(driver: Driver): Promise<EdgeData[]> {
   }
 }
 
-export async function retrieveInfo(driver: Driver): Promise<NodeData[]> {
+export async function retrieveInfo(session: Session): Promise<NodeData[]> {
   const varname = 'u';
-  var res = await testQuery(
-    driver,
+  var res = await query(
+    session,
     `MATCH (${varname}:Person) RETURN ${varname}`,
-    {},
   );
   if (res === undefined) {
     console.log('ERR: res is undefined');
