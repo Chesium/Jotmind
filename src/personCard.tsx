@@ -28,12 +28,20 @@ function PersonCardTag({data}: {data: TagData}) {
   );
 }
 
-export type OnFocus = (elementId:Neo4jId) => void;
+export type OnFocus = (elementId: Neo4jId) => void;
 
-export default function PersonCard({data,onFocus}: {data: expandedNodeData,onFocus:OnFocus}) {
+export default function PersonCard({
+  data,
+  onFocus,
+}: {
+  data: expandedNodeData;
+  onFocus: OnFocus;
+}) {
   const defaultAvatar = './assets/avatar-default.jpg';
   return (
-    <TouchableOpacity style={[style.profileCard, style.shadowAndroid]} onPress={(e)=>onFocus(data.neo4jId)}>
+    <TouchableOpacity
+      style={[style.profileCard, style.shadowAndroid]}
+      onPress={e => onFocus(data.neo4jId)}>
       <View style={style.profileHeader}>
         {/* <Image
           style={style.avatar}

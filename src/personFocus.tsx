@@ -16,6 +16,8 @@ import {
 } from './neo4jconnector';
 import {StaticScreenProps, useNavigation} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import useUndo from './lib/use-undo';
+import {Undo, Redo, Plus} from 'lucide-react-native';
 
 export type PersonFocusProps = StaticScreenProps<{
   session: Session | null;
@@ -29,15 +31,27 @@ export function PersonFocus({route}: PersonFocusProps) {
     properties: {},
     elementId: '',
   };
+  const [
+    dataPropState,
+    {
+      set: setDataProp,
+      reset: resetDataProp,
+      undo: undoDataProp,
+      redo: redoDataProp,
+      canUndo,
+      canRedo,
+    },
+  ] = useUndo<Properties>({});
   const [data, setData] = useState<PersonNodeData>(emptyPersonNodeData);
-  const [dataProp, setDataProp] = useState<Properties>({});
+  // const [dataProp, setDataProp] = useState<Properties>({});
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
 
+  const {present: dataProp} = dataPropState;
   useEffect(() => {
     // navigation.addListener('beforeRemove', async e => {
     //   await route.params.session?.close();
     // });
-    async function fetchData() {
+    async function initData() {
       if (route.params.session == null) {
         return;
       }
@@ -50,6 +64,7 @@ export function PersonFocus({route}: PersonFocusProps) {
       console.log(queryResult);
       if (queryResult !== null) {
         setData(queryResult);
+        setDataProp(queryResult.properties);
       }
     }
     async function updateData(newProp: Properties) {
@@ -57,16 +72,18 @@ export function PersonFocus({route}: PersonFocusProps) {
         return;
       }
       console.log('update data');
-      await updateNodeProperties(
+      console.log(dataProp);
+      updateNodeProperties(
         route.params.session,
         route.params.elementId,
         newProp,
       );
-      await fetchData();
+      // await fetchData();
+      setData({...data, properties: {...newProp}});
     }
     if (Object.keys(dataProp).length == 0) {
       //init
-      fetchData();
+      initData();
     } else {
       //update
       updateData(dataProp);
@@ -84,8 +101,34 @@ export function PersonFocus({route}: PersonFocusProps) {
           ) as expandedNodeData
         }
         onFocus={e => {}}></PersonCard>
+      <View style={style.propertiesEditorToolbar}>
+        <Undo
+          style={style.undo}
+          size={20}
+          color={dataPropState.past.length > 1 ? '#666666' : '#cccccc'}
+          onPress={e => {
+            if (dataPropState.past.length > 1) {
+              undoDataProp();
+            }
+          }}
+        />
+        <Redo
+          style={style.redo}
+          size={20}
+          color={canRedo ? '#666666' : '#cccccc'}
+          onPress={redoDataProp}
+        />
+        <Plus
+          style={style.plus}
+          size={20}
+          color="#666666"
+          onPress={e => {
+            console.log('Press Plus');
+          }}
+        />
+      </View>
       <PropertiesEditor
-        properties={data.properties}
+        data={data}
         onChangeProperty={(o, n) => {
           setDataProp(n);
           console.log(n);
@@ -103,5 +146,22 @@ export function PersonFocus({route}: PersonFocusProps) {
 const style = StyleSheet.create({
   personFocus: {
     alignItems: 'center',
+    paddingVertical: 15,
+  },
+  propertiesEditorToolbar: {
+    paddingVertical: 10,
+    width: 330,
+    justifyContent: 'flex-start',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  undo: {
+    // marginRight:"auto",
+  },
+  redo: {
+    // marginRight:"auto",
+  },
+  plus: {
+    marginLeft: 'auto',
   },
 });

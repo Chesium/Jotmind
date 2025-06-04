@@ -1,70 +1,88 @@
 import * as React from 'react';
-import {View, TextInput,Text, StyleSheet} from 'react-native';
+import {X} from 'lucide-react-native';
+import {View, TextInput, Text, StyleSheet} from 'react-native';
 import type {
   Properties,
   OnSetPropertyKey,
   OnSetPropertyValue,
 } from './PropertiesEditor';
+import {PersonNodeData} from '../neo4jconnector';
 
 export function PropertyPairEditor({
-  properties,
+  data,
   keyname,
   onSetPropertyKey,
   onSetPropertyValue,
 }: {
-  properties: Properties;
+  data: PersonNodeData;
   keyname: string;
   onSetPropertyKey: OnSetPropertyKey;
   onSetPropertyValue: OnSetPropertyValue;
 }) {
   const [currentKey, setCurrentKey] = React.useState(keyname);
-  const [currentValue, setCurrentValue] = React.useState(properties[keyname]);
+  const [currentValue, setCurrentValue] = React.useState(
+    data.properties[keyname],
+  );
+
+  React.useEffect(() => {
+    setCurrentKey(keyname);
+    setCurrentValue(data.properties[keyname]);
+  }, [keyname, data]);
+
   return (
     <View style={style.propertyPairEditor}>
-    <TextInput
-      style={style.propertyKeyInput}
-      placeholder="[Key]"
-      value={currentKey}
-      onChangeText={newKey => {
-        onSetPropertyKey(currentKey, newKey);
-        setCurrentKey(newKey);
-      }}></TextInput>
-    <TextInput style={style.middleColon} editable={false} value={":"}></TextInput>
-    <TextInput
-      style={style.propertyValueInput}
-      placeholder="[Value]"
-      value={currentValue}
-      onChangeText={newValue => {
-        onSetPropertyValue(currentKey, newValue);
-        setCurrentValue(newValue);
-      }}></TextInput>
+      <TextInput
+        style={style.propertyKeyInput}
+        placeholder="[Key]"
+        value={currentKey}
+        onChangeText={newKey => {
+          onSetPropertyKey(currentKey, newKey);
+          setCurrentKey(newKey);
+        }}></TextInput>
+      <TextInput
+        style={style.middleColon}
+        editable={false}
+        value={':'}></TextInput>
+      <TextInput
+        style={style.propertyValueInput}
+        placeholder="[Value]"
+        value={currentValue}
+        onChangeText={newValue => {
+          onSetPropertyValue(currentKey, newValue);
+          setCurrentValue(newValue);
+        }}></TextInput>
+      <X style={style.addProperyIcon} size={20} color="#666666" />
     </View>
   );
 }
 
 const style = StyleSheet.create({
-  middleColon:{
+  middleColon: {
     height: 50,
     fontSize: 15,
   },
   propertyPairEditor: {
-    width:330,
-    flexDirection:"row",
+    width: 330,
+    flexDirection: 'row',
     borderBottomWidth: 2,
     borderBottomColor: '#dedede',
     borderTopWidth: 2,
     borderTopColor: '#dedede',
-    textAlign:"right",
+    textAlign: 'right',
+    alignItems: 'center',
   },
   propertyKeyInput: {
-    flex:1,
+    flex: 1,
     height: 50,
     fontSize: 15,
-    textAlign:"right"
+    textAlign: 'right',
   },
   propertyValueInput: {
-    flex:1,
+    flex: 1,
     height: 50,
     fontSize: 15,
+  },
+  addProperyIcon: {
+    marginLeft: 'auto',
   },
 });

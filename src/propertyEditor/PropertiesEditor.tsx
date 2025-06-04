@@ -1,6 +1,8 @@
 import * as React from 'react';
 import {View, StyleSheet} from 'react-native';
 import {PropertyPairEditor} from './PropertyPairEditor';
+import useUndo from '../lib/use-undo';
+import {PersonNodeData} from '../neo4jconnector';
 
 export interface Properties {
   [Key: string]: string | undefined;
@@ -16,35 +18,35 @@ export type OnSetPropertyKey = (oldKey: string, newKey: string) => void;
 export type OnSetPropertyValue = (key: string, newValue: string) => void;
 
 export function PropertiesEditor({
-  properties,
+  data,
   onChangeProperty,
   onSetPropertyKey,
   onSetPropertyValue,
 }: {
-  properties: Properties;
+  data: PersonNodeData;
   onChangeProperty: OnChangeProperty;
   onSetPropertyKey: OnSetPropertyKey;
   onSetPropertyValue: OnSetPropertyValue;
 }) {
   return (
     <View style={style.propertiesEditor}>
-      {Object.keys(properties).map((k, i) => (
+      {Object.keys(data.properties).map((k, i) => (
         <PropertyPairEditor
           key={`PropertyPairEditor-${i}`}
-          properties={properties}
+          data={data}
           keyname={k}
           onSetPropertyKey={(o, n) => {
             onSetPropertyKey(o, n);
-            let tmpProp = Object.assign(properties, {});
+            let tmpProp = Object.assign(data.properties, {});
             tmpProp[n] = tmpProp[o];
             delete tmpProp[o];
-            onChangeProperty(properties, tmpProp);
+            onChangeProperty(data.properties, tmpProp);
           }}
           onSetPropertyValue={(k, v) => {
             onSetPropertyValue(k, v);
-            let tmpProp = Object.assign(properties, {});
+            let tmpProp = Object.assign(data.properties, {});
             tmpProp[k] = v;
-            onChangeProperty(properties, tmpProp);
+            onChangeProperty(data.properties, tmpProp);
           }}></PropertyPairEditor>
       ))}
     </View>
