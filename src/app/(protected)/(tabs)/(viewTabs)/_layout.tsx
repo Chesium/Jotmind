@@ -9,14 +9,25 @@ export default function BottomTabsLayout() {
       backBehavior="order"
     >
       <Tabs.Screen
-        name="(viewTabs)"
+        name="(home)"
         options={{
-          title: "Views",
+          title: "Graph View",
           headerShown: false,
-          tabBarLabel: "Views",
+          tabBarLabel: "Graph",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="graph" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="cards"
+        options={{
+          title: "Cards",
+          headerShown: false,
+          popToTopOnBlur: true,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons
-              name="view-dashboard"
+              name="view-sequential"
               size={size}
               color={color}
             />
@@ -24,27 +35,16 @@ export default function BottomTabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="Clusters"
-        options={{
-          title: "Clusters",
-          headerShown: false,
-          popToTopOnBlur: true,
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="database" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="account"
+        name="table"
         options={{
           // tabBarBadge: 2,
           tabBarBadgeStyle: {
             backgroundColor: "tomato",
             color: "white",
           },
-          title: "Account",
+          title: "Table",
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="account" size={size} color={color} />
+            <MaterialCommunityIcons name="table" size={size} color={color} />
           ),
         }}
       />

@@ -8,9 +8,9 @@ export default function SecondScreen() {
 
   return (
     <View className="justify-center flex-1 p-4">
-      <AppText center>Second Screen</AppText>
-      <Link href="/second/nested" push asChild>
-        <Button title="Push to /second/nested" />
+      <AppText center>Cards View</AppText>
+      <Link href="/cards/nested" push asChild>
+        <Button title="Push to /cards/nested" />
       </Link>
       <Button
         title="Back"
