@@ -2,11 +2,13 @@ import PersonCard from "@/components/personCard";
 import { PropertiesEditor } from "@/components/PropertiesEditor";
 import { Neo4jId, Properties } from "@/utils/dataType";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useNavigation } from "expo-router";
 import { ScrollView, View } from "react-native";
-import { useCardViewStore } from ".";
 import { StyleSheet } from "react-native";
-import { useEffect } from "react";
+import { useContext, useEffect, useState } from "react";
+import useCardViewStore from "@/utils/CardViewStore";
+import { AuthContext } from "@/utils/authContext";
+import { AppText } from "@/components/AppText";
 
 export default function PersonFocus() {
   // route params
@@ -16,18 +18,54 @@ export default function PersonFocus() {
   const data = useCardViewStore((state) => state.map[id]);
   const setDataProp = useCardViewStore((state) => state.updateProp);
   // zundo states & actions
-  const { pastStates, futureStates, undo, redo, clear } =
-    useCardViewStore.temporal.getState();
-  const canUndo = pastStates.length > 0;
-  const canRedo = futureStates.length > 0;
+  // const { pastStates, futureStates, undo, redo, clear } =
+  //   useCardViewStore.temporal.getState();
+  const undo = useCardViewStore((state) => state.undo);
+  const redo = useCardViewStore((state) => state.redo);
+  const sync = useCardViewStore((state) => state.syncUpdates);
+  const auth = useContext(AuthContext);
+  const canUndo = useCardViewStore(
+    (state) => state.actionHistoryPast.length > 0
+  );
+  const canRedo = useCardViewStore(
+    (state) => state.actionHistoryFuture.length > 0
+  );
+  const actionsToBeSynced = useCardViewStore(
+    (state) => state.actionHistoryPast.length
+  );
+  const [saving, setSaving] = useState<[number, number]>([0, 0]);
 
+  // ref: https://stackoverflow.com/questions/75826317/prevent-default-back-navigation-when-using-expo-router
+  // Navigation
+  const navigation = useNavigation();
+
+  // Effect
   useEffect(() => {
-    clear();
+    const listener = navigation.addListener("beforeRemove", async (e) => {
+      e.preventDefault();
+      console.log("syncing");
+      // setSaving([actionsToBeSynced,actionsToBeSynced]);
+      // Do your stuff here
+      if (auth.session !== null) {
+        await sync(auth.session, (rest, total) => setSaving([rest, total]));
+      }
+      console.log("finish syncing");
+      navigation.dispatch(e.data.action);
+    });
+
+    return () => {
+      navigation.removeListener("beforeRemove", listener);
+    };
   }, []);
 
   return (
     <ScrollView contentContainerStyle={style.personFocus}>
-      <PersonCard data={data} onFocus={(e) => {}}></PersonCard>
+      {saving[0] != 0 ? (
+        <AppText center>
+          Saving changes to the database... ({saving[0]}/{saving[1]})
+        </AppText>
+      ) : null}
+      <PersonCard id={id} onFocus={(e) => {}}></PersonCard>
       <View style={style.propertiesEditorToolbar}>
         <MaterialCommunityIcons
           name="undo"
@@ -37,7 +75,6 @@ export default function PersonFocus() {
           onPress={(e) => {
             if (canUndo) {
               console.log("undo");
-              console.log(pastStates);
               undo();
               // undoDataProp();
               // dispatch(ActionCreators.undo());

@@ -5,56 +5,16 @@ import {
   retrieveInfoAsMap,
 } from "@/utils/neo4jconnector";
 import { create } from "zustand";
-import { temporal } from "zundo";
+// import { temporal } from "zundo";
 import { Session } from "neo4j-driver";
 import PersonCard from "@/components/personCard";
 import { ScrollView, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { useContext, useEffect } from "react";
 import { AuthContext } from "@/utils/authContext";
-
-type UpdateType = PersonNodeData | { id: Neo4jId; nprop: Properties };
-
-interface CardViewState {
-  updateHistory: UpdateType[];
-  map: PersonNodeMap;
-  fetchMap: (session: Session) => void;
-  syncUpdates: (session: Session) => void;
-  updateNode: (newNode: PersonNodeData) => void;
-  updateProp: (id: Neo4jId, nprop: Properties) => void;
-}
-
-export const useCardViewStore = create<CardViewState>()(
-  temporal(
-    (set) => ({
-      updateHistory: [],
-      map: {},
-      fetchMap: async (session) => {
-        console.log("begin fetching PersonNodeMap from Neo4j");
-        set({ updateHistory: [], map: await retrieveInfoAsMap(session) });
-      },
-      syncUpdates: async (session) => {
-        // todo
-      },
-      updateNode: (newNode) =>
-        set((state) => ({
-          updateHistory: state.updateHistory,
-          map: { ...state.map, [newNode.elementId]: newNode },
-        })),
-      updateProp: (id, nprop) =>
-        set((state) => ({
-          updateHistory: state.updateHistory,
-          map: { ...state.map, [id]: { ...state.map[id], properties: nprop } },
-        })),
-    }),
-    {
-      partialize: (state) => {
-        const { updateHistory, map, ...rest } = state;
-        return { updateHistory, map };
-      },
-    }
-  )
-);
+import { immer } from "zustand/middleware/immer";
+import { devtools } from "zustand/middleware";
+import useCardViewStore from "@/utils/CardViewStore";
 
 export default function PersonCardView() {
   // {
@@ -79,9 +39,9 @@ export default function PersonCardView() {
 
   return (
     <ScrollView contentContainerStyle={styles.scrollContainer}>
-      {Object.values(dataMap).map((nodeData, i) => (
+      {Object.keys(dataMap).map((id, i) => (
         <PersonCard
-          data={nodeData}
+          id={id}
           key={`PersonCard${i}`}
           onFocus={(id) => {
             router.navigate({

@@ -8,6 +8,8 @@ import {
   testTagSignature,
 } from "@/utils/neo4jconnector";
 import { useAssets } from "expo-asset";
+import { subscribeWithSelector } from "zustand/middleware";
+import useCardViewStore from "@/utils/CardViewStore";
 
 interface colorMap {
   [Key: string]: string;
@@ -38,13 +40,14 @@ function PersonCardTag({ data }: { data: TagData }) {
 export type OnFocus = (elementId: Neo4jId) => void;
 
 export default function PersonCard({
-  data,
+  id,
   onFocus,
 }: {
-  data: PersonNodeData;
+  id: Neo4jId;
   onFocus: OnFocus;
 }) {
   // const defaultAvatar = "./assets/avatar-default.jpg";
+  const data = useCardViewStore((state) => state.map[id]);
   const expandedData = PersonNodeDataToCy(
     data,
     testTagSignature,

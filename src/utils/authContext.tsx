@@ -4,7 +4,7 @@ import { SplashScreen, useRouter } from "expo-router";
 import { createContext, PropsWithChildren, useEffect, useState } from "react";
 import { connectToNeo4j } from "./neo4jconnector";
 import { Driver, Session } from "neo4j-driver";
-import { useCardViewStore } from "@/app/(protected)/(tabs)/(viewTabs)/cards";
+import useCardViewStore from "./CardViewStore";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   const _fetchMap = useCardViewStore((state) => state.fetchMap);
-  const { clear } = useCardViewStore.temporal.getState();
+  // const { clear } = useCardViewStore.temporal.getState();
   const initMap = (session: Session) => {
     _fetchMap(session);
     // clear();

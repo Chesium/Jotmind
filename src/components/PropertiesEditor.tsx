@@ -45,9 +45,12 @@ export function PropertiesEditor({
           }}
           onSetPropertyValue={(k, v) => {
             onSetPropertyValue(k, v);
-            let tmpProp = Object.assign(data.properties, {});
-            tmpProp[k] = v;
-            onChangeProperty(data.properties, tmpProp);
+            // let tmpProp = Object.assign(data.properties, {});
+            // tmpProp[k] = v;
+            // console.log("tmpProp");
+            // console.log(v);
+            // console.log({ ...data.properties, [k]: v });
+            onChangeProperty(data.properties, { ...data.properties, [k]: v });
           }}
           onDeleteProperty={(k) => {
             let tmpProp = Object.assign(data.properties, {});
