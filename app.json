@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "Auth",
+    "name": "JotMind",
     "slug": "expo-starter",
     "scheme": "expo-starter",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/router-icon.png",
+    "icon": "./assets/jotmind-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/jotmind-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -18,7 +18,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/jotmind-icon.png",
         "backgroundColor": "#ffffff"
       }
     },
