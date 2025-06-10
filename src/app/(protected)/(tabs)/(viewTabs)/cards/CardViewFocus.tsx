@@ -62,7 +62,8 @@ export default function PersonFocus() {
     <ScrollView contentContainerStyle={style.personFocus}>
       {saving[0] != 0 ? (
         <AppText center>
-          Saving changes to the database... ({saving[0]}/{saving[1]})
+          Saving changes to the database... ({saving[1] - saving[0]}/{saving[1]}
+          )
         </AppText>
       ) : null}
       <PersonCard id={id} onFocus={(e) => {}}></PersonCard>
