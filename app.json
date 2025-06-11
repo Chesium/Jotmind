@@ -20,7 +20,9 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/jotmind-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.chesium.expostarter"
     },
     "web": {
       "favicon": "./assets/favicon.png"
