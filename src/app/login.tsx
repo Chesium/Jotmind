@@ -21,25 +21,32 @@ export default function LoginScreen() {
   } = useForm<LoginInput>({
     defaultValues: {
       username: "DemoUser",
-      password: "123456",
+      password: "12345678",
     },
   });
   // const onSubmit: SubmitHandler<LoginInput> = (data) => authContext.logIn(data);
   const [submittedData, setSubmittedData] = useState<LoginInput | null>(null);
+  const [loginError, setLoginError] = useState<string | undefined>(undefined);
 
   const onSubmit: SubmitHandler<LoginInput> = (data) => {
     // Simulate form submission
     console.log("Submitted Data:", data);
     setSubmittedData(data);
-    authContext.logIn(data);
+    setLoginError(undefined);
+    try {
+      authContext.logIn(data);
+    } catch (e) {
+      setLoginError((e as Error).message);
+    }
   };
 
   return (
     <View className="flex-1 justify-center p-4">
-      <AppText size="heading" center>
-        Login Screen
+      <AppText size="heading" center className="font-bold">
+        Login
       </AppText>
       <View style={styles.container}>
+        <Text className="font-semibold">UserName</Text>
         <Controller
           control={control}
           rules={{
@@ -50,7 +57,10 @@ export default function LoginScreen() {
               style={styles.input}
               placeholder="First name"
               onBlur={onBlur}
-              onChangeText={onChange}
+              onChangeText={(e) => {
+                setLoginError(undefined);
+                onChange(e);
+              }}
               value={value}
             />
           )}
@@ -58,22 +68,29 @@ export default function LoginScreen() {
         />
         {errors.username && <Text>This is required.</Text>}
 
+        <Text className="font-semibold">Password</Text>
         <Controller
           control={control}
           rules={{
-            maxLength: 100,
+            required: true,
           }}
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
               placeholder="Last name"
               onBlur={onBlur}
-              onChangeText={onChange}
+              onChangeText={(e) => {
+                setLoginError(undefined);
+                onChange(e);
+              }}
               value={value}
             />
           )}
           name="password"
         />
+        {errors.password && <Text>This is required.</Text>}
+
+        {loginError && <Text className="text-red">{loginError}</Text>}
 
         <Button title="Submit" onPress={handleSubmit(onSubmit)} />
 

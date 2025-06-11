@@ -2,18 +2,17 @@ import { LoginInput } from "@/app/login";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SplashScreen, useRouter } from "expo-router";
 import { createContext, PropsWithChildren, useEffect, useState } from "react";
-import { connectToNeo4j } from "./neo4jconnector";
 import { Driver, Session } from "neo4j-driver";
 import useCardViewStore from "./CardViewStore";
+import _connector, { Neo4jConnector } from "./neo4juserCtrl";
 
 SplashScreen.preventAutoHideAsync();
 
 type AuthState = {
   isLoggedIn: boolean;
   isReady: boolean;
-  driver: Driver | null;
-  session: Session | null;
-  userName: string;
+  connector: Neo4jConnector;
+  username: string | null;
   logIn: (info: LoginInput) => void;
   logOut: () => void;
 };
@@ -23,9 +22,8 @@ const authStorageKey = "auth-key";
 export const AuthContext = createContext<AuthState>({
   isLoggedIn: false,
   isReady: false,
-  driver: null,
-  session: null,
-  userName: "",
+  connector: _connector,
+  username: null,
   logIn: () => {},
   logOut: () => {},
 });
@@ -33,7 +31,7 @@ export const AuthContext = createContext<AuthState>({
 export function AuthProvider({ children }: PropsWithChildren) {
   const [isReady, setIsReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userName, setUserName] = useState<string>("");
+  const [username, setUsername] = useState<string>("");
   const [driverSession, setDriverSession] = useState<
     [Driver | null, Session | null]
   >([null, null]);
@@ -53,27 +51,25 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const _fetchMap = useCardViewStore((state) => state.fetchMap);
   // const { clear } = useCardViewStore.temporal.getState();
-  const initMap = (session: Session) => {
-    _fetchMap(session);
+  const initMap = () => {
+    _fetchMap(_connector);
     // clear();
   };
 
   const connectToBackend = async (info: LoginInput) => {
-    var driver = await connectToNeo4j({
-      url: "neo4j+s://88964078.databases.neo4j.io",
-      username: "neo4j",
-      password: "dwYzcQjWVcdltn3CuFjXOOlexAqucW51BTEHCmm7llg",
+    await _connector.connectToNeo4j();
+    await _connector.logIn(info.username, info.password);
+    _connector.addEventListener("changed username", (ev) => {
+      setUsername(ev.name);
     });
-    setUserName(info.username);
-    var currentSession = driver.session();
-    setDriverSession([driver, currentSession]);
-    initMap(currentSession);
+    setUsername(info.username);
+    initMap();
   };
 
   const logIn = async (info: LoginInput) => {
     setIsLoggedIn(true);
-    storeAuthState({ isLoggedIn: true, info: info });
     await connectToBackend(info);
+    storeAuthState({ isLoggedIn: true, info: info });
     router.replace("/");
   };
 
@@ -93,7 +89,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
           const auth = JSON.parse(value);
           console.log(`getAuthFromStorage:`);
           console.log(auth);
-          await connectToBackend(auth.info);
+          if (auth.isLoggedIn == true) {
+            await connectToBackend(auth.info);
+          }
           setIsLoggedIn(auth.isLoggedIn);
         }
       } catch (error) {
@@ -115,9 +113,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       value={{
         isReady,
         isLoggedIn,
-        userName,
-        driver: driverSession[0],
-        session: driverSession[1],
+        connector: _connector,
+        username,
         logIn,
         logOut,
       }}

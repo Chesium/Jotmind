@@ -1,7 +1,7 @@
 import * as React from "react";
 import { View, StyleSheet } from "react-native";
 import { PropertyPairEditor } from "./PropertyPairEditor";
-import { PersonNodeData } from "@/utils/neo4jconnector";
+import { PersonNodeData } from "@/utils/dataType";
 
 export interface Properties {
   [Key: string]: string | undefined;

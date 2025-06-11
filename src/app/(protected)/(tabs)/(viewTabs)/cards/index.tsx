@@ -1,9 +1,4 @@
 import { Neo4jId, Properties } from "@/utils/dataType";
-import {
-  PersonNodeData,
-  PersonNodeMap,
-  retrieveInfoAsMap,
-} from "@/utils/neo4jconnector";
 import { create } from "zustand";
 // import { temporal } from "zundo";
 import { Session } from "neo4j-driver";

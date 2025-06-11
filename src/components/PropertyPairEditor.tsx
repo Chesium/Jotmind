@@ -7,8 +7,8 @@ import type {
   OnSetPropertyValue,
   OnDeleteProperty,
 } from "./PropertiesEditor";
-import { PersonNodeData } from "@/utils/neo4jconnector";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { PersonNodeData } from "@/utils/dataType";
 
 export function PropertyPairEditor({
   data,

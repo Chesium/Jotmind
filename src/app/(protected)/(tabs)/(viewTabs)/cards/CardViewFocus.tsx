@@ -46,9 +46,7 @@ export default function PersonFocus() {
       console.log("syncing");
       // setSaving([actionsToBeSynced,actionsToBeSynced]);
       // Do your stuff here
-      if (auth.session !== null) {
-        await sync(auth.session, (rest, total) => setSaving([rest, total]));
-      }
+      await sync(auth.connector, (rest, total) => setSaving([rest, total]));
       console.log("finish syncing");
       navigation.dispatch(e.data.action);
     });

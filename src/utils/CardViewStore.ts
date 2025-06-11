@@ -1,11 +1,11 @@
 import { Session } from "neo4j-driver";
-import { Neo4jId, Properties } from "./dataType";
-import { PersonNodeData, PersonNodeMap, retrieveInfoAsMap, updateNodeProperties } from "./neo4jconnector";
+import { Neo4jId, PersonNodeData, PersonNodeMap, Properties } from "./dataType";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createWithEqualityFn } from "zustand/traditional";
 
 import { shallow } from 'zustand/vanilla/shallow'
+import { Neo4jConnector } from "./neo4juserCtrl";
 
 type UpdateNodeRecord = {
     type: "UpdateNode";
@@ -26,8 +26,8 @@ interface CardViewState {
     actionHistoryPast: UpdateRecord[];
     actionHistoryFuture: UpdateRecord[];
     map: PersonNodeMap;
-    fetchMap: (session: Session) => void;
-    syncUpdates: (session: Session, callback: (rest: number, total: number) => void) => void;
+    fetchMap: (connector: Neo4jConnector) => Promise<void>;
+    syncUpdates: (connector: Neo4jConnector, callback: (rest: number, total: number) => void) => Promise<void>;
 
     undo: () => void;
     redo: () => void;
@@ -47,22 +47,22 @@ const useCardViewStore = create<CardViewState>()(
                 actionHistoryPast: [],
                 actionHistoryFuture: [],
                 map: {},
-                fetchMap: async (session) => {
+                fetchMap: async (connector) => {
                     console.log("begin fetching PersonNodeMap from Neo4j");
                     set({
                         actionHistoryPast: [],
                         actionHistoryFuture: [],
-                        map: await retrieveInfoAsMap(session),
+                        map: await connector.retrieveInfoAsMap(),
                     });
                 },
-                syncUpdates: async (session, callback: (rest: number, total: number) => void) => {
+                syncUpdates: async (connector, callback: (rest: number, total: number) => void) => {
                     const { actionHistoryPast } = get();
                     const itemN = actionHistoryPast.length;
                     for (var i = 0; i < itemN; i++) {
                         callback(itemN - i, itemN);
                         let action = actionHistoryPast[i]
                         if (action.type == 'UpdateProp') {
-                            await updateNodeProperties(session, action.id, action.newProp)
+                            await connector.updateNodeProperties(action.id, action.newProp)
                         } else {
 
                         }

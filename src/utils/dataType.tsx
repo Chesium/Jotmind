@@ -68,3 +68,44 @@ export interface neo4jLoginInfo {
 export interface Properties {
   [Key: string]: string | undefined;
 }
+
+type MBTI =
+  | "INTJ"
+  | "INTP"
+  | "ENTJ"
+  | "ENTP"
+  | "INFJ"
+  | "INFP"
+  | "ENFJ"
+  | "ENFP"
+  | "ISTJ"
+  | "ISFJ"
+  | "ESTJ"
+  | "ESFJ"
+  | "ISTP"
+  | "ISFP"
+  | "ESTP"
+  | "ESFP";
+
+interface PersonNodeProperties {
+  [Key: string]: string | undefined;
+  name?: string;
+  hometown?: string;
+  nationality?: string;
+  major?: string;
+  gender?: "M" | "F";
+  school?: string;
+  year_of_study?: string;
+  alias?: string;
+  Birthday?: string;
+  mbti?: MBTI;
+}
+
+export interface PersonNodeData {
+  identity: number;
+  labels: string[];
+  properties: PersonNodeProperties;
+  elementId: string;
+}
+
+export type PersonNodeMap = Record<Neo4jId, PersonNodeData>;

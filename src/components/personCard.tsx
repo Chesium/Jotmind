@@ -1,12 +1,14 @@
 import * as React from "react";
 import { Text, View, StyleSheet, TouchableOpacity } from "react-native";
 import { Image } from "expo-image";
-import type { expandedNodeData, Neo4jId, TagData } from "@/utils/dataType";
-import {
+import type {
+  expandedNodeData,
+  Neo4jId,
+  NodeData,
+  normalNodeData,
   PersonNodeData,
-  PersonNodeDataToCy,
-  testTagSignature,
-} from "@/utils/neo4jconnector";
+  TagData,
+} from "@/utils/dataType";
 import { useAssets } from "expo-asset";
 import { subscribeWithSelector } from "zustand/middleware";
 import useCardViewStore from "@/utils/CardViewStore";
@@ -35,6 +37,202 @@ function PersonCardTag({ data }: { data: TagData }) {
       <Text style={[style.tag, { color: textcolor }]}>{data.tag}</Text>
     </View>
   );
+}
+
+interface GenernalNodeProperties {
+  [key: string]: string;
+}
+
+interface EntryStat {
+  entries: number;
+  wordCount: number;
+}
+
+type TagToCy = (value: string) => string;
+
+type ColorGen = (value: string) => string;
+
+const MBTI2Color: ColorGen = (mbti: string) => {
+  if (mbti.length != 4) {
+    return "black";
+  }
+  switch (mbti.slice(1, 3)) {
+    case "NT":
+      return "#88619a";
+    case "NF":
+      return "#33a474";
+    default:
+  }
+  if (mbti[3] == "J") {
+    // SJ
+    return "#4298b4";
+  } else {
+    // SP
+    return "#e4ae3a";
+  }
+};
+
+interface TagSignature {
+  t2c: TagToCy;
+  color?: string | ColorGen;
+  textColor?: string | ColorGen;
+}
+
+interface TagMap {
+  [key: string]: TagSignature;
+}
+
+const DIRECT: TagToCy = (value: string) => value;
+
+function WITHKEY(key: string): TagToCy {
+  return (value: string) => {
+    return `${key}: ${value}`;
+  };
+}
+
+const entryIndexInProperties: string[] = [
+  "name",
+  "hometown",
+  "nationality",
+  "major",
+  "gender",
+  "school",
+  "year_of_study",
+  "alias",
+  "Birthday",
+  "mbti",
+];
+
+const testTagSignature: TagMap = {
+  hometown: { t2c: DIRECT, color: "green" },
+  nationality: {
+    t2c: DIRECT,
+    color: (s) => {
+      switch (s) {
+        case "CHN":
+          return "red";
+        case "HKG":
+          return "blue";
+        default:
+          return "black";
+      }
+    },
+  },
+  major: {
+    t2c: WITHKEY("maj"),
+    color: (s) => {
+      switch (s) {
+        case "EE":
+          return "#795548";
+        case "BBA":
+          return "orange";
+        default:
+          return "black";
+      }
+    },
+  },
+  gender: {
+    t2c: DIRECT,
+    color: (s) => {
+      switch (s) {
+        case "M":
+          return "blue";
+        case "F":
+          return "pink";
+        default:
+          return "black";
+      }
+    },
+  },
+  school: { t2c: DIRECT, color: "orange" },
+  year_of_study: { t2c: DIRECT, color: "#43A047" },
+  Birthday: { t2c: WITHKEY("birth"), color: "orange" },
+  mbti: { t2c: DIRECT, color: MBTI2Color },
+};
+
+function calcEntryStat(
+  data: PersonNodeData,
+  indices: string[] = entryIndexInProperties
+): EntryStat {
+  var entries = 0;
+  var wordCount = 0;
+  indices.forEach((index) => {
+    if (
+      (data.properties as unknown as GenernalNodeProperties)[index] !==
+      undefined
+    ) {
+      entries++;
+      wordCount += (data.properties as unknown as GenernalNodeProperties)[
+        index
+      ].split(" ").length;
+    }
+  });
+  return { entries: entries, wordCount: wordCount };
+}
+
+function PersonNodeTagToCy(
+  prop: GenernalNodeProperties,
+  signature: TagMap
+): TagData[] {
+  var tags: TagData[] = [];
+  for (const key in prop) {
+    if (signature[key] !== undefined) {
+      var tagSignature = signature[key];
+      var tagValue = prop[key];
+      var color: string = "#000000";
+      var textColor: string = "#ffffff";
+      if (typeof tagSignature.color === "string") {
+        color = tagSignature.color;
+      } else if (typeof tagSignature.color === "function") {
+        color = tagSignature.color(tagValue);
+      }
+      if (typeof tagSignature.textColor === "string") {
+        textColor = tagSignature.textColor;
+      } else if (typeof tagSignature.textColor === "function") {
+        textColor = tagSignature.textColor(tagValue);
+      }
+      var tag: TagData = {
+        tag: tagSignature.t2c(tagValue),
+        textColor: textColor,
+        color: color,
+      };
+      tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+function PersonNodeDataToCy(
+  data: PersonNodeData,
+  tagMap: TagMap,
+  nodeType: "expanded" | "normal"
+): NodeData {
+  console.log("PersonNodeDataToCy");
+  console.log(data);
+  var entryStat = calcEntryStat(data);
+  if (nodeType == "expanded") {
+    var expandedNodeData: expandedNodeData = {
+      nodeType: "expanded",
+      neo4jId: data.elementId,
+      name: data.properties.name,
+      lFootnote: `${entryStat.entries}@${entryStat.wordCount}`,
+      rFootnote: `last update: ...`,
+      tags: PersonNodeTagToCy(
+        data.properties as unknown as GenernalNodeProperties,
+        tagMap
+      ),
+    };
+
+    console.log("END PersonNodeDataToCy");
+    return expandedNodeData;
+  } else {
+    var normalNodeData: normalNodeData = {
+      nodeType: "normal",
+      neo4jId: data.elementId,
+      name: data.properties.name,
+    };
+    return normalNodeData;
+  }
 }
 
 export type OnFocus = (elementId: Neo4jId) => void;
