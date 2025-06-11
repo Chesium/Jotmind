@@ -28,60 +28,7 @@ export default function IndexScreen() {
 
   return (
     <View className="justify-center flex-1 p-4">
-      <AppText center>Index Screen</AppText>
-      <Link href="/home-nested" push asChild>
-        <Button title="Push to /home-nested" />
-      </Link>
-      {canGoBack ? (
-        <Button
-          title="Back"
-          theme="secondary"
-          onPress={() => {
-            router.back();
-          }}
-        />
-      ) : null}
-      <Button
-        title="Open Alert"
-        theme="secondary"
-        onPress={() => handleOpenAlert()}
-      />
-      <Button
-        title="Open RN Modal"
-        theme="secondary"
-        onPress={() => setModalVisible(true)}
-      />
-      <Link href="/modal" push asChild>
-        <Button title="Open Router Modal" theme="secondary" />
-      </Link>
-      <Link href="/modal-with-stack" push asChild>
-        <Button title="Open Router Modal (Stack)" theme="secondary" />
-      </Link>
-      {/* https://reactnative.dev/docs/modal */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent
-        // presentationStyle="pageSheet"
-        onRequestClose={() => {
-          setModalVisible(false);
-        }}
-      >
-        <View className="flex-1 items-center justify-center">
-          <View className="p-12 rounded-lg bg-white">
-            <AppText center size="heading">
-              A custom styled modal!
-            </AppText>
-            <Button
-              title="Close"
-              theme="secondary"
-              onPress={() => {
-                setModalVisible(false);
-              }}
-            />
-          </View>
-        </View>
-      </Modal>
+      <AppText center>Graph View (Todo)</AppText>
     </View>
   );
 }

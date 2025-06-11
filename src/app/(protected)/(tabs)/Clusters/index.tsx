@@ -8,17 +8,7 @@ export default function SecondScreen() {
 
   return (
     <View className="justify-center flex-1 p-4">
-      <AppText center>Clusters</AppText>
-      <Link href="/Clusters/nested" push asChild>
-        <Button title="Push to /Clusters/nested" />
-      </Link>
-      <Button
-        title="Back"
-        theme="secondary"
-        onPress={() => {
-          router.back();
-        }}
-      />
+      <AppText center>List of Data Clusters (Todo)</AppText>
     </View>
   );
 }

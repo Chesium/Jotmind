@@ -9,20 +9,9 @@ export default function BottomTabsLayout() {
       backBehavior="order"
     >
       <Tabs.Screen
-        name="(home)"
-        options={{
-          title: "Graph View",
-          headerShown: false,
-          tabBarLabel: "Graph",
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="graph" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="cards"
         options={{
-          title: "Cards",
+          title: "Cards View",
           headerShown: false,
           popToTopOnBlur: true,
           tabBarIcon: ({ color, size }) => (
@@ -35,6 +24,17 @@ export default function BottomTabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="(home)"
+        options={{
+          title: "Graph View",
+          headerShown: false,
+          tabBarLabel: "Graph",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="graph" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="table"
         options={{
           // tabBarBadge: 2,
@@ -42,7 +42,7 @@ export default function BottomTabsLayout() {
             backgroundColor: "tomato",
             color: "white",
           },
-          title: "Table",
+          title: "Table View",
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="table" size={size} color={color} />
           ),

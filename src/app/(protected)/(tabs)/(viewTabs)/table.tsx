@@ -8,14 +8,7 @@ export default function FourthScreen() {
 
   return (
     <View className="justify-center flex-1 p-4">
-      <AppText center>Table View</AppText>
-      <Button
-        title="Back"
-        theme="secondary"
-        onPress={() => {
-          router.back();
-        }}
-      />
+      <AppText center>Table View (Todo)</AppText>
     </View>
   );
 }
