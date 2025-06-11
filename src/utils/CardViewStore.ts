@@ -36,7 +36,7 @@ interface CardViewState {
     updateProp: (id: Neo4jId, nprop: Properties) => void;
 }
 
-const dcopy = (o: any) => JSON.parse(JSON.stringify(o));
+const dcopy = (o: any) => o === undefined ? undefined : JSON.parse(JSON.stringify(o));
 export const deepCmp = <T>(o: T, n: T) =>
     JSON.stringify((o as any).map) == JSON.stringify((n as any).map)
 
@@ -111,7 +111,7 @@ const useCardViewStore = create<CardViewState>()(
                         var id = newNode.elementId;
                         state.actionHistoryPast.push({
                             type: "UpdateNode",
-                            oldNode: dcopy(state.map[id]),
+                            oldNode: dcopy(id in state.map ? state.map[id] : undefined),
                             newNode: dcopy(newNode),
                         });
                         state.actionHistoryFuture = [];

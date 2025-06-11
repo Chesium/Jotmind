@@ -2,7 +2,7 @@ import { AppText } from "@/components/AppText";
 import { Button } from "@/components/Button";
 import { AuthContext } from "@/utils/authContext";
 import { useRouter } from "expo-router";
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useForm, SubmitHandler, Controller } from "react-hook-form";
 
@@ -40,6 +40,10 @@ export default function LoginScreen() {
     }
   };
 
+  useEffect(() => {
+    authContext.connector.connectToNeo4j();
+  }, []);
+
   return (
     <View className="flex-1 justify-center p-4">
       <AppText size="heading" center className="font-bold">
@@ -55,7 +59,7 @@ export default function LoginScreen() {
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="First name"
+              placeholder="UserName"
               onBlur={onBlur}
               onChangeText={(e) => {
                 setLoginError(undefined);
@@ -77,7 +81,7 @@ export default function LoginScreen() {
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="Last name"
+              placeholder="Password"
               onBlur={onBlur}
               onChangeText={(e) => {
                 setLoginError(undefined);

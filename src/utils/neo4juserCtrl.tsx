@@ -152,7 +152,7 @@ export class Neo4jConnector {
       CREATE (:User {
         userId: $userId,  
         username: $username,
-        password_hash: $password_hash,
+        password_hash: $password_hash
       })`;
     const userId = uuidv4();
     // ref: https://www.npmjs.com/package/bcryptjs
