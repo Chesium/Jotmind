@@ -33,7 +33,7 @@
         "expo-asset",
         {
           "assets": [
-            "./assets/avatar-default.jpg"
+            "./assets/avatar_default.jpg"
           ]
         }
       ]

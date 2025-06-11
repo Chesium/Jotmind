@@ -21,7 +21,7 @@ export default function FourthScreen() {
         <View className={cn("shrink-0")}>
           <Image
             style={styles.avatar}
-            source={require("./avatar-default2.jpg")}
+            source={require("./avatarDefault2.jpg")}
             alt="avatar"
           />
         </View>

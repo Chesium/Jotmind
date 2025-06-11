@@ -265,7 +265,7 @@ export default function PersonCard({
             : defaultAvatar)}></Image> */}
         <Image
           style={style.avatar}
-          source={require("./avatar-default.jpg")}
+          source={require("./avatarDefault.jpg")}
         ></Image>
         <Text style={style.namefield}>{data.properties.name}</Text>
       </View>
