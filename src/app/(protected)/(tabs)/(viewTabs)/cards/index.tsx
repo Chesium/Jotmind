@@ -1,17 +1,14 @@
-import { Neo4jId, Properties } from "@/utils/dataType";
-import { create } from "zustand";
+import React, { useState } from "react";
 // import { temporal } from "zundo";
-import { Session } from "neo4j-driver";
-import PersonCard from "@/components/personCard";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
-import { useContext, useEffect } from "react";
-import { AuthContext } from "@/utils/authContext";
-import { immer } from "zustand/middleware/immer";
-import { devtools } from "zustand/middleware";
-import useCardViewStore from "@/utils/CardViewStore";
-import { Button } from "@/components/Button";
 import AddPersonButton from "@/components/AddPersonButton";
+import PersonCard from "@/components/personCard";
+import useCardViewStore from "@/utils/CardViewStore";
+import { SearchBar } from "@rneui/themed";
+import { useRouter } from "expo-router";
+import lunr from "lunr";
+import { ScrollView, StyleSheet, View } from "react-native";
+
+type SearchBarComponentProps = {};
 
 export default function PersonCardView() {
   // {
@@ -21,6 +18,13 @@ export default function PersonCardView() {
   //   data: PersonNodeMap;
   //   onFocus: OnFocus;
   // }
+  const [search, setSearch] = useState("");
+  const [searchIDX, setSearchIDX] = useState(lunr(function () {}));
+
+  const updateSearch = (search: string) => {
+    setSearch(search);
+  };
+
   const router = useRouter();
   const dataMap = useCardViewStore((state) => state.map);
   const updateNode = useCardViewStore((state) => state.updateNode);
@@ -37,6 +41,33 @@ export default function PersonCardView() {
 
   return (
     <View>
+      <SearchBar
+        placeholder="Search Here..." // Placeholder text for the search bar
+        lightTheme // Use light theme for the search bar
+        round // Make the search bar round
+        autoCorrect={false} // Disable auto-correct
+        containerStyle={{
+          backgroundColor: "white", // Background color of the container
+          borderTopWidth: 0, // Remove top border
+          borderBottomWidth: 0, // Remove bottom border
+          padding: 10, // Padding around the container
+          borderColor: "black", // Border color
+        }}
+        inputContainerStyle={{
+          backgroundColor: "lightgrey", // Background color of the input container
+          borderRadius: 10, // Rounded corners for the input container
+        }}
+        inputStyle={{
+          backgroundColor: "white", // Background color of the input field
+          borderRadius: 10, // Rounded corners for the input field
+          padding: 10, // Padding inside the input field
+        }}
+        searchIcon={{ size: 24, color: "black" }} // Style for the search icon
+        clearIcon={{ size: 24, color: "black" }} // Style for the clear icon
+        cancelIcon={{ size: 24, color: "black" }} // Style for the cancel icon
+        onChangeText={updateSearch}
+        value={search}
+      />
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {Object.keys(dataMap).map((id, i) => (
           <PersonCard
