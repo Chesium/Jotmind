@@ -1,18 +1,13 @@
 {
   "expo": {
-    "name": "JotMind",
-    "slug": "expo-starter",
-    "scheme": "expo-starter",
+    "name": "easbuild_test",
+    "slug": "easbuild_test",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/jotmind-icon.png",
-    "userInterfaceStyle": "light",
+    "scheme": "easbuildtest",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/jotmind-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true
     },
@@ -22,25 +17,32 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.chesium.expostarter"
+      "package": "com.chesium.easbuild_test"
     },
     "web": {
+      "bundler": "metro",
+      "output": "static",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
       [
-        "expo-asset",
+        "expo-splash-screen",
         {
-          "assets": [
-            "./assets/avatar_default.jpg"
-          ]
+          "image": "./assets/jotmind-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
         }
       ]
     ],
-    "expo": {
-      "web": {
-        "bundler": "metro"
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "3a55acc2-693d-4c0e-9165-e0aecf2b9ed9"
       }
     }
   }

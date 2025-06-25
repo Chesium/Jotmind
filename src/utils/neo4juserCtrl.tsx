@@ -271,7 +271,10 @@ export class Neo4jConnector {
       MATCH (:User {userId: $userId})-[:OWNS]->(p:Person)
       WHERE elementId(p) = $elementId set p={} ${changeClause}`;
     console.log(`UPD: ${command}`);
-    var res = await this.query(command, { userId: this.info, elementId });
+    var res = await this.query(command, {
+      userId: this.info.userId,
+      elementId,
+    });
   }
 }
 
