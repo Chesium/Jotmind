@@ -1,15 +1,15 @@
+import bcrypt from "bcryptjs";
 import neo4j, { Driver, Session } from "neo4j-driver";
+import "react-native-get-random-values";
+import { v4 as uuidv4 } from "uuid";
 import {
+  EdgeData,
   Neo4jId,
   neo4jLoginInfo,
   PersonNodeData,
   PersonNodeMap,
   Properties,
 } from "./dataType";
-import bcrypt from "bcryptjs";
-import "react-native-get-random-values";
-import { v4 as uuidv4 } from "uuid";
-import { Buffer } from "@craftzdog/react-native-buffer";
 // import {
 //   encryptWithAes,
 //   decryptWithAes,
@@ -275,6 +275,68 @@ export class Neo4jConnector {
       userId: this.info.userId,
       elementId,
     });
+  }
+
+  async retrieveEdgeInfo(): Promise<EdgeData[]> {
+    if (this.info.status != "logged in") {
+      throw new Error("Can not fetch/update data before logging in");
+    }
+    const command = `
+    MATCH (:User {userId: $userId})-[:OWNS]->(u:Person)-[r1]->(ev)<-[r2]-(v:Person) RETURN u,r1,ev,r2,v`;
+    console.log("retrieving Edge Info");
+    var res = await this.query(command, {
+      userId: this.info.userId,
+    });
+    if (res === undefined) {
+      console.log("ERR: res is undefined");
+      return [];
+    } else {
+      interface EdgeDataToBeCombined {
+        source: string;
+        target: string;
+        bidirectional: boolean;
+        weight: number;
+        description: string;
+      }
+
+      var edges_tmp: EdgeDataToBeCombined[] = res.records.map((record) => {
+        var u = record.get("u") as PersonNodeData;
+        var v = record.get("v") as PersonNodeData;
+        return {
+          source: u.elementId,
+          target: v.elementId,
+          bidirectional: true,
+          weight: record.get("ev").properties.weight,
+          description: record.get("ev").properties.description,
+        };
+      });
+      var edges: EdgeData[] = [];
+      edges_tmp.forEach((edge) => {
+        var index = edges.findIndex(
+          (e) => e.source == edge.source && e.target == edge.target
+        );
+        var index2 = edges.findIndex(
+          (e) => e.source == edge.target && e.target == edge.source
+        );
+        // consider all edges as bidirectional
+        if (index == -1 && index2 == -1) {
+          edges.push({
+            source: edge.source,
+            target: edge.target,
+            bidirectional: edge.bidirectional,
+            weight: edge.weight,
+            description: edge.description,
+          });
+        } else if (index != -1) {
+          edges[index].weight += edge.weight;
+          edges[index].description += `, ${edge.description}`;
+        } else if (index2 != -1) {
+          edges[index2].weight += edge.weight;
+          edges[index2].description += `, ${edge.description}`;
+        }
+      });
+      return edges;
+    }
   }
 }
 

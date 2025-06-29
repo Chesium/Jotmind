@@ -1,10 +1,7 @@
-import { Session } from "neo4j-driver";
-import { Neo4jId, PersonNodeData, PersonNodeMap, Properties } from "./dataType";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import { createWithEqualityFn } from "zustand/traditional";
+import { EdgeData, Neo4jId, PersonNodeData, PersonNodeMap, Properties } from "./dataType";
 
-import { shallow } from 'zustand/vanilla/shallow'
 import { Neo4jConnector } from "./neo4juserCtrl";
 
 type UpdateNodeRecord = {
@@ -26,6 +23,7 @@ interface CardViewState {
     actionHistoryPast: UpdateRecord[];
     actionHistoryFuture: UpdateRecord[];
     map: PersonNodeMap;
+    graphEdges: EdgeData[];
     fetchMap: (connector: Neo4jConnector) => Promise<void>;
     syncUpdates: (connector: Neo4jConnector, callback: (rest: number, total: number) => void) => Promise<void>;
 
@@ -47,12 +45,14 @@ const useCardViewStore = create<CardViewState>()(
                 actionHistoryPast: [],
                 actionHistoryFuture: [],
                 map: {},
+                graphEdges: [],
                 fetchMap: async (connector) => {
                     console.log("begin fetching PersonNodeMap from Neo4j");
                     set({
                         actionHistoryPast: [],
                         actionHistoryFuture: [],
                         map: await connector.retrieveInfoAsMap(),
+                        graphEdges: await connector.retrieveEdgeInfo()
                     });
                 },
                 syncUpdates: async (connector, callback: (rest: number, total: number) => void) => {

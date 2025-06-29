@@ -1,13 +1,22 @@
-import { Alert, View, Modal } from "react-native";
-import { AppText } from "@/components/AppText";
-import { Link, useRouter } from "expo-router";
-import { Button } from "@/components/Button";
-import { useState } from "react";
+import useCardViewStore from "@/utils/CardViewStore";
+import { EdgeData, PersonNodeMap } from "@/utils/dataType";
+import { useRouter } from "expo-router";
+import { useRef, useState } from "react";
+import { Alert, View } from "react-native";
+import { WebView } from "react-native-webview";
+
+interface RNInjectedObj {
+  map: PersonNodeMap;
+  edges: EdgeData[];
+}
 
 export default function IndexScreen() {
   const router = useRouter();
   const canGoBack = router.canGoBack();
   const [modalVisible, setModalVisible] = useState(false);
+  const map = useCardViewStore((state) => state.map);
+  const edges = useCardViewStore((state) => state.graphEdges);
+  const refWebView = useRef<WebView | null>(null);
 
   // https://reactnative.dev/docs/alert
   const handleOpenAlert = () => {
@@ -27,8 +36,15 @@ export default function IndexScreen() {
   };
 
   return (
-    <View className="justify-center flex-1 p-4">
-      <AppText center>Graph View (Todo)</AppText>
+    <View className="justify-center flex-1">
+      <WebView
+        ref={refWebView}
+        source={{
+          uri: "http://10.22.96.244:5173/",
+        }}
+        // injectedJavaScriptObject={{ map: map }}
+        injectedJavaScriptObject={{ map: map, edges: edges }}
+      />
     </View>
   );
 }

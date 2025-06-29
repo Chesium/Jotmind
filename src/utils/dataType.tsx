@@ -109,3 +109,11 @@ export interface PersonNodeData {
 }
 
 export type PersonNodeMap = Record<Neo4jId, PersonNodeData>;
+
+export interface EdgeData {
+  source: Neo4jId;
+  target: Neo4jId;
+  bidirectional: boolean;
+  weight: number;
+  description: string;
+}
