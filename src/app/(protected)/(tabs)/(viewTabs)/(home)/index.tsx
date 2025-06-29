@@ -44,6 +44,13 @@ export default function IndexScreen() {
         }}
         // injectedJavaScriptObject={{ map: map }}
         injectedJavaScriptObject={{ map: map, edges: edges }}
+        onMessage={(ev) => {
+          var toNodeId = ev.nativeEvent.data;
+          router.navigate({
+            pathname: "/(protected)/(tabs)/(viewTabs)/(home)/graphFocus",
+            params: { id: toNodeId },
+          });
+        }}
       />
     </View>
   );
