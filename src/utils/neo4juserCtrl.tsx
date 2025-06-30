@@ -137,9 +137,11 @@ export class Neo4jConnector {
       throw new Error("Can not query before connecting to Neo4j");
     } else {
       try {
-        const res = await this.info.session.run(cypher, params, {
-          timeout: 3000,
+        var session = this.info.driver.session();
+        const res = await session.run(cypher, params, {
+          timeout: 1000,
         });
+        session.close();
         return res;
       } catch (e) {
         throw e;
@@ -258,22 +260,30 @@ export class Neo4jConnector {
   }
 
   async updateNodeProperties(
-    elementId: Neo4jId,
-    newProp: Properties
+    idPropPairs: { id: Neo4jId; newProp: Properties }[]
   ): Promise<void> {
     if (this.info.status != "logged in") {
       throw new Error("Can not fetch/update data before logging in");
     }
-    const changeClause = Object.keys(newProp)
-      .map((k) => `set p.${k} = "${newProp[k]}"`)
-      .join(" ");
-    var command = `
-      MATCH (:User {userId: $userId})-[:OWNS]->(p:Person)
-      WHERE elementId(p) = $elementId set p={} ${changeClause}`;
+
+    // var i = 0;
+
+    function whereClause(idPropPair: {
+      id: Neo4jId;
+      newProp: Properties;
+    }): string {
+      const changeClause = Object.keys(idPropPair.newProp)
+        .map((k) => `${k}:"${idPropPair.newProp[k]}"`)
+        .join(",");
+      const res = `MATCH (:User {userId: $userId})-[:OWNS]->(p:Person) WHERE elementId(p) = "${idPropPair.id}" set p={${changeClause}}`;
+      // i++;
+      return res;
+    }
+
+    var command = idPropPairs.map(whereClause).join(";\n");
     console.log(`UPD: ${command}`);
     var res = await this.query(command, {
       userId: this.info.userId,
-      elementId,
     });
   }
 

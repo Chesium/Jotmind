@@ -56,17 +56,19 @@ const useCardViewStore = create<CardViewState>()(
                     });
                 },
                 syncUpdates: async (connector, callback: (rest: number, total: number) => void) => {
-                    const { actionHistoryPast } = get();
+                    const { map, actionHistoryPast } = get();
                     const itemN = actionHistoryPast.length;
-                    for (var i = 0; i < itemN; i++) {
-                        callback(itemN - i, itemN);
-                        let action = actionHistoryPast[i]
-                        if (action.type == 'UpdateProp') {
-                            await connector.updateNodeProperties(action.id, action.newProp)
-                        } else {
+                    const affectedNodeIDs = new Set(actionHistoryPast.filter((h) => h.type == "UpdateProp").map((h) => h.id));
+                    connector.updateNodeProperties(Array.from(affectedNodeIDs.values()).map((id) => { return { id: id, newProp: map[id].properties } })).then(() => { console.log("Update Done"); });
+                    // for (var i = 0; i < itemN; i++) {
+                    //     callback(itemN - i, itemN);
+                    //     let action = actionHistoryPast[i]
+                    //     if (action.type == 'UpdateProp') {
+                    //         await connector.updateNodeProperties(action.id, action.newProp)
+                    //     } else {
 
-                        }
-                    }
+                    //     }
+                    // }
                     set(state => {
                         state.actionHistoryPast = [];
                         state.actionHistoryFuture = [];
