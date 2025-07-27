@@ -297,6 +297,7 @@ export class Neo4jConnector {
     var res = await this.query(command, {
       userId: this.info.userId,
     });
+    console.log(res);
     if (res === undefined) {
       console.log("ERR: res is undefined");
       return [];
@@ -320,6 +321,9 @@ export class Neo4jConnector {
           description: record.get("ev").properties.description,
         };
       });
+
+      console.log("got edges tmp");
+      console.log(edges_tmp);
       var edges: EdgeData[] = [];
       edges_tmp.forEach((edge) => {
         var index = edges.findIndex(
