@@ -40,12 +40,12 @@ export default function IndexScreen() {
       <WebView
         ref={refWebView}
         source={{
-          uri: "http://10.22.96.244:5173/",
+          uri: "https://jotmind-graphviewer.netlify.app/",
         }}
         // injectedJavaScriptObject={{ map: map }}
         injectedJavaScriptObject={{ map: map, edges: edges }}
         onMessage={(ev) => {
-          var toNodeId = ev.nativeEvent.data;
+          let toNodeId = ev.nativeEvent.data;
           router.navigate({
             pathname: "/(protected)/(tabs)/(viewTabs)/(home)/graphFocus",
             params: { id: toNodeId },
