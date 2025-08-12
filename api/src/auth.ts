@@ -29,8 +29,7 @@ async function newNeo4jDB(name: string) {
 }
 
 const host = process.env.HOST;
-const port = process.env.DEV_API_PORT;
-const FRONTEND = `${host}:${port}`;
+const FRONTEND = `${host}:${process.env.DEV_WEB_PORT}`;
 
 export const auth = betterAuth({
     database: db,

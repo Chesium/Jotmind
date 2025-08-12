@@ -28,7 +28,7 @@ const http = createServer(app);
 // const io = new SocketIOServer(http, { cors: { origin: client_url, credentials: true }});
 
 
-const FRONTEND = `${host}:${port}`;
+const FRONTEND = `${host}:${process.env.DEV_WEB_PORT}`;
 // const FRONTEND = `http://localhost:5173`;
 
 app.use(

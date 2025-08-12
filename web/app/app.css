@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@plugin 'tailwind-scrollbar';
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+html,
+body {
+}
+
+@layer utilities {
+
+  .tab-shadow {
+    box-shadow: 0 0 15px rgba(0,0,0,0.2);
+    clip-path: inset(-24px 0 0 0);
+  }
+
+  .topbar-shadow {
+    box-shadow: 0 0 15px rgba(0,0,0,0.2);
+    clip-path: inset(0 0 -24px 0);
+  }
+}

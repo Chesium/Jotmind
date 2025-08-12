@@ -5,5 +5,16 @@
   "projectType": "application",
   "tags": [],
   "// targets": "to see all targets run: nx show project web --web",
-  "targets": {}
+  "targets": {
+    "serve": {
+      "continuous": true,
+      "options": {
+        "cwd": "web",
+        "command": "react-router dev"
+      },
+      "executor": "nx:run-commands",
+      "configurations": {},
+      "parallelism": true
+    }
+  }
 }
