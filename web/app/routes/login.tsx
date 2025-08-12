@@ -1,9 +1,7 @@
 import { useNavigate, Link } from "react-router";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { authClient } from "../lib/auth-client";
-import { credentialsSchema, type Credentials } from "../validation/auth-validation";
-import type { ReactNode } from "react";
+import { type Credentials } from "../validation/auth-validation";
 
 export default function Login() {
   const nav = useNavigate();

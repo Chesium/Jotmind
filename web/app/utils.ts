@@ -12,7 +12,7 @@ export function indexByTo<T, K extends PropertyKey, V>(
       if (onDuplicate === "first") continue; // keep the earlier one
       // "last": fall through to overwrite
     }
-    (out as any)[k] = getVal(item);
+    (out as Record<K, V>)[k] = getVal(item);
   }
   return out;
 }

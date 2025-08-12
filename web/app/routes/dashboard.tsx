@@ -1,6 +1,5 @@
 import { Navigate, useNavigate } from "react-router";
-import { api, authClient } from "../lib/auth-client";
-import { useState } from "react";
+import { authClient } from "../lib/auth-client";
 
 export default function Dashboard() {
 
@@ -8,7 +7,6 @@ export default function Dashboard() {
   // auto-refreshes when user logs in/out thanks to useSession
   const sessionRaw = authClient.useSession(); // hook from docs
   const { data: session, isPending } = sessionRaw;
-  const [res, setRes] = useState("<empty>");
   if (isPending) return <p>…loading</p>;
   if (!session) return <Navigate to="/login" />;
 
@@ -35,7 +33,6 @@ export default function Dashboard() {
             <p>session.Neo4jDb: {(session as any).neo4jDb}</p>
 
             <button onClick={logOut} className="w-full cursor-pointer rounded-md border border-blue-500 bg-blue-500 px-5 py-3 text-base font-medium text-white transition hover:bg-opacity-90">Log&nbsp;out</button>
-            <p>{res}</p>
           </div>
         </div>
       </div>

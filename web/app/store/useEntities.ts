@@ -1,6 +1,6 @@
 import { create } from "zustand"
-import { ZResAll, type Claim, type Entity, type ResClaim, toNodeType, type FormValues, type UpdateData } from "./type";
-import { indexByTo, unique } from "../utils";
+import { ZResAll, type Claim, type Entity, toNodeType, type UpdateData } from "@my-repo/shared-types";
+import { indexByTo } from "../utils";
 import { api } from "../lib/auth-client";
 import { immer } from 'zustand/middleware/immer'
 import MiniSearch, { type Suggestion } from 'minisearch'

@@ -1,9 +1,8 @@
 import React, { useState } from "react";
-import { useForm, useFieldArray, Controller, useWatch, type UseFormRegister, type FieldErrors, type Control } from "react-hook-form";
-import { z } from "zod";
+import { useForm, useFieldArray, type UseFormRegister, type FieldErrors, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEntities } from "~/store/useEntities";
-import { WithUUID, ZClaimArgDTO, ZClaimDTO, ZEntityDTO, ZFormSchema, type Claim, type ClaimArg, type Entity, type EntityDTO, type FormValues, type NodeType } from "@my-repo/shared-types";
+import { WithUUID, ZFormSchema, type FormValues, type NodeType } from "@my-repo/shared-types";
 import { PiX } from 'react-icons/pi';
 
 // ——————————————————————————————————————————
@@ -68,26 +67,26 @@ export const isIntrinsicPredicate = (p?: string): p is IntrinsicPredicate =>
 // ——————————————————————————————————————————
 // Helpers
 // ——————————————————————————————————————————
-const rolesForPredicate = (predicate: string): string[] => {
-  switch (predicate) {
-    case "born_in":
-      return ["subject", "object"]; // Person, Place
-    case "learned_about":
-      return ["subject", "object", "via_person", "at_event"]; // Person, Concept, Person?, Event?
-    case "attended":
-      return ["subject", "object", "at_place"]; // Person, Event, Place
-    case "introduced":
-      return ["introducer", "introduced", "to", "at_event"]; // Person, Person, Person, Event
-    default:
-      // Allow free-form roles for custom predicates
-      return ["subject", "object"]; // sensible default
-  }
-};
+// const rolesForPredicate = (predicate: string): string[] => {
+//   switch (predicate) {
+//     case "born_in":
+//       return ["subject", "object"]; // Person, Place
+//     case "learned_about":
+//       return ["subject", "object", "via_person", "at_event"]; // Person, Concept, Person?, Event?
+//     case "attended":
+//       return ["subject", "object", "at_place"]; // Person, Event, Place
+//     case "introduced":
+//       return ["introducer", "introduced", "to", "at_event"]; // Person, Person, Person, Event
+//     default:
+//       // Allow free-form roles for custom predicates
+//       return ["subject", "object"]; // sensible default
+//   }
+// };
 
-const guessDefaultArgs = (predicate: string): { role: string }[] => {
-  const roles = rolesForPredicate(predicate);
-  return roles.slice(0, 2).map((r) => ({ role: r }));
-};
+// const guessDefaultArgs = (predicate: string): { role: string }[] => {
+//   const roles = rolesForPredicate(predicate);
+//   return roles.slice(0, 2).map((r) => ({ role: r }));
+// };
 
 // const findNodeByUuid = (opts: NodeOption[], uuid: string) =>
 //   opts.find((o) => o.uuid === uuid);
@@ -154,7 +153,6 @@ export default function EntityClaimEditor(props: {
     control,
     register,
     handleSubmit,
-    watch,
     formState: { errors },
   } = methods;
 
@@ -168,8 +166,6 @@ export default function EntityClaimEditor(props: {
   const removeClaim = (i: number) => claimsFA.remove(i);
 
   const onSubmit = (values: FormValues) => {
-    // For demo just log
-    // eslint-disable-next-line no-console
     console.log("SUBMIT", values);
     updateEntity(WithUUID(values));
   };
@@ -281,7 +277,7 @@ function ClaimCard({
 
   // Read current predicate to suggest role options
   // Using Controller is optional; here we stick to register for simplicity
-  const predicatePath = `claims.${index}.predicate` as const;
+  // const predicatePath = `claims.${index}.predicate` as const;
 
   const [curPos, setCurPos] = useState(1);
 

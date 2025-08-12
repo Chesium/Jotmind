@@ -16,7 +16,7 @@ export default function CardView() {
     if (!initialized) {
       fetchAll();
     }
-  }, [initialized])
+  }, [initialized, fetchAll])
 
   const newEntity = () => {
     const newEntity = defaultEntity();

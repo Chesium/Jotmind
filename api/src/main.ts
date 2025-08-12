@@ -58,7 +58,7 @@ app.get("/api/fetchall", async (req, res) => {
     const records = await neo.getAll();
     await neo.close();
     res.json(records);
-  } catch (e:unknown) {
+  } catch {
     res.status(401).end();
   }
 });
