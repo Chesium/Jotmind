@@ -94,3 +94,73 @@ export const ZUpdateData = z.object({
 })
 
 export type UpdateData = z.infer<typeof ZUpdateData>
+
+import { v4 as uuidv4 } from 'uuid';
+export type Entity = EntityDTO
+
+// FIXME currently we cannot edit the newly created entity's claims since
+// it's not registered in the claim-args-node_uuid field 
+export function defaultEntity(): z.infer<typeof ZEntityDTO2> {
+  return {
+    type: "Person",
+    uuid: uuidv4(),
+    name: "",
+    description: ""
+  }
+}
+
+export type NodeType = "Person" | "Place" | "Event" | "Concept";
+
+export function toNodeType(value: string): NodeType {
+  const allowed: NodeType[] = ["Person", "Place", "Event", "Concept"];
+  if (!allowed.includes(value as NodeType)) {
+    throw new Error(`Invalid node type: ${value}`);
+  }
+  return value as NodeType;
+}
+
+export type ClaimArg = ClaimArgDTO
+
+export type Claim = ClaimDTO
+
+export const ZClaimDTO = z.object({
+  args: z.array(ZClaimArgDTO),
+  uuid: z.string().optional(), // undefined => new Claim
+  description: z.string(),
+  predicate: z.string(),
+  confidence: z.number(),
+  value_str: z.string().optional(),
+})
+
+export const ZEntityDTO = z.object({
+  type: z.enum(["Person", "Place", "Event", "Concept"]),
+  uuid: z.string().optional(), // undefined => new Entity
+  name: z.string(),
+  description: z.string()
+})
+
+export const ZFormSchema = z.object({
+  entity: ZEntityDTO,
+  claims: z.array(ZClaimDTO)
+})
+
+
+
+
+export type EntityDTO = z.infer<typeof ZEntityDTO>;
+export type ClaimDTO = z.infer<typeof ZClaimDTO>;
+export type ClaimArgDTO = z.infer<typeof ZClaimArgDTO>;
+export type FormValues = z.infer<typeof ZFormSchema>;
+
+export function WithUUID(data: FormValues): UpdateData {
+  return {
+    entity: { uuid: data.entity.uuid ?? uuidv4(), ...data.entity },
+    claims: data.claims.map(claim => {
+      return {
+        uuid: claim.uuid ?? uuidv4(),
+        value_str: claim.value_str ?? "",
+        ...claim
+      }
+    }),
+  }
+}

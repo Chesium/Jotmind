@@ -1,6 +1,7 @@
 import { useEntities } from "~/store/useEntities";
 import EntityIcon from "./EntityIcon";
 import { Link } from "react-router";
+import type { ClaimArg } from "@my-repo/shared-types";
 
 export default function ClaimCard({ omitEntities, cuuid }: { omitEntities: string[], cuuid: string }) {
   const { predicate, description, args, value_str } = useEntities(state => state.claimsMap[cuuid]);
@@ -19,12 +20,12 @@ export default function ClaimCard({ omitEntities, cuuid }: { omitEntities: strin
               <th>node</th>
             </tr></thead>
           <tbody>
-            {args.filter((arg) => !(arg.node_uuid in omitEntities)).map((arg) => (<tr key={arg.node_uuid}>
+            {args.filter((arg: ClaimArg) => !(arg.node_uuid in omitEntities)).map((arg: ClaimArg) => (<tr key={arg.node_uuid}>
               <td><span>{arg.role}</span></td>
               <td>
                 <Link to={`/entity/${arg.node_uuid}`} className="flex flex-row justify-centers items-center gap-5">
-                <EntityIcon label={entitiesMap[arg.node_uuid].type} size={20} />
-                <span>{entitiesMap[arg.node_uuid].name}</span></Link>
+                  <EntityIcon label={entitiesMap[arg.node_uuid].type} size={20} />
+                  <span>{entitiesMap[arg.node_uuid].name}</span></Link>
               </td>
             </tr>))}</tbody>
         </table>

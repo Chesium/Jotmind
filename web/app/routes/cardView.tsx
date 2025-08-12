@@ -5,7 +5,7 @@ import { useEntities } from "~/store/useEntities";
 import JotMindLogo from '../assets/jotmind_logo.svg?react'
 import SearchBar from "~/components/SearchBar";
 import { PiPlusBold } from "react-icons/pi";
-import { defaultEntity } from "~/store/type";
+import { defaultEntity } from "@my-repo/shared-types";
 
 
 export default function CardView() {

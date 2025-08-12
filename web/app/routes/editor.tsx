@@ -3,7 +3,7 @@ import { useForm, useFieldArray, Controller, useWatch, type UseFormRegister, typ
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEntities } from "~/store/useEntities";
-import { WithUUID, ZClaimArgDTO, ZClaimDTO, ZEntityDTO, ZFormSchema, type Claim, type ClaimArg, type Entity, type EntityDTO, type FormValues, type NodeType } from "~/store/type";
+import { WithUUID, ZClaimArgDTO, ZClaimDTO, ZEntityDTO, ZFormSchema, type Claim, type ClaimArg, type Entity, type EntityDTO, type FormValues, type NodeType } from "@my-repo/shared-types";
 import { PiX } from 'react-icons/pi';
 
 // ——————————————————————————————————————————
