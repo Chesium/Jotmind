@@ -1,5 +1,5 @@
 import { Link, Outlet } from "react-router";
-import { PiGraphDuotone } from 'react-icons/pi';
+import { PiGraph, PiGraphDuotone } from 'react-icons/pi';
 import { PiDatabase } from 'react-icons/pi';
 import { PiUserCircle } from 'react-icons/pi';
 
@@ -17,10 +17,12 @@ export default function TabsLayout() {
             <span className="text-sm">data</span>
             </div>
           </Link>
-          {/* <div className="flex flex-col items-center">
-            <PiDatabase size={30}></PiDatabase>
-            <span className="text-sm">data</span>
-          </div> */}
+          <Link to="/graphview">
+          <div className="flex flex-col items-center">
+            <PiGraph size={30}></PiGraph>
+            <span className="text-sm">graph</span>
+          </div>
+          </Link>
           <Link to="/dashboard">
             <div className="flex flex-col items-center">
               <PiUserCircle size={30}></PiUserCircle>
