@@ -18,6 +18,9 @@ export default defineConfig(() => ({
         searchForWorkspaceRoot(process.cwd()),
       ],
     },
+    proxy: {
+      '/api': { target: 'http://localhost:3000', changeOrigin: true }
+    }
   },
   preview: {
     port: 4200,

@@ -52,8 +52,18 @@ app.use(express.json());
 // const driver = neo4j.driver("bolt://localhost:7687", neo4j.auth.basic("neo4j", "password"));
 
 // ── 3) Protected REST endpoint example
+
+
+app.get("/healthz", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get("/api/fetchall", async (req, res) => {
   try {
+    console.log("here");
     const neo = await openGraphSession(fromNodeHeaders(req.headers));
     const records = await neo.getAll();
     await neo.close();

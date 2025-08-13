@@ -90,7 +90,7 @@ export const useEntities = create<State>()(immer((set) => ({
   // claimsByEntity: {},
   fetchAll: async () => {
     set({ loading: true });
-    const data = ZResAll.parse(await api<null, any>("/api/fetchall"))
+    const data = ZResAll.parse(await api<null, any>("/fetchall"))
     console.log(data);
     // const claims = data.map((item) => { return { entity_uuid: item.entity.uuid, claim_ids: item.claims.map(c => c.claim_uuid) } })
     const emap = indexByTo(data.entities, (e) => e.uuid, (i) => { return { ...i, type: toNodeType(i.labels[0]) } })
@@ -147,7 +147,7 @@ export const useEntities = create<State>()(immer((set) => ({
       // state.miniSearchIdx.replace(toDoc(data.entity.uuid, state.entitiesMap, state.claimsMap, cofe))
     })
     if (sync) {
-      await api<UpdateData, null>("/api/update", { method: "POST", body: data })
+      await api<UpdateData, null>("/update", { method: "POST", body: data })
       console.log("update done");
     }
   },
