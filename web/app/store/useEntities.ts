@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { ZResAll, type Claim, type Entity, toNodeType, type UpdateData } from "@my-repo/shared-types";
-import { indexByTo } from "../utils";
+import { delay, indexByTo } from "../utils";
 import { api } from "../lib/auth-client";
 import { immer } from 'zustand/middleware/immer'
 import MiniSearch, { type Suggestion } from 'minisearch'
@@ -33,6 +33,8 @@ interface State {
 
   setQuery: (q: string) => void;
   runSearch: () => void;
+
+  setRefresh: () => void;
 
   // search: () => Promise<void>;
   // loadOverview: (uuid: string) => Promise<void>;
@@ -88,6 +90,9 @@ export const useEntities = create<State>()(immer((set) => ({
   suggestions: [],
   // entities: [],
   // claimsByEntity: {},
+  setRefresh: () => {
+    set({ initialized: false });
+  },
   fetchAll: async () => {
     set({ loading: true });
     const data = ZResAll.parse(await api<null, any>("/fetchall"))

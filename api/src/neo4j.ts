@@ -2,6 +2,7 @@ import { Neo4jGraph } from "@langchain/community/graphs/neo4j_graph";
 import c, { AnyZodObject, Cypher } from "./cyphers";
 import { z } from "zod";
 import { ResAll, UpdateData } from "@my-repo/shared-types";
+import { testDataCypher } from "./testDataCypher";
 
 // export const config = {
 //     url: NEO4JINFO.url, // URL for the Neo4j instance
@@ -82,6 +83,25 @@ export class Neo4jWrapper {
         for (const claim of data.claims) {
             await this.runCypher(c.updateClaim, claim)
         }
+    }
+
+    async initConstraints(): Promise<void> {
+        const cyphers =
+            [`CREATE CONSTRAINT IF NOT EXISTS FOR (n:Person)  REQUIRE n.uuid IS UNIQUE`,
+                `CREATE CONSTRAINT IF NOT EXISTS FOR (n:Event)   REQUIRE n.uuid IS UNIQUE`,
+                `CREATE CONSTRAINT IF NOT EXISTS FOR (n:Concept) REQUIRE n.uuid IS UNIQUE`,
+                `CREATE CONSTRAINT IF NOT EXISTS FOR (n:Place)   REQUIRE n.uuid IS UNIQUE`,
+                `CREATE CONSTRAINT IF NOT EXISTS FOR (n:Claim)   REQUIRE n.uuid IS UNIQUE`,
+                `CREATE CONSTRAINT IF NOT EXISTS FOR (n:Predicate) REQUIRE n.key IS UNIQUE`,
+                `CREATE FULLTEXT INDEX entityText IF NOT EXISTS  FOR (n:Person|Event|Concept|Place) ON EACH [n.name, n.description]`,
+                `CREATE FULLTEXT INDEX claimText IF NOT EXISTS  FOR (c:Claim) ON EACH [c.predicate, c.description, c.value_str]`]
+        for (const cypher of cyphers) {
+            await this.query(cypher);
+        }
+    }
+
+    async hydrateTestData(): Promise<void> {
+        await this.runCypher(testDataCypher, {});
     }
 
     async close() {

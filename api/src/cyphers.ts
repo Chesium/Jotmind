@@ -20,18 +20,18 @@ export function makeCypher<P extends AnyZodObject, R extends z.ZodTypeAny | void
 
 // 3) Your upsert example as a typed Cypher
 
-export const init = makeCypher(z.object({}),
-  `
-    CREATE CONSTRAINT IF NOT EXISTS FOR (n:Person)  REQUIRE n.uuid IS UNIQUE;
-    CREATE CONSTRAINT IF NOT EXISTS FOR (n:Event)   REQUIRE n.uuid IS UNIQUE;
-    CREATE CONSTRAINT IF NOT EXISTS FOR (n:Concept) REQUIRE n.uuid IS UNIQUE;
-    CREATE CONSTRAINT IF NOT EXISTS FOR (n:Place)   REQUIRE n.uuid IS UNIQUE;
-    CREATE CONSTRAINT IF NOT EXISTS FOR (n:Claim)   REQUIRE n.uuid IS UNIQUE;
-    CREATE CONSTRAINT IF NOT EXISTS FOR (n:Predicate) REQUIRE n.key IS UNIQUE;
-    CREATE FULLTEXT INDEX entityText IF NOT EXISTS  FOR (n:Person|Event|Concept|Place) ON EACH [n.name, n.description];
-    CREATE FULLTEXT INDEX claimText IF NOT EXISTS  FOR (c:Claim) ON EACH [c.predicate, c.description, c.value_str];
-  `
-)
+// export const init = makeCypher(z.object({}),
+//   `
+//     CREATE CONSTRAINT IF NOT EXISTS FOR (n:Person)  REQUIRE n.uuid IS UNIQUE;
+//     CREATE CONSTRAINT IF NOT EXISTS FOR (n:Event)   REQUIRE n.uuid IS UNIQUE;
+//     CREATE CONSTRAINT IF NOT EXISTS FOR (n:Concept) REQUIRE n.uuid IS UNIQUE;
+//     CREATE CONSTRAINT IF NOT EXISTS FOR (n:Place)   REQUIRE n.uuid IS UNIQUE;
+//     CREATE CONSTRAINT IF NOT EXISTS FOR (n:Claim)   REQUIRE n.uuid IS UNIQUE;
+//     CREATE CONSTRAINT IF NOT EXISTS FOR (n:Predicate) REQUIRE n.key IS UNIQUE;
+//     CREATE FULLTEXT INDEX entityText IF NOT EXISTS  FOR (n:Person|Event|Concept|Place) ON EACH [n.name, n.description];
+//     CREATE FULLTEXT INDEX claimText IF NOT EXISTS  FOR (c:Claim) ON EACH [c.predicate, c.description, c.value_str];
+//   `
+// )
 
 export const updateEntity = makeCypher(ZEntityDTO2,
   `
@@ -248,7 +248,6 @@ export const getClaims = makeCypher(z.object({}),
 )
 
 export default {
-  init,
   upsertClaim,
   entityFulltextSearch,
   claimFulltextSearch,

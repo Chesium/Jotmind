@@ -20,3 +20,7 @@ export function indexByTo<T, K extends PropertyKey, V>(
 export function unique<T>(arr: T[]): T[] {
   return Array.from(new Set(arr))
 }
+
+export async function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}

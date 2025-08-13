@@ -6,6 +6,7 @@ import JotMindLogo from '../assets/jotmind_logo.svg?react'
 import SearchBar from "~/components/SearchBar";
 import { PiPlusBold } from "react-icons/pi";
 import { defaultEntity } from "@my-repo/shared-types";
+import { ScaleLoader } from "react-spinners"
 
 
 export default function CardView() {
@@ -40,10 +41,17 @@ export default function CardView() {
         </div>
       </div>
       <div className="flex flex-col w-full gap-5 pt-[calc(70px+env(safe-area-inset-bottom))]">
-        {displayedIdx.map(uuid => (
+
+        {initialized ? (displayedIdx.length===0 ? <div className="flex flex-col items-center gap-5">
+          <span>There are no items in the database.</span>
+        </div> : displayedIdx.map(uuid => (
           <Link to={`/entity/${uuid}`} key={uuid}>
             <EntityCard uuid={uuid}></EntityCard>
-          </Link>))}
+          </Link>))) : <div className="flex flex-col items-center gap-5">
+          <ScaleLoader></ScaleLoader>
+          <span>fetching data from database...</span>
+        </div>
+        }
       </div>
     </div>
   );

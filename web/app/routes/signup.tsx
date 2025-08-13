@@ -3,6 +3,8 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { authClient } from "../lib/auth-client";
+import { useState } from "react";
+import { BarLoader } from "react-spinners";
 
 // re-use credential fields + confirm
 const signUpSchema = z
@@ -27,11 +29,15 @@ export default function SignUpPage() {
     formState: { errors, isSubmitting },
     setError,
   } = useForm<SignUpForm>({ resolver: zodResolver(signUpSchema) });
+  
+  const [waiting, setWaiting] = useState<boolean>(false);
 
   const onSubmit = async ({ name, email, password }: SignUpForm) => {
+    setWaiting(true);
     const { error } = await authClient.signUp.email(
       { name, email, password, callbackURL: "/dashboard" } // Better-Auth call
     );
+    // setWaiting(false);
     if (error) {
       setError("root", { message: error.message });
     } else {
@@ -67,6 +73,10 @@ export default function SignUpPage() {
     {errors.confirm && <span>{errors.confirm.message}</span>}
 
     {errors.root && <p className="error">{errors.root.message}</p>}
+    {waiting ? <div className="flex flex-row justify-between items-center w-full">
+      <BarLoader></BarLoader>
+      <span>trying to log you in...</span>
+    </div> : ""}
     <button disabled={isSubmitting} className="w-full cursor-pointer rounded-md border border-blue-500 bg-blue-500 px-5 py-3 text-base font-medium text-white transition hover:bg-opacity-90">Sign&nbsp;up</button>
   </form>
   )

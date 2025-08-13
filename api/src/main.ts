@@ -2,7 +2,7 @@ import express from "express";
 import { createServer } from "http";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import cors from "cors";
-import { auth } from "./auth";
+import { auth, db } from "./auth";
 import { Neo4jWrapper } from "./neo4j";
 import { ZUpdateData } from "@my-repo/shared-types";
 import { $ZodError, treeifyError } from "zod/v4/core";
@@ -67,6 +67,22 @@ app.get("/api/fetchall", async (req, res) => {
     const neo = await openGraphSession(fromNodeHeaders(req.headers));
     const records = await neo.getAll();
     await neo.close();
+    res.json(records);
+  } catch {
+    res.status(401).end();
+  }
+});
+
+app.get("/api/hydratetest", async (req, res) => {
+  try {
+    console.log("hydratetest");
+    const neo = await openGraphSession(fromNodeHeaders(req.headers));
+    const records = await neo.hydrateTestData();
+    await neo.close();
+    const sess = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+    db.prepare(
+      `UPDATE user SET initialized = 1 WHERE id = ?`
+    ).run(sess.user.id);
     res.json(records);
   } catch {
     res.status(401).end();

@@ -2,8 +2,9 @@ import { betterAuth } from "better-auth";
 import Database from "better-sqlite3";
 import { createAuthMiddleware, customSession } from "better-auth/plugins";
 import neo4j from "neo4j-driver";
+import { Neo4jWrapper } from "./neo4j";
 
-const db = new Database("./sqlite.db", { verbose: console.log });
+export const db = new Database("./sqlite.db", { verbose: console.log });
 
 console.log(process.env.NEO4J_URL);
 
@@ -12,32 +13,36 @@ const driver = neo4j.driver(
     neo4j.auth.basic(process.env.NEO4J_USERNAME as string, process.env.NEO4J_PASSWORD as string)
 )
 
-function slugify(raw: string) {
-    return raw
-        .toLowerCase()
-        .replace(/[^a-z0-9_]+/g, "_")
-        .replace(/^_+|_+$/g, "");
-}
-
 async function newNeo4jDB(name: string) {
-    const neo4jDb = slugify(name);
+    // const neo4jDb = slugify(name);
     const sys = driver.session({ database: "system" });
     try {
-        await sys.run(`CREATE DATABASE \`${neo4jDb}\` IF NOT EXISTS`);
+        await sys.run(`CREATE DATABASE \`${name}\` IF NOT EXISTS`);
     } finally {
         await sys.close();
     }
-    return neo4jDb
+    const wrapper = new Neo4jWrapper(name);
+    await wrapper.initialize();
+    await wrapper.initConstraints();
+    return name
 }
 
 const host = process.env.HOST;
 const FRONTEND = `${host}:${process.env.DEV_WEB_PORT}`;
+
+function normalizeUsername(username: string): string {
+  return username
+    .toLowerCase()               // 转换成小写
+    .replace(/[^a-z0-9]+/g, "-")  // 非字母数字替换为 dash
+    .replace(/^-+|-+$/g, "");     // 去掉首尾多余的 dash
+}
 
 export const auth = betterAuth({
     database: db,
     trustedOrigins: [FRONTEND],
     emailAndPassword: {
         enabled: true,
+        autoSignIn: true,
     },
     socialProviders: {
         github: {
@@ -49,7 +54,7 @@ export const auth = betterAuth({
         customSession(async ({ user, session }) => {
             // ② 同步查询用户自定义字段
             const stmt = db.prepare(`
-        SELECT neo4j_db
+        SELECT neo4j_db, initialized
         FROM   user
         WHERE  id = ?
         LIMIT  1
@@ -57,7 +62,7 @@ export const auth = betterAuth({
 
             // better-sqlite3 的 .get() 直接返回行对象或 undefined
             const meta = stmt.get(session.userId) as
-                | { neo4j_db: string | null; enc_token: string | null }
+                | { neo4j_db: string | null; enc_token: string | null; initialized : boolean | null }
                 | undefined;
 
             // ③ 组装自定义 Session 对象
@@ -65,6 +70,7 @@ export const auth = betterAuth({
                 user,                    // Better-Auth 默认字段
                 session,                 // 同上
                 neo4jDb: meta?.neo4j_db ?? undefined,
+                initialized: meta?.initialized ?? undefined,
             };
         }),
     ],
@@ -76,14 +82,17 @@ export const auth = betterAuth({
             if (!newSession) return;
 
             const uid = newSession.user.id;
-            const displayName = newSession.user.name ?? `user_${uid}`;
+            
+            const displayName = `user-${normalizeUsername(newSession.user.name)}-${uid}`;
 
-            const neo4jDb = await newNeo4jDB(displayName);
+            
+            db.prepare(
+                `UPDATE user SET neo4j_db = ?, initialized = 0 WHERE id = ?`
+            ).run(displayName, uid);
+
+            await newNeo4jDB(displayName);
 
             // 2-b) persist db-name in SQLite
-            db.prepare(
-                `UPDATE user SET neo4j_db = ? WHERE id = ?`
-            ).run(neo4jDb, uid);
         }),
     },
 })

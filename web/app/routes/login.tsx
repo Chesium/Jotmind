@@ -2,6 +2,9 @@ import { useNavigate, Link } from "react-router";
 import { useForm } from "react-hook-form";
 import { authClient } from "../lib/auth-client";
 import { type Credentials } from "../validation/auth-validation";
+import { delay } from "~/utils";
+import { useState } from "react";
+import { BarLoader } from "react-spinners";
 
 export default function Login() {
   const nav = useNavigate();
@@ -12,15 +15,19 @@ export default function Login() {
     setError,
   } = useForm<Credentials>();
 
+  const [waiting, setWaiting] = useState<boolean>(false);
+
   const onSubmit = async (data: Credentials) => {
+    setWaiting(true);
     const { error } = await authClient.signIn.email(
       { ...data, callbackURL: "/dashboard" }
     );
+    // setWaiting(false);
     if (error) {
       // react-hook-form friendly field error
       setError("root", { message: error.message });
     } else {
-      nav("/dashboard");
+      // nav("/dashboard");
     }
   };
 
@@ -45,6 +52,11 @@ export default function Login() {
     {errors.password && <span>{errors.password.message}</span>}
 
     {errors.root && <p className="error">{errors.root.message}</p>}
+    
+    {waiting ? <div className="flex flex-row justify-between items-center w-full">
+      <BarLoader></BarLoader>
+      <span>trying to log you in...</span>
+    </div> : ""}
     <button disabled={isSubmitting} className="w-full cursor-pointer rounded-md border border-blue-500 bg-blue-500 px-5 py-3 text-base font-medium text-white transition hover:bg-opacity-90">Log in</button>
   </form>
   )
