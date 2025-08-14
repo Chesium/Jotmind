@@ -18,18 +18,11 @@ async function openGraphSession(headers: Headers) {
   const wrapper = new Neo4jWrapper(sess.neo4jDb);
   await wrapper.initialize();
   return wrapper;
-  // return driver.session({ database: sess.neo4jDb });
 }
 
 const http = createServer(app);
-// const io = new SocketIOServer(http);
-
-// app.options('{*any}', cors());
-// const io = new SocketIOServer(http, { cors: { origin: client_url, credentials: true }});
-
 
 const FRONTEND = `${host}:${process.env.DEV_WEB_PORT}`;
-// const FRONTEND = `http://localhost:5173`;
 
 app.use(
   cors({
@@ -41,17 +34,8 @@ app.use(
 );
 
 // ── 1) Mount Better-Auth
-app.all("/api/auth/{*any}", toNodeHandler(auth));           // official snippet
-
-// JSON middleware comes *after* the auth handler
+app.all("/api/auth/{*any}", toNodeHandler(auth));
 app.use(express.json());
-// app.use(express.json(), cors({ origin: client_url, credentials: true }));
-
-// ── 2) Neo4j driver (one driver for REST + WS)
-// const wrapper = new Neo4jWrapper(config);
-// const driver = neo4j.driver("bolt://localhost:7687", neo4j.auth.basic("neo4j", "password"));
-
-// ── 3) Protected REST endpoint example
 
 
 app.get("/healthz", (req, res) => {
@@ -91,8 +75,6 @@ app.get("/api/hydratetest", async (req, res) => {
 
 app.post("/api/update", async (req, res) => {
   try {
-    // 运行时校验
-    // console.log("body:",req);
     console.log(req.body);
     const data = ZUpdateData.parse(req.body);
     const neo = await openGraphSession(fromNodeHeaders(req.headers));
@@ -110,41 +92,5 @@ app.post("/api/update", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-// import { fileURLToPath } from 'url';
-// import { dirname } from 'path';
-
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = dirname(__filename);
-
-// const distDir = path.join(__dirname, "..", "client");
-// app.use(express.static(distDir));
-// app.get("/{*any}", (_, res) => res.sendFile(path.join(distDir, "index.html")));
-
-// const PORT = process.env.PORT || 8080;
-// app.listen(PORT, () => console.log(`listening on http://localhost:${PORT}`));
-
-// ── 4) WebSocket namespace (re-uses same Neo4j driver)
-// io.of("/neo4j").use(async (socket, next) => {
-//   // Simple cookie auth guard
-//   const headers = new Headers([["cookie", socket.request.headers.cookie ?? ""]]);
-//   const s = await auth.api.getSession({ headers });
-//   if (!s) return next(new Error("unauthenticated"));
-//   socket.data.user = s.user;
-//   next();
-// });
-
-// io.of("/neo4j").on("connection", (socket) => {
-//   socket.on("cypher", async (query: string, ack) => {
-//     try {
-//     //   const neo = driver.session();
-//       const res = await wrapper.query(query);
-//     //   await neo.close();
-//       ack(null, res);
-//     } catch (e) {
-//       ack(e);
-//     }
-//   });
-// });
 
 http.listen(port, () => console.log(`API + WS listening on :${port}`));

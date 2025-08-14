@@ -33,6 +33,7 @@ npm-debug.log
 yarn-error.log
 testem.log
 /typings
+sqlite.db
 
 # System Files
 .DS_Store

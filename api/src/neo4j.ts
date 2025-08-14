@@ -4,19 +4,7 @@ import { z } from "zod";
 import { ResAll, UpdateData } from "@my-repo/shared-types";
 import { testDataCypher } from "./testDataCypher";
 
-// export const config = {
-//     url: NEO4JINFO.url, // URL for the Neo4j instance
-//     username: NEO4JINFO.username, // Username for Neo4j authentication
-//     password: NEO4JINFO.password, // Password for Neo4j authentication
-//     indexName: "vector", // Name of the vector index
-//     keywordIndexName: "keyword", // Name of the keyword index if using hybrid search
-//     searchType: "vector" as const, // Type of search (e.g., vector, hybrid)
-//     nodeLabel: "Chunk", // Label for the nodes in the graph
-//     textNodeProperty: "text", // Property of the node containing text
-//     embeddingNodeProperty: "embedding", // Property of the node containing embedding
-// };
-
-interface Neo4jGraphConfig {
+export interface Neo4jGraphConfig {
     url: string;
     username: string;
     password: string;
@@ -108,25 +96,3 @@ export class Neo4jWrapper {
         return await this.graph.close();
     }
 }
-
-
-// export async function testQuery() {
-//     const exampleQuery = `match (v)-[r]-(u {label:"ARDF"}) return v,r,u`;
-//     console.log("begin Neo4jGraph.initialize(config)");
-//     const graph = await Neo4jGraph.initialize(config);
-//     console.log(`begin graph.query: ${exampleQuery}`);
-//     const res = await graph.query(exampleQuery);
-//     return res;
-// }
-
-// export async function testOpenAIChain() {
-//     const model = new OpenAI({ temperature: 0 });
-//     const graph = await Neo4jGraph.initialize(config);
-//     await graph.refreshSchema();
-//     const chain = GraphCypherQAChain.fromLLM({ llm: model, graph });
-//     // console.log(graph.getSchema());
-//     return graph.getSchema();
-//     // const res = await chain.invoke({
-//     //     query: "What was the cast of the Casino?",
-//     // });
-// }

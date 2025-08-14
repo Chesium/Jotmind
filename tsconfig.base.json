@@ -10,14 +10,22 @@
     "importHelpers": true,
     "target": "es2015",
     "module": "esnext",
-    "lib": ["es2020", "dom"],
+    "lib": [
+      "es2020",
+      "dom"
+    ],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@my-repo/shared-config": ["shared-config/src/index.ts"],
-      "@my-repo/shared-types": ["shared-types/src/index.ts"]
-    }
+      "@my-repo/shared-types": [
+        "shared-types/src/index.ts"
+      ]
+    },
+    "esModuleInterop": true,
   },
-  "exclude": ["node_modules", "tmp"]
+  "exclude": [
+    "node_modules",
+    "tmp"
+  ]
 }

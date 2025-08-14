@@ -30,7 +30,7 @@ async function newNeo4jDB(name: string) {
 const host = process.env.HOST;
 const FRONTEND = `${host}:${process.env.DEV_WEB_PORT}`;
 
-function normalizeUsername(username: string): string {
+export function normalizeUsername(username: string): string {
   return username
     .toLowerCase()               // 转换成小写
     .replace(/[^a-z0-9]+/g, "-")  // 非字母数字替换为 dash
