@@ -8,6 +8,13 @@
       "when": 1781354031302,
       "tag": "0000_ordinary_venom",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781354745360,
+      "tag": "0001_colorful_vampiro",
+      "breakpoints": true
     }
   ]
 }

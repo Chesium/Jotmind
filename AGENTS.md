@@ -48,6 +48,28 @@
   `apps/api/src/db/db.integration.test.ts`) so default `pnpm test:api` stays green; run them with
   `DATABASE_URL=... pnpm --filter @jotmind/api test` against the compose DB.
 
+## Authentication (accounts & sessions)
+
+- Auth lives in `apps/api/src/auth/`. Passwords use **Argon2id** via `@node-rs/argon2`
+  (`password.ts`). NOTE: `Algorithm` is an ambient const enum and cannot be value-imported under
+  `verbatimModuleSyntax` — reference it numerically (`Argon2id === 2`, `2 as Algorithm`).
+- Routes are built by `createAuthRouter({ store })` (`auth/index.ts`) and mounted at `/api/auth` in
+  `createApp`. Endpoints: `GET /setup-status`, `POST /setup` (first-run admin, 409 once any user
+  exists), `POST /login`, `GET /me`, `POST /logout`, `POST /users` (admin-only account creation).
+- **Testability pattern:** route handlers depend on an injectable `AuthStore` interface
+  (`auth/store.ts`). Unit tests pass an in-memory fake (see `auth/auth.test.ts`) so they run with no
+  DB; production uses `dbAuthStore` (lazy `getDb()` per call). `createApp({ authStore })` and
+  `createApp({ checkDatabase })` are the two injection seams — follow this for future DB-backed routes.
+- **Sessions** are PostgreSQL-backed (`sessions` table). Cookie names: `jm_session` (HTTP-only,
+  `Secure` when `COOKIE_SECURE=true` or `NODE_ENV=production`, `SameSite=Lax`) and `jm_csrf`
+  (readable). `cookieParser()` is mounted in `createApp`; read cookies via `req.cookies`.
+- **CSRF** uses the synchronizer-token pattern: compare the `x-csrf-token` header against
+  `session.csrfToken` (constant-time). Apply `requireCsrf` to all cookie-authenticated mutations.
+- `req.auth` (`{ user, session }`) is attached by `requireAuth` via a global Express `Request`
+  augmentation in `auth/index.ts`.
+- DB-backed auth integration test (`auth/auth.integration.test.ts`) uses
+  `describe.skipIf(!DATABASE_URL)` and TRUNCATEs `sessions, users` before/after.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

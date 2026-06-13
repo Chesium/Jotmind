@@ -83,6 +83,23 @@ and stays `ok` (useful for unit tests and AI-disabled local runs).
 API integration tests that need a live database (migrations + extension checks) run only when
 `DATABASE_URL` is set; otherwise they are skipped so the default `pnpm test:api` stays green.
 
+## Authentication & accounts
+
+JotMind uses **local/server accounts** — no mandatory cloud account.
+
+- **First-run setup:** when no users exist, the web app shows a setup screen that creates the
+  initial **admin** account. `GET /api/auth/setup-status` reports whether setup is still required;
+  `POST /api/auth/setup` is rejected once any account exists.
+- **Passwords** are hashed with **Argon2id** (via `@node-rs/argon2`); plaintext is never stored.
+- **Sessions** are server-side and **PostgreSQL-backed** (`sessions` table). The session token lives
+  in a `jm_session` **HTTP-only** cookie (`Secure` in production / when `COOKIE_SECURE=true`,
+  `SameSite=Lax`).
+- **CSRF:** cookie-authenticated mutations require a synchronizer token. Each session has a
+  `csrfToken` exposed via the readable `jm_csrf` cookie and the login/setup/`/me` responses; clients
+  must echo it in the `x-csrf-token` header on `POST/PUT/PATCH/DELETE`.
+- **Account creation is admin-controlled** after first-run setup: only `admin` accounts may call
+  `POST /api/auth/users`.
+
 ## Data & privacy
 
 Canonical data lives in **PostgreSQL**, persisted in the `jotmind-db` Docker volume. **Back up that

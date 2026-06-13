@@ -1,4 +1,5 @@
 import express, { type Express } from 'express';
+import cookieParser from 'cookie-parser';
 import {
   healthStatusSchema,
   parseOrThrow,
@@ -6,6 +7,7 @@ import {
   type HealthStatus,
 } from '@jotmind/schemas';
 import { checkDatabaseHealth, isDatabaseHealthy } from './db/health.js';
+import { createAuthRouter, type AuthStore } from './auth/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -16,12 +18,20 @@ export interface AppOptions {
    * result without a live PostgreSQL connection. Defaults to the real probe.
    */
   checkDatabase?: () => Promise<DatabaseHealth>;
+  /**
+   * Account/session store. Injectable so unit tests can use an in-memory
+   * implementation. Defaults to the PostgreSQL-backed store.
+   */
+  authStore?: AuthStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
   const { checkDatabase = checkDatabaseHealth } = options;
   const app = express();
   app.use(express.json());
+  app.use(cookieParser());
+
+  app.use('/api/auth', createAuthRouter({ store: options.authStore }));
 
   app.get('/api/health', (_req, res, next) => {
     void (async () => {
