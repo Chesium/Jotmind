@@ -202,6 +202,37 @@ origin (exactly one of note/source), entity not-self-merge, status enums.
   `*.integration.test.ts` uses `skipIf(!DATABASE_URL)` and TRUNCATEs
   `jobs, knowledge_bases, users`.
 
+## Entities (manual create/edit, US-008)
+
+- Entity CRUD lives in `apps/api/src/entities/`: `store.ts` (`EntityStore`
+  interface + `dbEntityStore`) and `index.ts` (`createEntityRouter`). Mounted at
+  **`/api/knowledge-bases/:kbId/entities`** with `Router({ mergeParams: true })`
+  so the parent `:kbId` is visible. `createApp` seam is `entityStore`.
+- Mount order: the entity router is registered AFTER the KB router. The KB router
+  (`/api/knowledge-bases`) has no `/:id/entities` route, so it falls through to
+  the more specific entities mount — keep this ordering when adding nested KB
+  routers.
+- **Role gating mirrors the KB router**: reads (`GET /`, `GET /:entityId`)
+  require `viewer`; mutations (`POST /`, `PATCH /:entityId`) require `editor`
+  (so viewers are read-only) + `requireCsrf`. The router's local `requireKbRole`
+  calls `kbStore.getRole(kbId, userId)` and returns **404 for non-members**
+  (hides existence), 403 for insufficient role.
+- **Entity writes emit audit + graph outbox events in the SAME transaction** as
+  the canonical `entities` row (`dbEntityStore.createEntity`/`updateEntity`):
+  `enqueueGraphOutbox(tx, …)` + an `audit_events` insert (`entity.created`/
+  `entity.updated`). This is the pattern for all US-009+ canonical graph writes —
+  note `dbGraphWriteStore` (graph/store.ts) does outbox but NOT audit; entity/
+  claim writes need both. Reads filter `deleted_at IS NULL`.
+- Shared entity Zod shapes are in `@jotmind/schemas` (`graph.ts`): `entitySchema`,
+  `entityListSchema`, `createEntitySchema` (type+name required), `updateEntitySchema`
+  (all-optional, `.refine` requires ≥1 field, nullable `description`). Built-in
+  types: `BUILTIN_ENTITY_TYPES`.
+- Web: `apps/web/src/api.ts` (`listEntities`/`createEntity`/`updateEntity`) +
+  the `<Entities>` component in `App.tsx` (rendered when a KB is selected; uses
+  `kbRoleSatisfies(kb.role, 'editor')` to show the form vs a read-only notice).
+  Custom properties are entered as a JSON object string; aliases/tags are
+  comma-separated inputs.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

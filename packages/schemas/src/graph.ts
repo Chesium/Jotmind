@@ -71,6 +71,64 @@ export const graphProjectionStatusSchema = z.object({
 export type GraphProjectionStatus = z.infer<typeof graphProjectionStatusSchema>;
 
 // ---------------------------------------------------------------------------
+// Entity shapes (US-008)
+//
+// Entities are typed graph nodes. Editors can create the built-in types and
+// edit name/aliases/description/tags/custom properties; viewers are read-only
+// (enforced by KB role middleware on the API). `properties` is free-form JSONB
+// until a custom schema (US-027) constrains it via `validateCustomProperties`.
+// ---------------------------------------------------------------------------
+
+/** Public shape of an entity as returned by the API. */
+export const entitySchema = z.object({
+  id: z.string().uuid(),
+  knowledgeBaseId: z.string().uuid(),
+  type: z.string(),
+  name: z.string(),
+  aliases: z.array(z.string()),
+  description: z.string().nullable(),
+  tags: z.array(z.string()),
+  properties: z.record(z.unknown()),
+  schemaVersionId: z.string().uuid().nullable(),
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type Entity = z.infer<typeof entitySchema>;
+
+/** A list of entities (as returned by `GET .../entities`). */
+export const entityListSchema = z.array(entitySchema);
+
+const aliasListSchema = z.array(z.string().trim().min(1).max(500));
+const tagListSchema = z.array(z.string().trim().min(1).max(200));
+
+/** Payload to create an entity. `type` and `name` are required. */
+export const createEntitySchema = z.object({
+  type: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(500),
+  aliases: aliasListSchema.optional(),
+  description: z.string().trim().max(5000).optional(),
+  tags: tagListSchema.optional(),
+  properties: z.record(z.unknown()).optional(),
+});
+export type CreateEntity = z.infer<typeof createEntitySchema>;
+
+/** Payload to edit an entity. All fields optional; at least one is required. */
+export const updateEntitySchema = z
+  .object({
+    type: z.string().trim().min(1).max(200).optional(),
+    name: z.string().trim().min(1).max(500).optional(),
+    aliases: aliasListSchema.optional(),
+    description: z.string().trim().max(5000).nullable().optional(),
+    tags: tagListSchema.optional(),
+    properties: z.record(z.unknown()).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one field is required',
+  });
+export type UpdateEntity = z.infer<typeof updateEntitySchema>;
+
+// ---------------------------------------------------------------------------
 // Custom-property validation hooks (US-005 AC3)
 //
 // Custom properties live in JSONB columns (`entities.properties`,

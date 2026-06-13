@@ -1,10 +1,47 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_ENTITY_TYPES, type PropertySchema, validateCustomProperties } from './graph.js';
+import {
+  BUILTIN_ENTITY_TYPES,
+  createEntitySchema,
+  updateEntitySchema,
+  type PropertySchema,
+  validateCustomProperties,
+} from './graph.js';
 
 describe('graph constants', () => {
   it('exposes the built-in entity types', () => {
     expect(BUILTIN_ENTITY_TYPES).toContain('Person');
     expect(BUILTIN_ENTITY_TYPES).toContain('Character');
+  });
+});
+
+describe('createEntitySchema', () => {
+  it('requires type and name', () => {
+    expect(createEntitySchema.safeParse({ type: 'Person' }).success).toBe(false);
+    expect(createEntitySchema.safeParse({ name: 'Ada' }).success).toBe(false);
+    expect(createEntitySchema.safeParse({ type: '', name: 'Ada' }).success).toBe(false);
+  });
+
+  it('accepts a full payload and trims strings', () => {
+    const parsed = createEntitySchema.parse({
+      type: 'Person',
+      name: '  Ada  ',
+      aliases: ['Ada Lovelace'],
+      tags: ['pioneer'],
+      properties: { born: 1815 },
+    });
+    expect(parsed.name).toBe('Ada');
+    expect(parsed.aliases).toEqual(['Ada Lovelace']);
+  });
+});
+
+describe('updateEntitySchema', () => {
+  it('rejects an empty payload', () => {
+    expect(updateEntitySchema.safeParse({}).success).toBe(false);
+  });
+
+  it('allows partial updates including null description', () => {
+    expect(updateEntitySchema.safeParse({ name: 'Tail recursion' }).success).toBe(true);
+    expect(updateEntitySchema.safeParse({ description: null }).success).toBe(true);
   });
 });
 

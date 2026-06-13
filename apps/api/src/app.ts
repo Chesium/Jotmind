@@ -10,6 +10,7 @@ import { checkDatabaseHealth, isDatabaseHealthy } from './db/health.js';
 import { createAuthRouter } from './auth/index.js';
 import { dbAuthStore, type AuthStore } from './auth/store.js';
 import { createKnowledgeBaseRouter, type KnowledgeBaseStore } from './kb/index.js';
+import { createEntityRouter, type EntityStore } from './entities/index.js';
 import {
   createGraphRouter,
   stubProjector,
@@ -41,6 +42,11 @@ export interface AppOptions {
    * implementation. Defaults to the PostgreSQL-backed store.
    */
   kbStore?: KnowledgeBaseStore;
+  /**
+   * Entity store (US-008). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  entityStore?: EntityStore;
   /**
    * Graph projection store. Injectable for unit tests. Defaults to the
    * PostgreSQL-backed store.
@@ -76,6 +82,10 @@ export function createApp(options: AppOptions = {}): Express {
 
   app.use('/api/auth', createAuthRouter({ store: authStore }));
   app.use('/api/knowledge-bases', createKnowledgeBaseRouter({ store: options.kbStore, authStore }));
+  app.use(
+    '/api/knowledge-bases/:kbId/entities',
+    createEntityRouter({ store: options.entityStore, kbStore: options.kbStore, authStore }),
+  );
   app.use(
     '/api/graph',
     createGraphRouter({ authStore, projectionStore: options.projectionStore, projector }),

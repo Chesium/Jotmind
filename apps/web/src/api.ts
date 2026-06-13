@@ -1,14 +1,19 @@
 import {
   authStateSchema,
+  entityListSchema,
+  entitySchema,
   knowledgeBaseListSchema,
   knowledgeBaseSchema,
   publicUserSchema,
   setupStatusSchema,
   type AccountRole,
   type AuthState,
+  type CreateEntity,
+  type Entity,
   type KnowledgeBase,
   type PublicUser,
   type SetupStatus,
+  type UpdateEntity,
 } from '@jotmind/schemas';
 
 async function errorMessage(res: Response): Promise<string> {
@@ -100,4 +105,46 @@ export async function createKnowledgeBase(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return knowledgeBaseSchema.parse(await res.json());
+}
+
+/** List entities in a Knowledge Base. */
+export async function listEntities(knowledgeBaseId: string): Promise<Entity[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return entityListSchema.parse(await res.json());
+}
+
+/** Create an entity in a Knowledge Base (editor+). */
+export async function createEntity(
+  knowledgeBaseId: string,
+  input: CreateEntity,
+  csrfToken: string,
+): Promise<Entity> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return entitySchema.parse(await res.json());
+}
+
+/** Edit an entity in a Knowledge Base (editor+). */
+export async function updateEntity(
+  knowledgeBaseId: string,
+  entityId: string,
+  input: UpdateEntity,
+  csrfToken: string,
+): Promise<Entity> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return entitySchema.parse(await res.json());
 }
