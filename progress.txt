@@ -112,3 +112,23 @@ Thread: https://ampcode.com/threads/T-019ec117-7377-754f-9fc8-eb19f5e01f67
   - drizzle check()/uniqueIndex().where()/index() are available in drizzle-orm 0.36; partial unique indexes use `.where(sql\`deleted_at IS NULL\`)`.
   - schema_version_id is nullable on entities/claims so US-008/009 (manual entity/claim CRUD) can run before US-027 (custom schemas). US-006 (next) wires graph_outbox events into the same tx as entity/claim/note/source writes + adds the projector seam.
 ---
+
+## Sat 13 Jun 2026 21:30 +08 - US-006
+Thread: https://ampcode.com/threads/T-019ec123-5e2b-719a-99eb-e5eb2a0cb7d4
+- Implemented the graph outbox + projection seam so AGE can stay a derived projection.
+- apps/api/src/graph/outbox.ts: enqueueGraphOutbox(tx, events) helper (accepts a tx via DbExecutor type so the graph_outbox insert is in the SAME transaction as the canonical write) + outboxEventType("<target>.<event>").
+- apps/api/src/graph/store.ts: GraphWriteStore interface + dbGraphWriteStore. createEntity/createNote/createSource/createClaim each write canonical row(s) + matching graph_outbox event in one transaction; createClaim also writes claim_arguments in-tx. This is the write seam US-008/009/011 will build on.
+- apps/api/src/graph/projector.ts: Projector interface {name, stubbed, project(event)}; stubProjector (logs, stubbed:true, NO AGE writes yet); ProjectionStore interface + dbProjectionStore; processOutbox() drains pending events ordered by (created_at, id) with FOR UPDATE SKIP LOCKED and marks each processed/failed (+attempts/last_error); rebuildProjection() repairs by reprojecting all non-deleted canonical records straight from relational tables (bypasses outbox); getProjectionStatus() returns {projector{name,stubbed}, counts{pending,processed,failed}}.
+- apps/api/src/graph/index.ts: createGraphRouter mounted at /api/graph in createApp. GET /projection/status (any authed user), POST /projection/process + POST /projection/rebuild (system admin only + requireCsrf).
+- Stubbed state visible (AC3): createApp logs the stub notice ONCE per process (module flag in app.ts to avoid flooding test output) and /api/graph/projection/status exposes stubbed:true.
+- requireAdmin now EXPORTED from auth/index.ts (was private) for reuse by graph maintenance routes. createApp seams now {checkDatabase, authStore, kbStore, projectionStore, projector}.
+- packages/schemas/src/graph.ts: added GRAPH_TARGET_TYPES (entity/claim/note/source), GRAPH_EVENT_TYPES (created/updated/deleted), and graphProjectionStatusSchema.
+- Files changed: packages/schemas/src/graph.ts; apps/api/src/graph/{outbox,store,projector,index,graph.test,graph.integration.test}.ts; apps/api/src/auth/index.ts (export requireAdmin); apps/api/src/app.ts (mount /api/graph + once-per-process stub log + seams); AGENTS.md; prd.json; progress.txt.
+- Tests: 11 graph unit (in-memory store + recording projector: outbox helper, processOutbox success/fail/no-reprocess, rebuild, status, API auth/non-admin-403/csrf-403/admin-drain) + 5 graph integration (skipIf no DATABASE_URL: same-tx outbox event for entity/note/source/claim, tx ROLLBACK leaves no outbox/claim when a check constraint fails, processOutbox with stub, rebuild count, soft-deleted excluded from rebuild).
+- Verified: pnpm verify fully green; brought up compose DB, db:migrate, ran all 52 api tests incl the 5 graph integration tests -> pass. Tore down DB.
+- **Learnings for future iterations:**
+  - See new AGENTS.md "Graph outbox & projection seam (US-006)" section. KEY: never write a canonical graph row (entity/claim/note/source) without enqueuing the matching graph_outbox event in the SAME transaction — always go through dbGraphWriteStore (or call enqueueGraphOutbox(tx, ...) inside your own tx). Mirror this for future graph writes (updates/deletes use eventType 'updated'/'deleted').
+  - The projector is STUBBED (stubProjector, stubbed:true). The real Apache AGE projector replaces it later: implement Projector.project to write AGE, set stubbed:false, and swap the default in createApp. processOutbox/rebuildProjection already handle batching/marking/repair — only project() changes.
+  - DbExecutor type in outbox.ts = Database | tx param; lets helpers run under getDb() OR a tx. Reuse for other in-transaction helpers.
+  - US-007 (next) adds the PostgreSQL-backed jobs foundation (jobs table already exists from US-005: status/attempts/max_attempts/run_after/failure_reason/owner_user_id). Follow the same injectable-store + claim-with-SKIP-LOCKED pattern used here for processOutbox.
+---

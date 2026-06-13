@@ -39,6 +39,37 @@ export const OUTBOX_STATUSES = ['pending', 'processed', 'failed'] as const;
 export const outboxStatusSchema = z.enum(OUTBOX_STATUSES);
 export type OutboxStatus = z.infer<typeof outboxStatusSchema>;
 
+/**
+ * Canonical graph record kinds whose writes emit `graph_outbox` events and are
+ * projected into Apache AGE (US-006). Notes and Sources are canonical records,
+ * not entity rows, so they project as their own node kinds.
+ */
+export const GRAPH_TARGET_TYPES = ['entity', 'claim', 'note', 'source'] as const;
+export const graphTargetTypeSchema = z.enum(GRAPH_TARGET_TYPES);
+export type GraphTargetType = (typeof GRAPH_TARGET_TYPES)[number];
+
+/** Kinds of outbox event emitted by canonical writes (US-006). */
+export const GRAPH_EVENT_TYPES = ['created', 'updated', 'deleted'] as const;
+export const graphEventTypeSchema = z.enum(GRAPH_EVENT_TYPES);
+export type GraphEventType = (typeof GRAPH_EVENT_TYPES)[number];
+
+/**
+ * Status of the graph projection pipeline (US-006). Exposed by the API so the
+ * stub projector is visible as `stubbed: true` and outbox backlog is observable.
+ */
+export const graphProjectionStatusSchema = z.object({
+  projector: z.object({
+    name: z.string(),
+    stubbed: z.boolean(),
+  }),
+  counts: z.object({
+    pending: z.number().int().nonnegative(),
+    processed: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+  }),
+});
+export type GraphProjectionStatus = z.infer<typeof graphProjectionStatusSchema>;
+
 // ---------------------------------------------------------------------------
 // Custom-property validation hooks (US-005 AC3)
 //

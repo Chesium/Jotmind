@@ -150,7 +150,8 @@ export function requireCsrf(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+/** Require the authenticated account to have the system `admin` role. */
+export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   if (req.auth?.user.role !== 'admin') {
     res.status(403).json({ error: 'Admin privileges required' });
     return;

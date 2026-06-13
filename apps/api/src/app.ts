@@ -10,9 +10,19 @@ import { checkDatabaseHealth, isDatabaseHealthy } from './db/health.js';
 import { createAuthRouter } from './auth/index.js';
 import { dbAuthStore, type AuthStore } from './auth/store.js';
 import { createKnowledgeBaseRouter, type KnowledgeBaseStore } from './kb/index.js';
+import {
+  createGraphRouter,
+  stubProjector,
+  type Projector,
+  type ProjectionStore,
+} from './graph/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
+
+// Log the stubbed-projection notice once per process (US-006 AC3) rather than
+// on every createApp call, which would flood test output.
+let loggedStubProjector = false;
 
 export interface AppOptions {
   /**
@@ -30,17 +40,40 @@ export interface AppOptions {
    * implementation. Defaults to the PostgreSQL-backed store.
    */
   kbStore?: KnowledgeBaseStore;
+  /**
+   * Graph projection store. Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  projectionStore?: ProjectionStore;
+  /**
+   * Graph projector. Defaults to the stub projector (US-006), which logs but
+   * does not yet write to Apache AGE.
+   */
+  projector?: Projector;
 }
 
 export function createApp(options: AppOptions = {}): Express {
   const { checkDatabase = checkDatabaseHealth } = options;
   const authStore = options.authStore ?? dbAuthStore;
+  const projector = options.projector ?? stubProjector;
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
 
+  if (projector.stubbed && !loggedStubProjector) {
+    // Make the stubbed projection state visible in logs (US-006 AC3).
+    loggedStubProjector = true;
+    console.log(
+      `[graph-projector:${projector.name}] STUB active — graph_outbox events are consumed but NOT projected to Apache AGE yet`,
+    );
+  }
+
   app.use('/api/auth', createAuthRouter({ store: authStore }));
   app.use('/api/knowledge-bases', createKnowledgeBaseRouter({ store: options.kbStore, authStore }));
+  app.use(
+    '/api/graph',
+    createGraphRouter({ authStore, projectionStore: options.projectionStore, projector }),
+  );
 
   app.get('/api/health', (_req, res, next) => {
     void (async () => {

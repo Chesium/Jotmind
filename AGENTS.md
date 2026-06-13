@@ -140,6 +140,36 @@ origin (exactly one of note/source), entity not-self-merge, status enums.
 - New `*.integration.test.ts` files must TRUNCATE the tables they touch in
   before/after and rely on `fileParallelism:false` (see `vitest.config.ts`).
 
+## Graph outbox & projection seam (US-006)
+
+- Apache AGE is a **derived projection**; the relational tables are canonical.
+  All entity/claim/note/source writes go through `apps/api/src/graph/store.ts`
+  (`dbGraphWriteStore`): each `create*` writes the canonical row(s) **and** a
+  `graph_outbox` event in the **same transaction** via `enqueueGraphOutbox(tx,
+…)` (`graph/outbox.ts`). US-008/009/011 build their create flows on this store —
+  do NOT write canonical graph rows without enqueuing the matching outbox event in
+  the same tx. Outbox `event_type` is `"<targetType>.<eventType>"` (e.g.
+  `entity.created`); use `outboxEventType()`.
+- The projection pipeline lives in `graph/projector.ts`: a `Projector` interface
+  (`name`, `stubbed`, `project(event)`), the default `stubProjector` (logs, does
+  NOT write to AGE yet), `processOutbox()` (drains pending events in
+  `(created_at, id)` order — UUIDv7 is sortable but not a strict sequence —
+  marking each `processed`/`failed`), `rebuildProjection()` (repair: reprojects
+  every non-deleted canonical record straight from the relational tables,
+  bypassing the outbox), and `getProjectionStatus()`. Both `processOutbox` and
+  `rebuildProjection` default to `dbProjectionStore` + `stubProjector`; inject a
+  fake `ProjectionStore`/`Projector` for unit tests.
+- The stubbed state must stay visible: `createApp` logs the stub notice **once
+  per process** (guarded by a module flag in `app.ts` so tests aren't flooded)
+  and `GET /api/graph/projection/status` returns `projector.stubbed`. When you
+  add the real AGE projector, set `stubbed: false` and replace `stubProjector`
+  in `createApp`'s default.
+- Routes (`graph/index.ts`, mounted at `/api/graph` in `createApp`):
+  `GET /projection/status` (any authed user), `POST /projection/process` and
+  `POST /projection/rebuild` (system **admin** only + `requireCsrf`). `requireAdmin`
+  is now exported from `auth/index.ts` for reuse. `createApp` seams are now
+  `{ checkDatabase, authStore, kbStore, projectionStore, projector }`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).
