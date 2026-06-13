@@ -70,6 +70,34 @@
 - DB-backed auth integration test (`auth/auth.integration.test.ts`) uses
   `describe.skipIf(!DATABASE_URL)` and TRUNCATEs `sessions, users` before/after.
 
+## Knowledge Bases, roles & audit (US-004)
+
+- Knowledge Bases are the top-level graph scope. Tables (`apps/api/src/db/schema.ts`):
+  `knowledge_bases`, `knowledge_base_members` (composite PK `(knowledge_base_id, user_id)`,
+  `role` text), and the append-only `audit_events` (nullable `knowledge_base_id`/`actor_user_id`,
+  `action`, `target_type`, `target_id`, JSONB `metadata`). Later graph tables (US-005) carry
+  `knowledge_base_id`.
+- **KB roles are separate from system account roles.** System roles (`admin`/`member`, in
+  `auth.ts`) gate server account creation; KB roles (`owner > admin > editor > viewer`, in
+  `packages/schemas/src/knowledge-base.ts`) gate per-KB access. A `member` account can `own` a KB.
+  Use `kbRoleSatisfies(role, required)` / `KB_ROLE_RANK` for "at least role X" checks.
+- Routes: `createKnowledgeBaseRouter({ store, authStore })` mounted at `/api/knowledge-bases`
+  (`apps/api/src/kb/index.ts`). `GET /` (list own), `POST /` (create → creator becomes owner),
+  `GET /:id` (viewer+), `GET /:id/members` + `POST /:id/members` (admin+), `GET /:id/audit`
+  (admin+). `requireKbRole(min)` loads the caller's membership for `:id` and returns **404** for
+  non-members (hides existence) and 403 for insufficient role.
+- Reuse the shared auth middleware exported from `auth/index.ts`: `requireAuth(authStore)`,
+  `requireCsrf`, `asyncHandler`. All cookie-auth mutations need `requireCsrf`.
+- Audit + membership writes happen in the **same DB transaction** as the canonical write (see
+  `dbKnowledgeBaseStore.createKnowledgeBase`/`assignRole`). Record an `audit_events` row for every
+  security-relevant mutation. Mirror this for US-005+ graph writes.
+- `createApp` resolves `authStore` once and passes it to both the auth and KB routers; injection
+  seams are now `{ checkDatabase, authStore, kbStore }`. Each DB-backed domain follows the
+  injectable-store pattern (interface + `db<Domain>Store` + in-memory fake in tests).
+- **DB integration tests share one database and TRUNCATE the same tables.** `apps/api` has a
+  `vitest.config.ts` setting `fileParallelism: false` so parallel test files don't wipe each
+  other's fixtures (FK violations). Keep it when adding more `*.integration.test.ts` files.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

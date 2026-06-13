@@ -15,6 +15,13 @@
       "when": 1781354745360,
       "tag": "0001_colorful_vampiro",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781355479121,
+      "tag": "0002_rare_maddog",
+      "breakpoints": true
     }
   ]
 }

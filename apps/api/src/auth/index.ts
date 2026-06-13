@@ -61,7 +61,7 @@ function toPublicUser(row: UserRow): PublicUser {
 }
 
 /** Wrap an async handler so rejected promises reach Express error handling. */
-function asyncHandler(
+export function asyncHandler(
   fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>,
 ): RequestHandler {
   return (req, res, next) => {
@@ -127,7 +127,7 @@ async function authenticate(store: AuthStore, req: Request): Promise<AuthContext
   return { user, session };
 }
 
-function requireAuth(store: AuthStore): RequestHandler {
+export function requireAuth(store: AuthStore): RequestHandler {
   return asyncHandler(async (req, res, next) => {
     const ctx = await authenticate(store, req);
     if (!ctx) {
@@ -140,7 +140,7 @@ function requireAuth(store: AuthStore): RequestHandler {
 }
 
 /** CSRF guard for cookie-authenticated mutations (synchronizer-token check). */
-function requireCsrf(req: Request, res: Response, next: NextFunction): void {
+export function requireCsrf(req: Request, res: Response, next: NextFunction): void {
   const header = req.header('x-csrf-token');
   const expected = req.auth?.session.csrfToken;
   if (!header || !expected || !safeEqual(header, expected)) {

@@ -68,8 +68,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Knowledge Base scope + KB roles. DB (apps/api/src/db/schema.ts): knowledge_bases (uuid pk, name, description, created_by FK users), knowledge_base_members (composite PK (kb_id,user_id), role text), audit_events (nullable kb_id/actor_user_id, action, target_type/id, JSONB metadata). Migration drizzle/0002. Shared schemas packages/schemas/src/knowledge-base.ts: KB_ROLES owner>admin>editor>viewer, kbRoleSatisfies/KB_ROLE_RANK, create/list/member/assign/audit Zod schemas (separate from system account role admin|member). Routes apps/api/src/kb/index.ts createKnowledgeBaseRouter({store,authStore}) at /api/knowledge-bases: GET / (list own), POST / (create->creator owner, CSRF), GET /:id (viewer+), GET+POST /:id/members (admin+, CSRF on POST), GET /:id/audit (admin+). requireKbRole(min) middleware loads membership for :id, 404 for non-members (hides existence) + 403 insufficient role. Reuses exported auth middleware requireAuth/requireCsrf/asyncHandler. dbKnowledgeBaseStore writes audit + membership in same tx as canonical write (creation records knowledge_base.created + role_assigned owner; assignRole upserts + records role_assigned). createApp seams now {checkDatabase,authStore,kbStore}. Web: api.ts listKnowledgeBases/createKnowledgeBase + App.tsx KnowledgeBases section (list w/ role, select, create form). Tests: 9 kb unit (in-memory store) + 1 kb integration (skipIf no DATABASE_URL) + 3 schema unit + web list test. Added apps/api/vitest.config.ts fileParallelism:false (shared-DB integration files TRUNCATE same tables). Verified: pnpm verify green; live DB migrate+integration pass; Playwright browser flow (setup->create KB->owner+selected) + screenshot confirmed (dev-browser unavailable, used Playwright+Chromium)."
     },
     {
       "id": "US-005",

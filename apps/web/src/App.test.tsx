@@ -67,6 +67,7 @@ describe('App', () => {
           },
         };
       }
+      if (url.includes('/api/knowledge-bases')) return { body: [] };
       return { status: 404 };
     });
     render(<App />);
@@ -74,5 +75,43 @@ describe('App', () => {
       expect(screen.getByTestId('current-user')).toHaveTextContent('admin@example.com');
     });
     expect(screen.getByRole('heading', { name: 'Create account' })).toBeInTheDocument();
+  });
+
+  it('lists Knowledge Bases for the authenticated user', async () => {
+    mockFetch((url) => {
+      if (url.includes('/api/auth/me')) {
+        return {
+          body: {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'admin@example.com',
+              role: 'admin',
+              createdAt: new Date().toISOString(),
+            },
+            csrfToken: 'tok',
+          },
+        };
+      }
+      if (url.includes('/api/knowledge-bases')) {
+        return {
+          body: [
+            {
+              id: '00000000-0000-0000-0000-0000000000aa',
+              name: 'My KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'owner',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        };
+      }
+      return { status: 404 };
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('kb-list')).toHaveTextContent('My KB (owner)');
+    });
   });
 });

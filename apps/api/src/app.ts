@@ -7,7 +7,9 @@ import {
   type HealthStatus,
 } from '@jotmind/schemas';
 import { checkDatabaseHealth, isDatabaseHealthy } from './db/health.js';
-import { createAuthRouter, type AuthStore } from './auth/index.js';
+import { createAuthRouter } from './auth/index.js';
+import { dbAuthStore, type AuthStore } from './auth/store.js';
+import { createKnowledgeBaseRouter, type KnowledgeBaseStore } from './kb/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -23,15 +25,22 @@ export interface AppOptions {
    * implementation. Defaults to the PostgreSQL-backed store.
    */
   authStore?: AuthStore;
+  /**
+   * Knowledge Base store. Injectable so unit tests can use an in-memory
+   * implementation. Defaults to the PostgreSQL-backed store.
+   */
+  kbStore?: KnowledgeBaseStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
   const { checkDatabase = checkDatabaseHealth } = options;
+  const authStore = options.authStore ?? dbAuthStore;
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
 
-  app.use('/api/auth', createAuthRouter({ store: options.authStore }));
+  app.use('/api/auth', createAuthRouter({ store: authStore }));
+  app.use('/api/knowledge-bases', createKnowledgeBaseRouter({ store: options.kbStore, authStore }));
 
   app.get('/api/health', (_req, res, next) => {
     void (async () => {

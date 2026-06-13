@@ -1,6 +1,15 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import type { AccountRole, AuthState } from '@jotmind/schemas';
-import { createAccount, getMe, getSetupStatus, login, logout, setupAdmin } from './api.js';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import type { AccountRole, AuthState, KnowledgeBase } from '@jotmind/schemas';
+import {
+  createAccount,
+  createKnowledgeBase,
+  getMe,
+  getSetupStatus,
+  listKnowledgeBases,
+  login,
+  logout,
+  setupAdmin,
+} from './api.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -169,8 +178,100 @@ function AuthedHome({ auth, onLogout }: { auth: AuthState; onLogout: () => void 
       <button type="button" onClick={() => void doLogout()} data-testid="logout">
         Sign out
       </button>
+      <KnowledgeBases csrfToken={auth.csrfToken} />
       {auth.user.role === 'admin' && <AccountCreator csrfToken={auth.csrfToken} />}
       {error && <p data-testid="logout-error">{error}</p>}
+    </section>
+  );
+}
+
+function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
+  const [items, setItems] = useState<KnowledgeBase[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      setItems(await listKnowledgeBases());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load Knowledge Bases');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const kb = await createKnowledgeBase(
+        { name, description: description || undefined },
+        csrfToken,
+      );
+      setName('');
+      setDescription('');
+      setSelectedId(kb.id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create Knowledge Base');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section aria-label="knowledge-bases">
+      <h2>Knowledge Bases</h2>
+      {items.length === 0 ? (
+        <p data-testid="kb-empty">No Knowledge Bases yet. Create one to get started.</p>
+      ) : (
+        <ul data-testid="kb-list">
+          {items.map((kb) => (
+            <li key={kb.id}>
+              <button
+                type="button"
+                aria-pressed={selectedId === kb.id}
+                onClick={() => setSelectedId(kb.id)}
+                data-testid={`kb-select-${kb.id}`}
+              >
+                {kb.name} ({kb.role}){selectedId === kb.id ? ' — selected' : ''}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={submit}>
+        <label>
+          Name
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            data-testid="kb-name"
+          />
+        </label>
+        <label>
+          Description
+          <input
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            data-testid="kb-description"
+          />
+        </label>
+        <button type="submit" disabled={busy} data-testid="kb-create-submit">
+          Create Knowledge Base
+        </button>
+      </form>
+      {error && <p data-testid="kb-error">{error}</p>}
     </section>
   );
 }

@@ -1,9 +1,12 @@
 import {
   authStateSchema,
+  knowledgeBaseListSchema,
+  knowledgeBaseSchema,
   publicUserSchema,
   setupStatusSchema,
   type AccountRole,
   type AuthState,
+  type KnowledgeBase,
   type PublicUser,
   type SetupStatus,
 } from '@jotmind/schemas';
@@ -75,4 +78,26 @@ export async function createAccount(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return publicUserSchema.parse(await res.json());
+}
+
+/** List Knowledge Bases the current user is a member of. */
+export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
+  const res = await fetch('/api/knowledge-bases', { credentials: 'include' });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return knowledgeBaseListSchema.parse(await res.json());
+}
+
+/** Create a Knowledge Base; the current user becomes its owner. */
+export async function createKnowledgeBase(
+  input: { name: string; description?: string },
+  csrfToken: string,
+): Promise<KnowledgeBase> {
+  const res = await fetch('/api/knowledge-bases', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return knowledgeBaseSchema.parse(await res.json());
 }
