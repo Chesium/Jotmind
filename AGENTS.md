@@ -98,6 +98,48 @@
   `vitest.config.ts` setting `fileParallelism: false` so parallel test files don't wipe each
   other's fixtures (FK violations). Keep it when adding more `*.integration.test.ts` files.
 
+## Canonical graph schema (US-005)
+
+- The relational tables in `apps/api/src/db/schema.ts` are the **canonical source
+  of truth** for the graph; Apache AGE is a derived projection fed from
+  `graph_outbox` (US-006). All writes go to the relational tables first.
+- Graph tables: `schema_definitions`, `schema_versions`, `entities`, `claims`,
+  `claim_arguments`, `notes`, `sources`, `source_excerpts`, `rule_definitions`,
+  `proposals`, `jobs`, `graph_outbox` (+ pre-existing `audit_events`). Migration
+  `drizzle/0003_massive_kronos.sql`.
+- **Canonical graph records use UUIDv7 PKs** via the PG18-native `uuidv7()`
+  default (`uuid('id').primaryKey().default(sql\`uuidv7()\`)`), NOT
+`gen_random_uuid()`/`defaultRandom()`(which the older auth/KB tables use).
+UUIDv7 is time-sortable (handy for outbox ordering) but is NOT a strict
+sequence — process outbox by`(created_at, id)` and keep projection idempotent.
+- Every canonical graph record has `knowledge_base_id` (FK, cascade), `created_at`/
+  `updated_at` timestamptz, nullable `deleted_at` (**soft-delete** — all reads
+  must filter `deleted_at IS NULL`; US-024 rule execution injects it), and
+  `created_by` (FK users, set null). JSONB columns (`properties`/`metadata`/
+  `provenance`/`spec`/`changes`/`payload`) default to `'{}'`/`'[]'`.
+- Operational tables (`jobs`, `graph_outbox`) have NO soft-delete.
+- KB-scoping is enforced at the **app layer** (`requireKbRole`); FKs are
+  single-column (mirroring existing tables), not composite same-KB FKs.
+- `entities.schema_version_id` / `claims.schema_version_id` are **nullable** so
+  US-008/009 can create records before custom schemas (US-027) exist; they record
+  the version a record was validated against. `entities.type` / `claims.predicate`
+  are the conceptual string types used for cross-version search (US-028).
+- Claims are multi-argument: `claim_arguments` rows are role-labeled and either an
+  entity ref (`argument_kind='entity'`, `entity_id`) or a literal
+  (`argument_kind='literal'`, `value` JSONB) — enforced by a check constraint. Do
+  NOT reduce claims to binary edges.
+- DB-level **check constraints** added via drizzle `check(name, sql\`...\`)`:
+confidence 0..1, valid_start<=valid_end, span_start<=span_end, source_excerpt
+origin (exactly one of note/source), entity not-self-merge, status enums.
+**Partial unique indexes** (`.where(sql\`deleted_at IS NULL\`)`) let
+  soft-deleted schema definitions / rules be recreated.
+- **Custom-property validation hook** lives in `@jotmind/schemas`
+  (`graph.ts` → `validateCustomProperties(propertySchema, properties)`); run it
+  before writing JSONB `properties`. Built-in entity types + status enums also
+  live there. `schema_versions.property_schema` stores the `PropertySchema`.
+- New `*.integration.test.ts` files must TRUNCATE the tables they touch in
+  before/after and rely on `fileParallelism:false` (see `vitest.config.ts`).
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).
