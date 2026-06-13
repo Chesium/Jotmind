@@ -11,6 +11,9 @@ Started: Sat 13 Jun 2026 08:14:49 PM +08
 - Validation: `pnpm verify:quick` (format:check+typecheck+lint+test) for fast loop, `pnpm verify` for full (adds test:api, test:e2e). `pnpm test` excludes @jotmind/api (run via `pnpm test:api`).
 - Playwright browsers must be installed once: `pnpm --filter @jotmind/web exec playwright install chromium`.
 - Prettier ignores Ralph scaffolding (prd.json, progress.txt, prompt.md, .agents, etc.) via .prettierignore. Add new non-source top-level files there if they break format:check.
+- DB stack = PostgreSQL 18 + Apache AGE 1.7.0 + pgvector 0.8.1 via infra/db/Dockerfile (FROM apache/age:latest, compile pgvector). pgvector MUST be >= v0.8.1 (older fails to build on PG 18). PG 18 docker volume MUST mount at /var/lib/postgresql (NOT /data) or the container exits.
+- ORM = Drizzle (drizzle-orm + postgres-js + drizzle-kit) in apps/api. Schema: apps/api/src/db/schema.ts; generate: `pnpm --filter @jotmind/api db:generate`; apply: `db:migrate`. Commit generated apps/api/drizzle/** (SQL + meta/).
+- DB access gated on DATABASE_URL: when unset, checkDatabaseHealth() -> configured:false and /api/health stays ok. DB-needing tests use describe.skipIf(!process.env.DATABASE_URL) so default test:api is green without infra.
 
 ## Sat 13 Jun 2026 20:25 +08 - US-001
 Thread: https://ampcode.com/threads/T-019ec0ea-b9f7-74a4-8859-43f08d85d8f4
@@ -24,4 +27,22 @@ Thread: https://ampcode.com/threads/T-019ec0ea-b9f7-74a4-8859-43f08d85d8f4
   - See Codebase Patterns above (Node 18 pinning, PATH for pnpm, schemas-resolve-from-source, no TS project references, .js import extensions).
   - The web e2e smoke test runs web-only; /api proxy errors in logs are expected/benign because the API isn't started during `pnpm test:e2e`. Future stories that need real API in e2e should start it (or run via root).
   - US-002 next: PostgreSQL + Apache AGE + pgvector via Docker Compose, Drizzle migrations, and a real DB-backed health check (extend /api/health).
+---
+
+## Sat 13 Jun 2026 20:42 +08 - US-002
+Thread: https://ampcode.com/threads/T-019ec0f2-8f1d-770c-9dea-473056778dea
+- Provisioned the canonical PostgreSQL store with Apache AGE + pgvector and wired DB health into the API.
+- infra/db/Dockerfile: FROM apache/age:latest (PG 18 + AGE 1.7.0) and compiles pgvector v0.8.1. infra/db/init/01-extensions.sql creates both extensions on first volume init.
+- docker-compose.yml (root): `db` service builds the image, binds 127.0.0.1:5432, named volume jotmind-db mounted at /var/lib/postgresql (PG18 convention), healthcheck via pg_isready.
+- apps/api: added drizzle-orm + postgres + drizzle-kit. src/db/schema.ts (minimal app_meta table = initial schema), src/db/client.ts (lazy postgres-js pool + drizzle), src/db/health.ts (checkDatabaseHealth + isDatabaseHealthy), src/db/migrate.ts (creates extensions then runs migrations; CLI-runnable), drizzle.config.ts, drizzle/0000_*.sql + meta/. Scripts: db:generate, db:migrate.
+- /api/health (apps/api/src/app.ts) now reports {database:{configured,connected,extensions:{age,vector},error?}}; status degraded if configured but unreachable/missing ext, ok otherwise. createApp accepts injectable checkDatabase for unit tests.
+- packages/schemas/src/health.ts: added databaseExtensionsSchema + databaseHealthSchema; healthStatusSchema.database is OPTIONAL (keeps web mock + old callers valid).
+- Tests: app.test.ts unit-covers ok/degraded/not-configured via injected mock; db.integration.test.ts is env-gated (describe.skipIf(!DATABASE_URL)) and verifies migrations create app_meta + extensions report true. Docs: README DB section + browser-storage-non-canonical/backup warning; .env.example.
+- Files changed: infra/db/{Dockerfile,init/01-extensions.sql}, docker-compose.yml, .env.example, apps/api/{package.json,drizzle.config.ts,drizzle/**,src/db/**,src/app.ts,src/app.test.ts}, packages/schemas/src/health.ts, README.md, AGENTS.md, pnpm-lock.yaml.
+- Verified: `pnpm verify` fully green (integration tests skip w/o DB). Brought up compose DB, confirmed extensions via init script, ran integration tests + live `curl /api/health` against it -> database.connected:true, age:true, vector:true. Cleaned up containers/temp build image.
+- **Learnings for future iterations:**
+  - See Codebase Patterns + AGENTS.md "Database" section. KEY GOTCHAS: pgvector must be >= v0.8.1 to build on PG 18; PG 18 docker volume MUST mount at /var/lib/postgresql (not /data) or the container exits on start.
+  - apache/age:latest is PG 18 + AGE 1.7.0 and auto-creates the `age` extension on the default DB; still create it idempotently for clarity/other DBs.
+  - Keep DB access gated on DATABASE_URL and health graceful (configured:false -> ok) so unit tests / no-DB runs stay green. US-005 will add the real canonical graph tables on top of this Drizzle setup; US-034 will make API tests run against a test PG container (then the integration test stops skipping in CI).
+  - To run DB-backed tests locally: `docker compose up -d --build db` then `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind pnpm --filter @jotmind/api test`.
 ---

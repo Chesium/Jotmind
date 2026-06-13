@@ -25,6 +25,29 @@
   `tsc` resolve the dependency from unbuilt `dist/*.d.ts` and fail with TS6305. Rely on package
   `exports` → source instead.
 
+## Database (PostgreSQL + AGE + pgvector)
+
+- Canonical store is **PostgreSQL 18** with **Apache AGE** (graph) + **pgvector** (embeddings).
+  Reference image: `infra/db/Dockerfile` (`FROM apache/age:latest`, which is PG 18 + AGE 1.7.0,
+  then compiles pgvector). **pgvector must be ≥ v0.8.1** — earlier versions fail to build on PG 18
+  (`vacuum_delay_point` signature change). Compose service: `docker compose up -d --build db`.
+- **PG 18 Docker volume must mount at `/var/lib/postgresql`, NOT `/var/lib/postgresql/data`** — PG 18
+  images use a version-specific subdir and refuse to start with a volume at the old `/data` path.
+- Extensions are created two ways (both idempotent): the init script
+  `infra/db/init/01-extensions.sql` (runs on first volume init) and the migrate runner
+  (`apps/api/src/db/migrate.ts`) which runs `CREATE EXTENSION IF NOT EXISTS age/vector` before
+  Drizzle migrations. AGE may already exist on the base image's default DB.
+- ORM is **Drizzle** (`drizzle-orm` + `postgres` driver, `drizzle-kit`). Schema in
+  `apps/api/src/db/schema.ts`; `pnpm --filter @jotmind/api db:generate` writes SQL to
+  `apps/api/drizzle/`; `pnpm --filter @jotmind/api db:migrate` applies them. Commit generated
+  `drizzle/` files (SQL + `meta/`).
+- DB access is gated on `DATABASE_URL`. When unset, `checkDatabaseHealth()` returns
+  `configured: false` and `/api/health` stays `ok` — keep this graceful behavior so unit tests and
+  AI-disabled runs don't need a live DB.
+- Tests needing a live DB use `describe.skipIf(!process.env.DATABASE_URL)` (see
+  `apps/api/src/db/db.integration.test.ts`) so default `pnpm test:api` stays green; run them with
+  `DATABASE_URL=... pnpm --filter @jotmind/api test` against the compose DB.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

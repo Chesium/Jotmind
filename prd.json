@@ -32,8 +32,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Reference PG 18 image (infra/db/Dockerfile: apache/age + compiled pgvector v0.8.1) with AGE 1.7.0 + pgvector 0.8.1; docker-compose.yml service `db` (volume at /var/lib/postgresql for PG18, init script creates extensions, localhost-bound). Drizzle ORM in apps/api (src/db/schema.ts app_meta, drizzle/ migrations, db:generate/db:migrate scripts, migrate runner creates extensions then migrates). /api/health now reports database connectivity + age/vector availability via checkDatabaseHealth (graceful configured:false when no DATABASE_URL -> stays ok). Env-gated integration test verifies migrations + extensions against live DB (skips without DATABASE_URL). Docs: README DB section + non-canonical browser-storage/backup warning, .env.example. pnpm verify green; integration tests + live /api/health verified against compose DB."
     },
     {
       "id": "US-003",

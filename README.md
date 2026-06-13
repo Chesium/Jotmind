@@ -12,6 +12,8 @@ apps/
   web/        React + Vite web app (@jotmind/web)
 packages/
   schemas/    Shared Zod schemas, types, and utilities (@jotmind/schemas)
+infra/
+  db/         Reference PostgreSQL image (Apache AGE + pgvector) + init scripts
 ```
 
 The shared `@jotmind/schemas` package is imported by both the API and the web app to keep request
@@ -54,7 +56,38 @@ The web dev server proxies `/api/*` to the API at `http://127.0.0.1:3001`.
 > Note: `pnpm test:e2e` requires Playwright browsers. Install them once with
 > `pnpm --filter @jotmind/web exec playwright install chromium`.
 
+## Database (PostgreSQL + Apache AGE + pgvector)
+
+The canonical store is PostgreSQL 18 with [Apache AGE](https://age.apache.org/) (graph) and
+[pgvector](https://github.com/pgvector/pgvector) (embeddings). A reference image and Compose file
+are provided.
+
+```bash
+# Build & start PostgreSQL (binds to 127.0.0.1:5432 by default)
+docker compose up -d --build db
+
+# Point the API at it (or copy .env.example -> .env)
+export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind
+
+# Apply migrations to create the initial schema
+pnpm --filter @jotmind/api db:migrate
+
+# Generate a new migration after editing src/db/schema.ts
+pnpm --filter @jotmind/api db:generate
+```
+
+The API `/api/health` endpoint reports database connectivity and whether the `age` and `vector`
+extensions are available. With no `DATABASE_URL` configured it reports `database.configured: false`
+and stays `ok` (useful for unit tests and AI-disabled local runs).
+
+API integration tests that need a live database (migrations + extension checks) run only when
+`DATABASE_URL` is set; otherwise they are skipped so the default `pnpm test:api` stays green.
+
 ## Data & privacy
 
-Persistent canonical data lives in PostgreSQL (added in later milestones). Browser storage is
-**non-canonical**; preserve the database volume and back it up to avoid data loss.
+Canonical data lives in **PostgreSQL**, persisted in the `jotmind-db` Docker volume. **Back up that
+volume** (or use `pg_dump`) to preserve your data — losing it loses your Knowledge Bases.
+
+Browser storage is **non-canonical**: it is only a cache/working copy and must never be treated as
+the source of truth. Clearing browser data does not lose canonical content; deleting the database
+volume does.
