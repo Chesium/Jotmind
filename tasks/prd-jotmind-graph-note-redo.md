@@ -1,476 +1,886 @@
 # PRD: JotMind Graph-Note Redo
 
+## Status
+
+- **Document state:** Improved work-in-progress PRD for Ralph / Amp multi-agent implementation.
+- **V1 definition:** V1 means milestones **M0 Foundation** through **M4 Polish/Hardening** are complete.
+- **First autonomous implementation wave:** M0 Foundation plus the architecture seams/stubs required by later milestones.
+- **First user-facing demo:** M1 Manual Graph.
+- **Implementation rule:** Do not implement code from this PRD until a story is selected for execution.
+
 ## Introduction
 
-JotMind is being rebuilt as a privacy-first self-hostable, graph-based personal knowledge app for fragmented information. The product should let users quickly capture notes, transform them into typed entities and provenance-aware claims, visualize relationships, search and edit through AI-assisted commands, and reason over the graph with Prolog-like/Datalog-style restricted rules.
+JotMind is being rebuilt as a privacy-first, self-hostable, graph-based personal knowledge app for fragmented information. It stores notes, sources, typed entities, multi-argument provenance-aware claims, custom schemas, and restricted Datalog/Horn-clause reasoning rules.
 
-The first polished version must demonstrate that the same graph-note foundation works across two first-class use cases:
+The app must let users capture raw information, manually or AI-assistively transform it into structured graph records, browse and search the graph, and run traceable reasoning over graph claims. The product must work without mandatory cloud accounts, mandatory vendor storage, or remote AI. Remote AI is disabled by default and may only be used through explicit consent policies.
 
-- **Personal relationship management:** remembering people, interactions, places, events, and relationship context.
-- **Reading/character maps:** tracking characters, events, attributes, plot participation, and logical relationships in books or manuscripts.
+V1 must showcase the same graph-note foundation through two built-in modules:
 
-The app must prioritize privacy and user control: data lives in a user-controlled self-hosted backend/database, AI writes require explicit user confirmation, and remote AI provider use is opt-in only.
+- **Personal relationship management:** people, interactions, places, events, relationship context, and social/event inference.
+- **Reading / character maps:** characters, plot events, attributes, relationship maps, and timeline/consistency inference for books or manuscripts.
 
-## Goals
+## Glossary
 
-- Create a privacy-first self-hostable knowledge graph that stores entities, notes, sources, and multi-argument claims.
-- Support manual creation, editing, deletion, merging, and search for entities and claims.
-- Provide fast natural-language capture that proposes structured entities/claims for user confirmation.
-- Preserve provenance, citation/source, timestamp, and confidence for every AI-created claim.
-- Provide a universal command/search interface where manual search works by default, local AI/RAG can be configured explicitly, and remote AI providers remain opt-in only.
-- Support Prolog-like/Datalog-style restricted rules and queries as a core graph-reasoning capability.
-- Let advanced users create lightweight custom schemas for entity types, claim predicates, properties, and validation rules.
-- Provide usable network, timeline/card, table, detail, and source/note views.
-- Ship polished built-in modules for personal relationship management and reading/character maps.
+- **Server instance:** A self-hosted JotMind backend deployment running locally, on a LAN server, or on a user-managed VPS/cloud server. It owns server-global configuration, authentication, sessions, jobs, and database access.
+- **Knowledge Base:** The user-facing scope that contains graph content, schemas, rules, settings, roles, audit events, and import/export data. Database fields must use `knowledge_base_id`.
+- **Module:** An installed schema/view/rule-pack bundle inside a Knowledge Base. A Module is not a separate database and is not a separate permission scope. Personal relationship management and reading/character maps are built-in Modules.
+- **Entity:** A canonical graph object such as Person, Event, Place, Concept, Character, or a custom type. Entities have type, name, aliases, description, tags, JSONB properties, and schema-version references.
+- **Claim:** A canonical fact/observation/relation record with predicate, metadata, provenance, confidence, optional time range, and one or more Claim Arguments.
+- **Claim Argument:** A role-labeled participant in a Claim, e.g. `subject`, `object`, `participant`, `place`, `source`, or module-defined roles.
+- **Note:** A canonical record for captured or written text. Notes may be projected as graph nodes, but they are not ordinary user-created entity types unless a graph projection or schema view exposes them that way.
+- **Source:** A canonical record for imported/captured material, e.g. Markdown, table row set, book excerpt, or plain text source. Sources may be projected as graph nodes, but are provenance records first.
+- **Citation / Source Excerpt:** A span, excerpt, or reference into a Note or Source used as evidence for a Claim, AI Proposal, answer, or Inferred Result.
+- **Proposal:** A reviewable pending change to graph content, import content, schema content, or rule content. Proposals are not applied until accepted by an authorized user.
+- **AI Proposal:** A Proposal generated by an AI provider or AI-like adapter. AI Proposals must preserve provider/model metadata when available and must never auto-apply.
+- **Inferred Result:** A derived result produced by a Rule Run. It is not a stored Claim unless explicitly accepted/materialized by an authorized user.
+- **Accepted Inferred Claim:** A Claim created from an Inferred Result after explicit user confirmation. It remains distinct from original user-entered or AI-extracted claims through provenance metadata.
+- **Schema Definition:** A stored definition of entity types, claim predicates, JSONB property schemas, compatible argument roles, validation rules, and optional view metadata.
+- **Schema Version:** An immutable or migration-aware version of a Schema Definition. Stored entities/claims reference the schema version used for validation.
+- **Rule Definition:** A stored restricted Datalog/Horn-clause rule, built-in rule-pack rule, or draft rule associated with a Knowledge Base and optionally a Module/schema.
+- **Rule Run:** One execution of a Rule Definition or rule pack against a Knowledge Base, producing traceable Inferred Results or validation/runtime errors.
+- **Graph Projection:** A derived Apache AGE graph index/query projection rebuilt from canonical relational PostgreSQL tables and `graph_outbox` events.
+- **Audit Event:** An immutable record of security-, privacy-, or data-impacting actions such as login, role change, user edit, AI Proposal, accepted AI write, import, export, delete, remote AI call metadata, job status action, or token change.
+- **Job / Background Job:** Durable PostgreSQL-backed work item for AGE projection, embedding indexing, AI extraction/answers, imports, exports, backups, or similar asynchronous tasks.
+
+## Product Goals
+
+- Create a privacy-first self-hostable knowledge graph that stores entities, notes, sources, multi-argument claims, schemas, rules, provenance, audit events, and jobs.
+- Make manual graph creation/editing/search usable without AI.
+- Provide fast capture that stores original material first, then optionally creates reviewable extraction proposals.
+- Preserve provenance, citations, timestamps, confidence, and user-confirmation metadata for AI-created or AI-modified claims.
+- Provide a universal command/search interface where manual search works by default, local AI/RAG can be configured, and remote AI remains opt-in.
+- Support restricted Datalog/Horn-clause reasoning through a Prolog-like text UI, with traceable inferred results.
+- Allow advanced users to create lightweight custom schemas: custom entity type, custom claim predicate, and JSONB property validation.
+- Ship polished built-in Modules for personal relationship management and reading/character maps.
+
+## Milestone Matrix
+
+| Milestone | Purpose | Demo outcome | Stories |
+| --- | --- | --- | --- |
+| **M0 Foundation** | Bootable secure monorepo app with database, auth, Knowledge Base scope, canonical schema, jobs/outbox seams, and visible stubs. | A developer/operator can run the app, sign in, select/create a Knowledge Base, and call typed health/session/KB APIs. | US-001 to US-007 |
+| **M1 Manual Graph** | First user-facing graph demo with manual CRUD, search, basic views, permissions, audit, and source/note display. | A user can create entities/claims/notes/sources, view them in network/table/detail/source views, and search without AI. | US-008 to US-014 |
+| **M2 AI/RAG** | Optional AI provider layer, proposals, command parsing, citations, privacy layering, embeddings, and mock/demo controls. | With mock/local/remote provider configured, a user captures text, reviews proposed edits, and asks cited questions without auto-writes. | US-015 to US-021 |
+| **M3 Reasoning** | Restricted Datalog/Horn-clause rule packs, text rules, rule runs, traces, inferred results, and accepted inferred claims. | Built-in rules infer traceable relationship/reading results and users can author simple safe text rules. | US-022 to US-026 |
+| **M4 Polish/Hardening** | Custom schema UI completion, import/export, built-in module polish, jobs/admin UX, deployment/docs, security hardening, and e2e coverage. | V1-ready self-hosted app with portable JSON export/import, polished Modules, operational docs, and full verification. | US-027 to US-034 |
+
+## Cross-Cutting Implementation Constraints
+
+### Source of truth and graph projection
+
+- PostgreSQL relational tables are canonical for Knowledge Base data.
+- Apache AGE is a derived graph projection/query index, not the canonical source of truth.
+- AGE can be rebuilt or repaired from canonical relational tables.
+- Agents must not treat AGE as canonical storage.
+- Relational writes and `graph_outbox` events must happen in the same transaction.
+- A background projector consumes `graph_outbox` and updates the AGE projection.
+- M0/M1 may stub the AGE projector, but projection interfaces, outbox records, and rebuild/repair boundaries must exist early.
+
+### Technology stack
+
+- TypeScript everywhere on Node.js.
+- Monorepo with `apps/web`, `apps/api`, and shared packages such as `packages/shared`.
+- Frontend: React + Vite.
+- Backend: Express with strict TypeScript and Zod request/response validation.
+- API style: REST JSON with shared Zod schemas where practical.
+- Database: PostgreSQL with Drizzle ORM/migrations, `pgvector`, Apache AGE extension/projection, and PostgreSQL-backed jobs/outbox.
+- Package manager: `pnpm`.
+- Standard scripts: `format`, `format:check`, `typecheck`, `lint`, `test`, `test:api`, `test:e2e`, `verify:quick`, and `verify`.
+
+### Authentication, authorization, and security
+
+- Browser auth uses server-side sessions with secure HTTP-only cookies.
+- Session state is stored in PostgreSQL, not process memory, for production/reference deployments.
+- Passwords use Argon2id.
+- Cookie-authenticated mutations require CSRF protection.
+- First-run setup creates the initial admin user. Public self-registration is disabled by default.
+- Knowledge Base roles: `owner`, `admin`, `editor`, `viewer`.
+- Every Knowledge Base API route enforces backend role checks; UI-only hiding is insufficient.
+- Personal access tokens are supported for non-browser clients and are auditable.
+- Rate limiting applies to auth, AI, import/export, search, backup/restore, and other expensive endpoints.
+
+### AI privacy policy layering
+
+AI policy is layered. The strictest applicable policy wins:
+
+1. Server policy.
+2. Knowledge Base policy.
+3. User setting.
+
+Required behavior:
+
+- Fresh production installs default to `No AI`.
+- Supported modes: `No AI`, `Local AI`, `Remote per request`, `Remote always allowed`.
+- `Remote always allowed` is per-user and per-Knowledge Base and cannot override stricter Knowledge Base or server policy.
+- Per-user provider keys may be used for a shared Knowledge Base only if the Knowledge Base policy allows that provider and remote data sharing scope.
+- Environment provider settings are server-global defaults or overrides. If server policy disables remote AI, user or Knowledge Base settings cannot bypass it.
+- Remote embeddings require separate consent from remote LLM calls.
+- Remote data sharing scope must distinguish at least `minimal` and `RAG context`.
+- Viewers may use read-only AI answer generation only when Knowledge Base policy permits it; viewers must not trigger graph writes, proposals, imports, or mutations.
+- Viewer remote calls still require user and Knowledge Base consent and must respect provider policies, remote scope, audit logging, and rate limits.
+
+### Mock AI provider rules
+
+- Mock AI providers are only for development, tests, demos, and early milestones.
+- If exposed in runtime UI, mock AI must be behind a development/demo flag.
+- Runtime mock AI must be visibly labeled `Mock AI / deterministic demo output`.
+- Fresh production installs still default to `No AI`.
+- The app must not fabricate AI output via hidden remote calls.
+
+### Note and Source modeling
+
+- Note and Source are canonical records.
+- Note and Source may be projected as graph nodes.
+- Note and Source are not ordinary user-created entity types unless graph projection or schema views expose them that way.
+- Claims may cite Notes, Sources, or Source Excerpts.
+- Source/note views display original captured/imported material and linked extracted claims.
+
+### Custom schema v1 minimum
+
+V1 minimum custom schema support includes:
+
+- Custom entity type.
+- Custom claim predicate.
+- JSONB property schema validation.
+- Schema version references from the start.
+
+View defaults and extraction hints may be M4 polish. Full guided schema migration UI may be staged later within M4, but stored data must reference schema versions from the start.
+
+### Reasoning v1 minimum
+
+M3 minimum reasoning includes:
+
+- Built-in rule packs.
+- Low-level predicates.
+- Simple restricted text rules.
+- Result trace.
+
+V1 rule syntax is restricted Datalog-like text syntax with explicit variables exposed through a Prolog-like UI. Guided rule builder, stratified negation, and graph edit proposal generation may be staged after the first reasoning milestone. Unrestricted Prolog, arbitrary recursion, arbitrary JavaScript, filesystem/network/process access, and unrestricted Prolog negation-as-failure are out of scope.
+
+### Import/export/backup scope
+
+- Portable JSON is the only full-fidelity per-Knowledge Base round-trip format.
+- Markdown export is human-readable and not guaranteed full-fidelity round trip.
+- CSV/table import/export is a structured subset flow.
+- PostgreSQL dump/restore is operator maintenance, not normal per-user portable export.
+- Knowledge Base owner/admin UI focuses on portable JSON import/export first.
+- Full database backup/restore belongs to server operator/admin CLI/docs.
+
+### Personal relationship remote sharing
+
+- Personal relationship data is sensitive.
+- The personal relationship Module defaults remote sharing scope to minimal.
+- Remote RAG context sharing for this Module requires an additional prominent confirmation.
+- Remote AI/embedding use still follows server, Knowledge Base, and user-level consent policies.
 
 ## User Stories
 
-### US-001: Initialize a privacy-first self-hosted knowledge base
-**Description:** As a privacy-conscious user, I want my JotMind data stored in a user-controlled backend/database so that I can use the app without mandatory vendor cloud storage.
+### US-001: Create the monorepo foundation
+
+**Target milestone:** M0 Foundation  
+**Description:** As a developer, I need a typed monorepo foundation so autonomous agents can add features consistently.
 
 **Acceptance Criteria:**
-- [ ] On first launch, the app creates or opens a self-hosted/local-server knowledge base without requiring cloud account sign-in.
-- [ ] The knowledge base can store entities, claims, notes, sources, schemas, and rule definitions.
-- [ ] The app displays where the active knowledge base database is hosted or how it can be backed up/exported.
-- [ ] Typecheck/lint passes.
+- [ ] Monorepo contains `apps/web`, `apps/api`, and shared package boundaries for schemas/types/utilities.
+- [ ] `pnpm` package scripts include `format`, `format:check`, `typecheck`, `lint`, `test`, `test:api`, `test:e2e`, `verify:quick`, and `verify`.
+- [ ] React + Vite web app and Express API app boot locally.
+- [ ] Shared Zod schema package can be imported by both web and API.
 
-### US-002: Store typed entities and claim-based relations
-**Description:** As a user, I want information represented as typed entities and claims so that fragmented notes can become a queryable graph.
+**Allowed stubs:** Empty UI shell, placeholder routes, placeholder tests.  
+**Definition of done:** `pnpm verify:quick` passes and README explains local dev startup.  
+**Verification expectations:** Typecheck/lint/unit smoke tests.  
+**Out of scope:** Domain graph CRUD, real auth UI polish, AGE projection.
 
-**Acceptance Criteria:**
-- [ ] The system supports at least Person, Event, Concept, Place, Note, and Source entity types.
-- [ ] Claims can connect one or more entities using typed roles, e.g. subject, object, participant, place, source, or context.
-- [ ] Claims include predicate, description, created timestamp, optional valid time range, confidence, and provenance fields.
-- [ ] Entity records support name, aliases, description, tags/groups, and custom properties.
-- [ ] Typecheck/lint passes.
+### US-002: Provision PostgreSQL with required extensions
 
-### US-003: Manually manage entities
-**Description:** As a user, I want to create and edit entities directly so that I can maintain my graph without relying on AI.
+**Target milestone:** M0 Foundation  
+**Description:** As an operator, I need reproducible database setup so the app has a reliable canonical store.
 
 **Acceptance Criteria:**
-- [ ] Users can create entities of supported built-in types.
-- [ ] Users can edit entity name, aliases, description, tags/groups, and custom properties.
-- [ ] Users can delete an entity after a confirmation step that explains affected claims.
-- [ ] Users can merge duplicate entities and preserve aliases, properties, notes, and related claims.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Docker Compose or equivalent starts PostgreSQL with Apache AGE and `pgvector` available.
+- [ ] Drizzle migrations can create the initial schema in a clean test database.
+- [ ] API health check reports database connectivity and required extension availability.
+- [ ] Docs warn that browser storage is non-canonical and database volume/backups preserve data.
 
-### US-004: Manually manage claims
-**Description:** As a user, I want to create and edit claims directly so that I can precisely record relationships and observations.
+**Allowed stubs:** AGE graph content may be empty; projector may be a no-op.  
+**Definition of done:** Clean setup can run migrations and API health check without manual DB edits.  
+**Verification expectations:** API test against test PostgreSQL container.  
+**Out of scope:** Production backup automation, real AGE projection traversal.
 
-**Acceptance Criteria:**
-- [ ] Users can create a claim by selecting predicate, description, confidence, optional valid time range, and entity arguments.
-- [ ] Users can edit claim metadata and argument roles after creation.
-- [ ] Users can delete a claim without deleting connected entities.
-- [ ] Claim forms validate required predicate and entity-argument fields before saving.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+### US-003: Implement local/server accounts and sessions
 
-### US-005: Capture fragmented text into a review queue
-**Description:** As a user, I want to quickly enter a paragraph or note so that JotMind can propose graph updates from fragmented information.
+**Target milestone:** M0 Foundation  
+**Description:** As an operator, I need secure local/server user accounts so Knowledge Bases can have authenticated access control without mandatory cloud accounts.
 
 **Acceptance Criteria:**
-- [ ] Users can enter freeform text into a quick-capture input.
-- [ ] The system stores the original captured text as a Note or Source before extraction.
-- [ ] When a real or mock AI provider is configured, the system proposes candidate entities and claims extracted from the text.
-- [ ] When no AI provider is configured, the capture flow stores the note/source and shows an AI setup/unavailable state without blocking manual review or search.
-- [ ] Proposed graph updates are shown in a review queue and are not written until confirmed.
-- [ ] Rejected proposals remain linked to the source note as rejected or dismissed extraction candidates.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] First-run setup creates an initial admin user.
+- [ ] Passwords are hashed with Argon2id.
+- [ ] Browser auth uses server-side PostgreSQL-backed sessions with secure HTTP-only cookies.
+- [ ] Cookie-authenticated mutations require CSRF protection.
+- [ ] Account creation is admin-controlled after first-run setup.
 
-### US-006: Confirm AI-suggested graph edits
-**Description:** As a user, I want to review AI-suggested edits before they change my knowledge base so that I remain in control of private information.
+**Allowed stubs:** Minimal admin UI; CLI/env-seeded setup acceptable.  
+**Definition of done:** Login/logout/session refresh work and mutation route rejects missing/invalid CSRF token.  
+**Verification expectations:** API auth/session/CSRF tests plus browser smoke for login if UI exists.  
+**Out of scope:** Email recovery, public registration, OAuth.
 
-**Acceptance Criteria:**
-- [ ] AI-generated create/update/delete proposals are displayed as structured, human-readable changes.
-- [ ] Each proposal shows affected entities, claims, predicates, arguments, confidence, and source citation.
-- [ ] Users can accept, reject, or edit each proposal before applying it.
-- [ ] The system never applies AI-suggested writes without explicit confirmation.
-- [ ] Accepted AI-created claims preserve provenance, citation/source, timestamp, and confidence.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+### US-004: Create Knowledge Base scope and roles
 
-### US-007: Search and command through a universal AI interface
-**Description:** As a user, I want one command/search box for natural-language queries, filters, and edit requests so that I can access the graph quickly.
+**Target milestone:** M0 Foundation  
+**Description:** As a user, I want selectable Knowledge Bases with role-based permissions so different graph scopes can be managed safely.
 
 **Acceptance Criteria:**
-- [ ] Users can submit natural-language queries such as “Who did I meet at ICRA?” or “Find characters related to X.”
-- [ ] The system constrains AI outputs to strict command schemas before presenting results or proposals.
-- [ ] Invalid schema outputs are discarded and do not execute.
-- [ ] Low-confidence or invalid structured parsing falls back to full-text or vector search results.
-- [ ] Structured interpretations and fallback results are shown separately so users can choose what to inspect or apply.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Data model uses `knowledge_base_id` for scoped records.
+- [ ] Users can create/select a Knowledge Base in minimal UI or API.
+- [ ] Roles exist: owner, admin, editor, viewer.
+- [ ] Backend middleware enforces role checks on Knowledge Base routes.
+- [ ] Audit events record role assignments and Knowledge Base creation.
 
-### US-008: Provide provenance-aware AI answers
-**Description:** As a user, I want AI answers to cite graph claims and source notes so that I can verify why an answer was produced.
+**Allowed stubs:** Basic role management UI may be minimal; API may lead.  
+**Definition of done:** Unauthorized users cannot access or mutate a Knowledge Base through API calls.  
+**Verification expectations:** API permission tests for owner/admin/editor/viewer.  
+**Out of scope:** Fine-grained per-entity/claim permissions, real-time collaboration.
 
-**Acceptance Criteria:**
-- [ ] When a real or mock AI provider is configured, AI answers include citations to claims and/or source notes used as evidence.
-- [ ] When no AI provider is configured, answer generation shows an AI setup/unavailable state and offers search results where applicable.
-- [ ] Each cited claim displays predicate, connected entities, confidence, and provenance metadata.
-- [ ] Users can click a citation to open the relevant claim or source note detail view.
-- [ ] Answers distinguish known facts, inferred facts, uncertain claims, and missing information.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+### US-005: Create canonical graph schema tables
 
-### US-009: Configure local and remote AI/RAG behavior
-**Description:** As a privacy-conscious user, I want AI disabled until explicitly configured and remote providers only by opt-in so that private graph content is not sent externally without consent.
+**Target milestone:** M0 Foundation  
+**Description:** As a developer, I need canonical relational tables for graph records so later UI, AI, and reasoning features share one consistent data model.
 
 **Acceptance Criteria:**
-- [ ] The default fresh-install AI mode is `No AI`: manual graph workflows and full-text/graph search work, while local and remote AI providers must be configured explicitly.
-- [ ] The default AI/RAG mode does not send knowledge-base content to remote AI provider services.
-- [ ] Users can explicitly enable remote AI provider processing in settings, with separate consent for remote embeddings where applicable.
-- [ ] Remote opt-in settings explain what content may be sent externally.
-- [ ] Users can disable remote AI provider processing again.
-- [ ] Command execution and answer generation respect the selected AI privacy mode.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Tables exist for entities, claims, claim arguments, notes, sources, source excerpts/citations, schema definitions/versions, rule definitions, proposals, audit events, jobs, and `graph_outbox`.
+- [ ] Canonical records include stable UUIDv7 identifiers, `knowledge_base_id`, timestamps, soft-delete fields, and audit metadata where appropriate.
+- [ ] Custom properties are stored in JSONB with validation hooks.
+- [ ] Entities/claims reference schema versions used for validation.
+- [ ] Notes and Sources are canonical records, not merely entity rows.
 
-### US-010: Build network, timeline/card, table, detail, and source views
-**Description:** As a user, I want multiple views over the same graph so that I can explore relationships, chronology, structured data, and original sources.
+**Allowed stubs:** Some validation hooks may initially accept built-in schemas only.  
+**Definition of done:** Migrations apply cleanly and repository tests can insert/read minimal records.  
+**Verification expectations:** Migration tests and repository unit/integration tests.  
+**Out of scope:** Full custom schema UI, AGE traversal queries.
+
+### US-006: Add graph outbox and projection seam
+
+**Target milestone:** M0 Foundation  
+**Description:** As a developer, I need graph writes and projection seams established early so AGE can remain derived without rewriting canonical write paths later.
 
 **Acceptance Criteria:**
-- [ ] Network view displays entities and claim-derived relationships for a selected module or filtered scope.
-- [ ] Timeline/card view displays time-related notes, claims, and events in chronological order when dates exist.
+- [ ] Entity/claim/note/source writes create `graph_outbox` events in the same transaction as canonical relational writes.
+- [ ] Projector interface can consume outbox events and mark projection state.
+- [ ] Stub projector is allowed but must be visible in logs/status as stubbed.
+- [ ] Rebuild/repair interface exists to regenerate projection from relational tables.
+
+**Allowed stubs:** Actual Apache AGE writes may be no-op in M0/M1.  
+**Definition of done:** Tests prove write + outbox atomicity and failed projection does not lose canonical data.  
+**Verification expectations:** Transactional API/repository tests.  
+**Out of scope:** Complete graph traversal query performance.
+
+### US-007: Add PostgreSQL-backed jobs foundation
+
+**Target milestone:** M0 Foundation  
+**Description:** As an operator, I need durable jobs so projection, AI, embeddings, imports, and exports do not depend on process-local state.
+
+**Acceptance Criteria:**
+- [ ] PostgreSQL-backed job table supports status, attempts, retry-after, failure reason, owner user, and `knowledge_base_id` when applicable.
+- [ ] Worker can run in-process and as a separate process mode.
+- [ ] Failed jobs retry with capped exponential backoff and then move to failed/dead-letter state.
+- [ ] Basic admin/status API exposes job status with permission checks.
+
+**Allowed stubs:** Only projection heartbeat/no-op jobs required in M0.  
+**Definition of done:** Job lifecycle tests cover pending/running/succeeded/retry/failed.  
+**Verification expectations:** API/job tests.  
+**Out of scope:** Full import/export/AI job implementations.
+
+### US-008: Manually create and edit entities
+
+**Target milestone:** M1 Manual Graph  
+**Description:** As an editor, I want to create and edit typed entities so I can maintain my graph without relying on AI.
+
+**Acceptance Criteria:**
+- [ ] Editors can create built-in entity types at minimum: Person, Event, Concept, Place, and Module-specific Character where relevant.
+- [ ] Editors can edit name, aliases, description, tags/groups, and JSONB custom properties.
+- [ ] Forms validate required fields and schema constraints before save.
+- [ ] Viewers can read entities but cannot mutate them.
+- [ ] Entity writes create audit events and graph outbox events.
+
+**Allowed stubs:** Advanced custom schema property editor may be basic JSON.  
+**Definition of done:** API and UI support create/read/update for entities with role checks.  
+**Verification expectations:** API tests, UI component/route tests, browser verification using dev-browser skill, `pnpm verify:quick`.  
+**Out of scope:** Merge, AI extraction, guided schema creation.
+
+### US-009: Manually create and edit claims
+
+**Target milestone:** M1 Manual Graph  
+**Description:** As an editor, I want to create and edit claims so relationships and observations are represented as provenance-aware graph facts.
+
+**Acceptance Criteria:**
+- [ ] Editors can create claims with predicate, description, confidence, optional valid time range, and one or more role-labeled Claim Arguments.
+- [ ] Claims support multi-argument relations and are not reduced to binary edges in the canonical model.
+- [ ] Editors can edit claim metadata and argument roles after creation.
+- [ ] Claim forms validate predicate and argument requirements before saving.
+- [ ] Claim writes create audit events and graph outbox events.
+
+**Allowed stubs:** Predicate choices may use built-in defaults before custom predicates ship.  
+**Definition of done:** API/UI support create/read/update for claims with multi-argument persistence.  
+**Verification expectations:** API tests, browser verification using dev-browser skill, `pnpm verify:quick`.  
+**Out of scope:** AI proposals, reasoning-derived claims.
+
+### US-010: Delete and merge graph records safely
+
+**Target milestone:** M1 Manual Graph  
+**Description:** As an editor, I want safe delete and merge flows so I can correct graph mistakes without corrupting provenance.
+
+**Acceptance Criteria:**
+- [ ] Entity/claim/note/source deletes are soft-deletes by default.
+- [ ] Delete confirmation explains affected claims or linked records.
+- [ ] Entity merge preserves aliases, properties, notes, sources, citations, related claims, audit events, and provenance.
+- [ ] Merge creates graph outbox events and an audit event.
+- [ ] Viewers cannot delete or merge.
+
+**Allowed stubs:** Hard-delete/purge admin tooling may be absent.  
+**Definition of done:** Merge/delete are reversible/auditable through soft-delete data and tests cover linked claims.  
+**Verification expectations:** API tests and browser verification using dev-browser skill.  
+**Out of scope:** Automated duplicate detection.
+
+### US-011: Capture Notes and Sources manually
+
+**Target milestone:** M1 Manual Graph  
+**Description:** As a user, I want to store fragmented text before extraction so original material remains available and citable.
+
+**Acceptance Criteria:**
+- [ ] Users can create Notes from freeform text.
+- [ ] Users can create Sources for imported/captured text or structured material metadata.
+- [ ] Source Excerpts/Citations can reference spans or excerpts in Notes/Sources.
+- [ ] Source/note views display original content and linked extracted/manual claims.
+- [ ] No AI provider is required for capture.
+
+**Allowed stubs:** Import-specific parsing may be deferred to M4.  
+**Definition of done:** A Note/Source can be created, viewed, cited by a claim, and searched.  
+**Verification expectations:** API tests, browser verification using dev-browser skill.  
+**Out of scope:** AI extraction proposals, full Markdown/table import.
+
+### US-012: Provide manual search and filters
+
+**Target milestone:** M1 Manual Graph  
+**Description:** As a user, I want search and filters to work without AI so the app remains useful in `No AI` mode.
+
+**Acceptance Criteria:**
+- [ ] Full-text token search covers entities, claims, notes, sources, aliases, tags, and descriptions.
+- [ ] Graph filters support entity type, claim predicate, date range, place, person, tag, confidence, and provenance where data exists.
+- [ ] Search respects Knowledge Base permissions.
+- [ ] If embeddings do not exist, vector search is omitted or shown as unavailable without breaking search.
+
+**Allowed stubs:** Vector search may be disabled until M2 embeddings.  
+**Definition of done:** Users can find manually created graph records in `No AI` mode.  
+**Verification expectations:** API search tests and browser verification using dev-browser skill.  
+**Out of scope:** Natural-language AI command parsing.
+
+### US-013: Build basic graph views
+
+**Target milestone:** M1 Manual Graph  
+**Description:** As a user, I want multiple views over the same graph so I can browse relationships, chronology, tables, details, and original sources.
+
+**Acceptance Criteria:**
+- [ ] Network view displays entities and claim-derived relationships for a selected Knowledge Base/Module/filter.
+- [ ] Timeline/card view displays dated notes, claims, and events chronologically when dates exist.
 - [ ] Table view displays entities or claims with sortable/filterable columns.
-- [ ] Detail view displays a selected entity or claim with related claims, sources, and editable metadata.
-- [ ] Source/note view displays original captured content and linked extracted claims.
-- [ ] Clicking entities, claims, tags, or citations navigates to relevant detail or source context.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Detail view displays a selected entity or claim with related claims, sources, citations, and editable metadata.
+- [ ] Source/note view displays original captured/imported material and linked claims.
+- [ ] Clicking entities, claims, tags, or citations navigates to relevant detail/source context.
 
-### US-011: Support personal relationship management module
-**Description:** As a user managing relationships, I want a built-in module for people, interactions, events, and places so that I can remember social context over time.
+**Allowed stubs:** Network layout may use relational query data while AGE projection is stubbed.  
+**Definition of done:** Manual graph demo can move between table/network/detail/source views.  
+**Verification expectations:** Browser verification using dev-browser skill, component tests where useful, `pnpm verify:quick`.  
+**Out of scope:** Advanced graph analytics, high-volume graph performance tuning.
+
+### US-014: Enforce audit and permissions in manual graph flows
+
+**Target milestone:** M1 Manual Graph  
+**Description:** As a Knowledge Base owner/admin, I want graph mutations audited and permissioned so shared self-hosted use is trustworthy.
 
 **Acceptance Criteria:**
-- [ ] The module includes default schemas for Person, Event, Place, Note, and relationship claims.
+- [ ] Entity, claim, note, source, merge, delete, role, and setting changes create Audit Events with authenticated user IDs.
+- [ ] Viewers can browse/search but cannot mutate content, accept proposals, run imports, or manage settings.
+- [ ] Editors can create/edit/merge/soft-delete graph content within their Knowledge Base.
+- [ ] Admins/owners can inspect Knowledge Base audit summaries and job status.
+
+**Allowed stubs:** Audit UI may be simple table/log view.  
+**Definition of done:** Permission bypass attempts fail at backend route/service layer.  
+**Verification expectations:** API permission/audit tests and browser verification for hidden/disabled unauthorized UI.  
+**Out of scope:** Fine-grained field-level or entity-level ACLs.
+
+### US-015: Configure AI provider adapter layer
+
+**Target milestone:** M2 AI/RAG  
+**Description:** As a developer, I need all AI integrations behind adapters so UI and graph repositories never call vendor SDKs directly.
+
+**Acceptance Criteria:**
+- [ ] LLM and embedding providers share typed adapter interfaces.
+- [ ] Local inference supports Ollama-native HTTP APIs and OpenAI-compatible local HTTP endpoints.
+- [ ] Remote LLM support includes OpenAI and Anthropic behind adapters.
+- [ ] Provider config schemas use Zod and separate secrets from portable Knowledge Base exports.
+- [ ] Normal tests use deterministic mock LLM/embedding providers.
+
+**Allowed stubs:** Real providers may be adapter skeletons until configured tests exist; deterministic mock is required.  
+**Definition of done:** No UI/repository code directly imports vendor SDKs or provider HTTP clients.  
+**Verification expectations:** Unit tests for adapter selection/config validation and mock provider behavior.  
+**Out of scope:** Production model quality tuning.
+
+### US-016: Implement layered AI privacy settings
+
+**Target milestone:** M2 AI/RAG  
+**Description:** As a privacy-conscious user/admin, I want layered AI policy so private Knowledge Base data is not sent externally without explicit permission.
+
+**Acceptance Criteria:**
+- [ ] Fresh installs default to `No AI`.
+- [ ] Server, Knowledge Base, and user AI policies are evaluated with strictest-policy-wins semantics.
+- [ ] Remote modes include `Remote per request` and `Remote always allowed`; always-allowed is per-user and per-Knowledge Base.
+- [ ] Remote embeddings require separate consent.
+- [ ] Remote call confirmations show provider, model, feature, and categories of content sent.
+- [ ] Remote AI call audit metadata excludes full prompts, full note content, API keys, and full model responses by default.
+
+**Allowed stubs:** Some provider choices may be disabled until adapters are complete.  
+**Definition of done:** Policy tests prove user settings cannot bypass stricter KB/server policies.  
+**Verification expectations:** API/service tests and browser verification using dev-browser skill.  
+**Out of scope:** Enterprise policy management or SSO.
+
+### US-017: Capture text into AI proposal review queue
+
+**Target milestone:** M2 AI/RAG  
+**Description:** As a user, I want captured text to generate reviewable graph proposals when AI is configured, without losing original material.
+
+**Acceptance Criteria:**
+- [ ] Quick-capture stores original text as Note or Source before extraction.
+- [ ] With configured local/remote/mock AI, extraction creates AI Proposals for candidate entities/claims.
+- [ ] With no AI, capture stores the note/source and shows setup/unavailable state without blocking manual review/search.
+- [ ] Rejected proposals remain linked to the source note as rejected/dismissed extraction candidates.
+- [ ] Runtime mock output, if exposed, is behind dev/demo flag and labeled `Mock AI / deterministic demo output`.
+
+**Allowed stubs:** Mock provider may be used for demo/test; real provider extraction quality may be basic.  
+**Definition of done:** AI-generated changes are pending Proposals only and never direct writes.  
+**Verification expectations:** API proposal tests, browser verification using dev-browser skill, privacy policy tests.  
+**Out of scope:** Bulk import extraction; automatic background extraction of all existing notes.
+
+### US-018: Review and apply graph proposals
+
+**Target milestone:** M2 AI/RAG  
+**Description:** As an editor, I want to review, edit, accept, or reject proposed graph changes before they modify my Knowledge Base.
+
+**Acceptance Criteria:**
+- [ ] Proposals display structured create/update/delete/merge changes with affected entities, claims, predicates, arguments, confidence, and source citations.
+- [ ] Users can accept, reject, or edit proposals at item level and batch level.
+- [ ] Accepted AI-created claims preserve provenance, citation/source, timestamp, confidence, provider/model where available, and user-confirmation metadata.
+- [ ] Invalid proposal payloads cannot be executed.
+- [ ] Viewers cannot create, accept, reject, or edit proposals.
+
+**Allowed stubs:** Delete/merge proposal types may initially be hidden unless safely supported.  
+**Definition of done:** No AI proposal can mutate the graph without explicit authorized user confirmation.  
+**Verification expectations:** API tests for proposal validation/apply/reject, browser verification using dev-browser skill.  
+**Out of scope:** Autonomous AI agents that apply edits.
+
+### US-019: Add universal command/search interface
+
+**Target milestone:** M2 AI/RAG  
+**Description:** As a user, I want one command/search box for natural-language queries, filters, and edit requests so I can quickly access graph information.
+
+**Acceptance Criteria:**
+- [ ] Manual search works in the command box when AI is disabled.
+- [ ] AI command outputs are constrained to strict Zod schemas before presenting results or proposals.
+- [ ] Invalid schema outputs are discarded and do not execute.
+- [ ] One repair retry may be attempted for invalid structured output.
+- [ ] Low-confidence/invalid structured parsing falls back to full-text/vector search results.
+- [ ] Structured interpretations and fallback results are visually separated.
+
+**Allowed stubs:** Supported command set may be small at first.  
+**Definition of done:** Command interface cannot execute unvalidated AI output.  
+**Verification expectations:** Schema validation tests, API tests, browser verification using dev-browser skill.  
+**Out of scope:** Voice commands, agentic multi-step automation.
+
+### US-020: Provide provenance-aware AI answers
+
+**Target milestone:** M2 AI/RAG  
+**Description:** As a user, I want AI answers to cite graph claims and source notes so I can verify why an answer was produced.
+
+**Acceptance Criteria:**
+- [ ] Configured AI answers include citations to claims, Notes, Sources, or Source Excerpts used as evidence.
+- [ ] No-AI mode shows setup/unavailable state and offers manual search results where applicable.
+- [ ] Each cited claim displays predicate, connected entities, confidence, and provenance metadata.
+- [ ] Users can click citations to open claim/source/note detail views.
+- [ ] Answers distinguish known facts, inferred facts, uncertain claims, and missing information.
+- [ ] Viewer answer generation is read-only and only allowed when policy permits it.
+
+**Allowed stubs:** Mock/demo answers may be deterministic and labeled.  
+**Definition of done:** Answers are never uncited when evidence exists and cannot create graph writes.  
+**Verification expectations:** API answer schema tests, browser verification using dev-browser skill, viewer permission tests.  
+**Out of scope:** Long-running autonomous research agents.
+
+### US-021: Index embeddings through jobs
+
+**Target milestone:** M2 AI/RAG  
+**Description:** As a user, I want optional vector search/RAG indexing so AI answers can use relevant graph context when consent permits it.
+
+**Acceptance Criteria:**
+- [ ] Embeddings are stored in PostgreSQL using `pgvector`.
+- [ ] Embedding jobs index entities, claims, notes, sources, aliases, tags, and recent activity as configured.
+- [ ] Remote embeddings require separate opt-in and remote scope controls.
+- [ ] Existing embeddings can power vector search even when generation providers are currently unavailable.
+- [ ] Job status is visible to users for their Knowledge Base indexing tasks.
+
+**Allowed stubs:** Local/mock embedding provider can be deterministic for tests.  
+**Definition of done:** Embedding generation is asynchronous, auditable where remote, and does not block manual search.  
+**Verification expectations:** Job tests, search tests, privacy policy tests.  
+**Out of scope:** Cross-Knowledge Base vector indexes.
+
+### US-022: Install built-in rule packs
+
+**Target milestone:** M3 Reasoning  
+**Description:** As a user, I want built-in rules for showcase Modules so reasoning is useful without writing rules from scratch.
+
+**Acceptance Criteria:**
+- [ ] Personal relationship Module includes at least one social-group or event-participation inference rule pack.
+- [ ] Reading/character-map Module includes at least one family/relationship inference or timeline consistency rule pack.
+- [ ] Rule packs are installed as Module bundle content inside a Knowledge Base.
+- [ ] Built-in rules are versioned and auditable when enabled/disabled.
+
+**Allowed stubs:** Rule set may be small but must produce traceable results on seed/demo data.  
+**Definition of done:** Built-in packs can be viewed and run against sample graph data.  
+**Verification expectations:** Rule integration tests and browser verification using dev-browser skill.  
+**Out of scope:** Marketplace rule packs.
+
+### US-023: Support restricted text rule authoring
+
+**Target milestone:** M3 Reasoning  
+**Description:** As an advanced user, I want to author simple restricted Datalog-like rules through a Prolog-like text UI so I can define custom inference.
+
+**Acceptance Criteria:**
+- [ ] Canonical text syntax supports explicit variables, e.g. `knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).`
+- [ ] Low-level predicates include equivalents of `entity(id, type, name)`, `claim(id, predicate)`, and `arg(claimId, role, entityId)`.
+- [ ] Rule validation runs before save/enable.
+- [ ] Invalid rules may be saved as drafts but cannot be enabled or executed.
+- [ ] Rules have no filesystem, network, process, arbitrary JavaScript, provider API, unrestricted recursion, or unrestricted negation access.
+
+**Allowed stubs:** Guided builder and negation may be deferred.  
+**Definition of done:** Users can save, validate, enable, disable, and view text rules safely.  
+**Verification expectations:** Parser/compiler validation tests and browser verification using dev-browser skill.  
+**Out of scope:** Unrestricted Prolog runtime, arbitrary recursion.
+
+### US-024: Run rules with traces
+
+**Target milestone:** M3 Reasoning  
+**Description:** As a user, I want rule runs to produce traceable inferred results so I can understand why an inference exists.
+
+**Acceptance Criteria:**
+- [ ] Rule execution runs on the backend against stored Knowledge Base data.
+- [ ] Rule Runs record status, start/end timestamps, errors, and triggering user/job.
+- [ ] Inferred Results show source rules and source claims/arguments used.
+- [ ] Rule errors are displayed without corrupting claims, schemas, or rules.
+- [ ] Inferred Results are labeled as inferred and are not stored as Claims by default.
+
+**Allowed stubs:** Compilation may target SQL and/or relational queries before AGE traversal is complete.  
+**Definition of done:** A rule run over sample data produces traceable results or safe errors.  
+**Verification expectations:** Rule engine tests, API tests, browser verification using dev-browser skill.  
+**Out of scope:** Automatic graph writes from rules.
+
+### US-025: Accept inferred results as claims
+
+**Target milestone:** M3 Reasoning  
+**Description:** As an editor, I want to accept an inferred result as a stored claim so important derived knowledge can become explicit while preserving provenance.
+
+**Acceptance Criteria:**
+- [ ] Editors can convert an Inferred Result into an Accepted Inferred Claim after confirmation.
+- [ ] Accepted Inferred Claims preserve source rule, rule run, source claims, timestamp, and accepting user.
+- [ ] Accepted Inferred Claims are distinguishable from user-entered and AI-extracted claims.
+- [ ] Viewers cannot accept inferred results.
+
+**Allowed stubs:** Batch accept may be deferred.  
+**Definition of done:** Accepted inferred claims round-trip through detail/search/views with provenance intact.  
+**Verification expectations:** API tests and browser verification using dev-browser skill.  
+**Out of scope:** Rule-generated proposals that mutate multiple graph records.
+
+### US-026: Add AGE-backed traversal where needed
+
+**Target milestone:** M3 Reasoning  
+**Description:** As a user, I want graph traversal features to use the derived graph projection where it adds value while preserving relational canonical truth.
+
+**Acceptance Criteria:**
+- [ ] Projector writes entity/claim/argument graph structures to Apache AGE from `graph_outbox`.
+- [ ] Multi-argument claims are projected as claim nodes connected to entity nodes by role-labeled edges.
+- [ ] Projection rebuild/repair can recreate AGE state from relational tables.
+- [ ] Traversal-dependent views/rules can query AGE through service abstractions.
+- [ ] Projection lag/failure is visible through job/status UI and does not corrupt canonical records.
+
+**Allowed stubs:** None for traversal-dependent V1 features by completion of this story.  
+**Definition of done:** AGE projection can be dropped/rebuilt and traversal features still recover from relational data.  
+**Verification expectations:** Projection integration tests and traversal query tests.  
+**Out of scope:** Treating AGE as canonical storage.
+
+### US-027: Build custom schema minimum UI/API
+
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As an advanced user, I want to define custom entity types and claim predicates so JotMind can adapt to new domains.
+
+**Acceptance Criteria:**
+- [ ] Users can create custom entity types with display name, description, and JSONB property schema validation.
+- [ ] Users can create custom claim predicates with allowed argument roles and compatible entity types.
+- [ ] Entities/claims validate against active schema versions before save.
+- [ ] Schema definitions are Knowledge Base scoped and included in portable JSON export.
+- [ ] Schema version references exist on stored graph records.
+
+**Allowed stubs:** View defaults, extraction hints, and full guided migration UI may be separate M4 work.  
+**Definition of done:** A user can create one custom entity type and one custom claim predicate and use both in manual CRUD.  
+**Verification expectations:** API validation tests and browser verification using dev-browser skill.  
+**Out of scope:** Plugin development SDK, public module marketplace.
+
+### US-028: Support schema version evolution basics
+
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As an advanced user, I want schema changes to avoid silently corrupting existing data.
+
+**Acceptance Criteria:**
+- [ ] Compatible changes may update labels/descriptions/view metadata or loosen validation without rewriting existing data.
+- [ ] Breaking changes create or activate a new schema version.
+- [ ] Existing data may remain valid under its referenced old schema version.
+- [ ] Validation warnings for old/mismatched data appear in schema/admin views and affected detail pages.
+- [ ] AI-assisted schema migrations, if present, create reviewable proposals and never auto-apply.
+
+**Allowed stubs:** Full guided migration UI may be minimal or deferred within M4 if versioning is complete.  
+**Definition of done:** Stored data keeps schema-version references and breaking changes do not rewrite it silently.  
+**Verification expectations:** Schema API tests and browser verification using dev-browser skill.  
+**Out of scope:** Automated complex migration planning.
+
+### US-029: Polish personal relationship Module
+
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As a user managing relationships, I want a built-in Module for people, interactions, events, and places so I can remember social context over time.
+
+**Acceptance Criteria:**
+- [ ] Module includes default schemas for Person, Event, Place, Note/Source views, and relationship claims.
 - [ ] Person profiles support names, aliases, birthday uncertainty, contact/social fields, notes, tags/groups, and relationship strength.
 - [ ] Users can record events where people were met, introduced, interacted, or mentioned.
-- [ ] Users can query location-aware recall, e.g. “Who do I know in Shanghai?”
-- [ ] The module includes at least one rule pack for social-group or event-participation inference.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Users can query location-aware recall, e.g. “Who do I know in Shanghai?” through search/command where data exists.
+- [ ] Remote sharing defaults to minimal, and Remote RAG context sharing requires additional prominent confirmation.
 
-### US-012: Support reading and character-map module
-**Description:** As a reader or writer, I want a built-in module for character maps so that I can track characters, plot events, and logical relationships in a book or manuscript.
+**Allowed stubs:** External contact/calendar/GPS integrations are absent.  
+**Definition of done:** Seed/demo data demonstrates relationship CRUD, recall, views, and at least one rule pack.  
+**Verification expectations:** Browser verification using dev-browser skill, e2e happy path, permission/privacy tests.  
+**Out of scope:** Social network import, contact sync, automated location logging.
+
+### US-030: Polish reading / character-map Module
+
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As a reader or writer, I want a built-in Module for character maps so I can track characters, plot events, and logical relationships.
 
 **Acceptance Criteria:**
-- [ ] The module includes default schemas for Character/Person, Event, Place, Concept, Source, and plot/relationship claims.
+- [ ] Module includes default schemas for Character/Person, Event, Place, Concept, Source views, and plot/relationship claims.
 - [ ] Users can record first appearance, attributes, event participation, and character relationships.
-- [ ] Network view can display a character relationship graph for a selected work or tag/filter.
-- [ ] Timeline/card view can display plot events in chronological order when dates or sequence numbers exist.
-- [ ] The module includes at least one rule pack for family/relationship inference or timeline consistency checks.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Network view displays a character relationship graph for a selected work or tag/filter.
+- [ ] Timeline/card view displays plot events by dates or sequence numbers.
+- [ ] Built-in rule pack demonstrates family/relationship inference or timeline consistency checks.
 
-### US-013: Create lightweight custom schemas in-app
-**Description:** As an advanced user, I want to define custom entity and claim schemas so that JotMind can adapt to new domains beyond the built-in modules.
+**Allowed stubs:** Cross-media PDF/ebook parsing may be absent.  
+**Definition of done:** Seed/demo data demonstrates character graph, timeline, claims, citations, and reasoning.  
+**Verification expectations:** Browser verification using dev-browser skill and e2e happy path.  
+**Out of scope:** Full manuscript editor or ebook reader.
 
-**Acceptance Criteria:**
-- [ ] Users can create a custom entity type with display name, description, default properties, and validation rules.
-- [ ] Users can create a custom claim predicate with allowed argument roles and compatible entity types.
-- [ ] Users can attach default views, filters, and extraction schema hints to a custom schema.
-- [ ] The system validates new entities and claims against their custom schema before saving.
-- [ ] Custom schema definitions are stored in the active knowledge base and can be exported.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+### US-031: Import portable and structured data through reviewable flows
 
-### US-014: Author and run Prolog-like/Datalog-style restricted reasoning rules
-**Description:** As an advanced user, I want to define restricted Datalog/Horn-clause rules over graph claims using a Prolog-like UI syntax so that I can infer relationships and query complex paths.
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As a user, I want to import existing notes and structured data without uncontrolled graph mutation.
 
 **Acceptance Criteria:**
-- [ ] Users can view built-in rule packs attached to the personal relationship and reading modules.
-- [ ] Users can create or edit lightweight custom rules associated with a schema or module.
-- [ ] The system can run rules to produce inferred query results without overwriting source claims.
-- [ ] Inferred results are labeled as inferred and show which rules/source claims produced them.
-- [ ] Rule errors are displayed without corrupting stored claims or schemas.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Users can import plain text or Markdown as Notes/Sources.
+- [ ] Users can import structured CSV/table data and map columns to entity or claim fields.
+- [ ] Imports generate reviewable proposed changes before mutating graph records.
+- [ ] Import jobs expose user-visible status and failure details.
+- [ ] Permission checks restrict import mutation proposals to editors/admins/owners.
 
-### US-015: Import and export portable text/structured data
-**Description:** As a user, I want to import and export portable graph data so that I can avoid lock-in and seed the app from existing notes.
+**Allowed stubs:** Advanced format detection and cross-media import are absent.  
+**Definition of done:** Text/Markdown and CSV subset imports can create reviewable proposals and accepted records.  
+**Verification expectations:** Import API/job tests and browser verification using dev-browser skill.  
+**Out of scope:** PDF/web/chat/calendar/GPS import.
+
+### US-032: Export and backup appropriately
+
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As a Knowledge Base owner/admin, I want portable export and operator backup paths so I can avoid lock-in and maintain deployments.
 
 **Acceptance Criteria:**
-- [ ] Users can import plain text or Markdown as source notes.
-- [ ] Users can import structured table data and map columns to entity fields or claim fields.
-- [ ] Users can export graph data to JSON and Markdown.
-- [ ] Exported data includes entities, claims, schemas, sources, provenance, and rule definitions.
-- [ ] Imports generate reviewable changes before modifying the graph.
-- [ ] Typecheck/lint passes.
-- [ ] Verify in browser using dev-browser skill.
+- [ ] Owner/admin UI supports full-fidelity portable JSON export/import for a Knowledge Base.
+- [ ] JSON export includes entities, claims, claim arguments, notes, sources, citations, schemas, schema versions, rules, provenance, and audit metadata as appropriate.
+- [ ] Markdown export is clearly labeled human-readable and not guaranteed full-fidelity round trip.
+- [ ] CSV/table export is labeled structured subset.
+- [ ] Secrets such as API keys are excluded from portable graph exports.
+- [ ] PostgreSQL dump/restore is documented as server operator/admin maintenance, not normal per-user portable export.
+
+**Allowed stubs:** Backup CLI/docs may be separate from owner/admin UI.  
+**Definition of done:** Exported JSON can reconstruct a test Knowledge Base without losing graph/provenance/schema/rule data.  
+**Verification expectations:** Round-trip export/import tests, browser verification using dev-browser skill for UI.  
+**Out of scope:** Cloud backup service, automatic sync.
+
+### US-033: Harden deployment and operations
+
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As an operator, I want clear self-hosted deployment paths so JotMind can run locally, on LAN, or on a user-managed server safely.
+
+**Acceptance Criteria:**
+- [ ] Reference Docker Compose includes stateless Node API container and PostgreSQL container with AGE and `pgvector`.
+- [ ] API can serve built frontend assets for simple single-origin deployment.
+- [ ] Frontend can also be deployed as static assets with configurable API base URL.
+- [ ] Backend binds to localhost by default; LAN binding requires explicit opt-in and authenticated access.
+- [ ] CORS uses configurable allowed origins and never allows all origins by default.
+- [ ] Docs distinguish local development, local/LAN production-style use, and VPS/cloud self-hosting.
+- [ ] Public internet exposure docs require HTTPS or trusted TLS reverse proxy, allowed origins, strong auth, and hardening warnings.
+
+**Allowed stubs:** No Kubernetes or provider-specific cloud manifests.  
+**Definition of done:** Operator can follow docs to run local and LAN/VPS-style reference deployments.  
+**Verification expectations:** Smoke tests for build/serve/config and documentation review.  
+**Out of scope:** Managed hosting, cloud sync, Kubernetes.
+
+### US-034: Complete V1 verification and hardening
+
+**Target milestone:** M4 Polish/Hardening  
+**Description:** As the product owner, I want V1 to have reliable verification so autonomous implementation can be trusted.
+
+**Acceptance Criteria:**
+- [ ] `pnpm verify` runs `format:check`, `typecheck`, `lint`, `test`, `test:api`, and `test:e2e`.
+- [ ] Critical UI flows have Playwright e2e coverage: login/setup, Knowledge Base selection, manual entity/claim CRUD, search/views, AI proposal review with mock provider, reasoning run, JSON export/import.
+- [ ] API tests run against a test PostgreSQL container with migrations applied.
+- [ ] Browser verification using dev-browser skill is completed for stories with UI acceptance.
+- [ ] Stubs remaining in V1 are documented, visible to users/admins when runtime-facing, and not on critical promised paths.
+
+**Allowed stubs:** Only explicitly documented non-critical integrations.  
+**Definition of done:** Full `pnpm verify` passes in a clean environment and V1 success metrics can be demonstrated.  
+**Verification expectations:** Full standard verification suite plus browser verification.  
+**Out of scope:** Post-V1 roadmap features.
 
 ## Functional Requirements
 
-- FR-1: The system must create or open a privacy-first self-hosted knowledge base without requiring cloud sign-in.
-- FR-2: The system must store entities, claims, notes, sources, schemas, and rules in the active knowledge base.
-- FR-3: The system must support built-in entity types Person, Event, Concept, Place, Note, and Source.
-- FR-4: The system must represent relationships and facts as claims with predicate, argument roles, metadata, confidence, and provenance.
-- FR-5: The system must allow users to create, edit, delete, and merge entities.
-- FR-6: The system must allow users to create, edit, and delete claims independently of connected entities.
-- FR-7: The system must store original captured text before AI extraction occurs.
-- FR-8: When a real or mock AI provider is configured, the system must extract candidate entities and claims from text/manual/Markdown/table input. Without an AI provider, the system must store inputs and expose manual review/search/setup states without fabricating AI output.
-- FR-9: The system must present AI-generated graph updates for confirmation before applying them.
-- FR-10: The system must preserve source/provenance/citation/confidence metadata on every AI-created claim.
-- FR-11: The system must provide a universal command interface for search, filtering, question answering, and edit proposals.
-- FR-12: The system must constrain AI command outputs to strict schemas and reject invalid outputs.
-- FR-13: The system must provide fallback full-text or vector search when structured command parsing fails or has low confidence.
-- FR-14: When a real or mock AI provider is configured, the system must provide provenance-aware AI answers with clickable citations to claims and source notes. Without an AI provider, the system must show an unavailable/setup state and fallback search where applicable.
-- FR-15: The system must default to `No AI` on fresh installs, allow explicit local AI/RAG configuration, and require explicit opt-in before sending content to remote AI providers.
-- FR-16: The system must provide network, timeline/card, table, detail, and source/note views over graph data.
-- FR-17: The system must support filters by entity type, claim predicate, date range, place, person, tag, confidence, and provenance where data is available.
-- FR-18: The system must include a personal relationship management module with default schemas, views, extraction hints, and social/event reasoning rules.
-- FR-19: The system must include a reading/character-map module with default schemas, views, extraction hints, and relationship/timeline reasoning rules.
-- FR-20: The system must allow advanced users to create lightweight custom entity types, claim predicates, properties, validation rules, view defaults, and extraction hints.
-- FR-21: The system must support Prolog-like/Datalog-style restricted rule authoring/querying and label inferred results separately from stored claims.
-- FR-22: The system must display contradictions or uncertainty when claims disagree or have low confidence.
-- FR-23: The system must support import from plain text, Markdown, and structured tables.
-- FR-24: The system must support owner/admin export of knowledge-base-scoped portable JSON and Markdown including graph data, schemas, rules, sources, and provenance.
-- FR-25: The system must maintain an audit trail for AI proposals, accepted AI writes, rejected AI proposals, user edits, imports, and deletes.
+- **FR-1:** The system must create/open self-hosted Knowledge Bases without requiring cloud account sign-in.
+- **FR-2:** The database field for Knowledge Base scope must be `knowledge_base_id`.
+- **FR-3:** PostgreSQL relational tables must be canonical for entities, claims, claim arguments, notes, sources, schemas, rules, proposals, audit events, jobs, and outbox records.
+- **FR-4:** Apache AGE must be a derived Graph Projection/query index that can be rebuilt from canonical relational tables.
+- **FR-5:** Relational writes and `graph_outbox` events must occur in the same transaction.
+- **FR-6:** Claims must be first-class records with predicate, role-labeled arguments, metadata, confidence, optional valid time range, citations, and provenance.
+- **FR-7:** Multi-argument claims must be supported; canonical claims must not be modeled only as direct binary edges.
+- **FR-8:** Notes and Sources must be canonical records that can be cited and projected as graph nodes when needed.
+- **FR-9:** Users with editor permissions must be able to create, edit, merge, and soft-delete entities and claims.
+- **FR-10:** Viewers must be able to read/browse/search permitted Knowledge Base data but must not mutate graph content, proposals, imports, settings, roles, or provider config.
+- **FR-11:** Manual graph workflows and full-text/graph search must work in `No AI` mode.
+- **FR-12:** AI-generated writes must never apply without explicit authorized user confirmation.
+- **FR-13:** Structured LLM outputs must use Zod schemas and invalid executable outputs must be discarded after at most one repair retry.
+- **FR-14:** AI Proposals must preserve source/citation, provider/model when available, timestamp, confidence, and user-confirmation metadata when accepted.
+- **FR-15:** Fresh installs must default to `No AI`; remote AI and remote embeddings require explicit layered consent.
+- **FR-16:** Remote AI privacy policy must apply server, Knowledge Base, and user settings with strictest-policy-wins semantics.
+- **FR-17:** Mock AI providers must be deterministic, test/demo/dev oriented, and visibly labeled if runtime-exposed.
+- **FR-18:** The system must provide network, timeline/card, table, detail, and source/note views over graph data.
+- **FR-19:** Built-in Modules must include personal relationship management and reading/character maps as schema/view/rule-pack bundles inside a Knowledge Base.
+- **FR-20:** The personal relationship Module must default remote sharing to minimal and require additional prominent confirmation for Remote RAG context sharing.
+- **FR-21:** The system must support custom entity types, custom claim predicates, and JSONB property schema validation at V1 minimum.
+- **FR-22:** Schema definitions must be versioned, and stored records must reference the validating schema version.
+- **FR-23:** The system must support restricted Datalog/Horn-clause rules with explicit variables and Prolog-like UI syntax.
+- **FR-24:** Rules must run in a sandboxed backend-authoritative engine with no filesystem/network/process/arbitrary JavaScript/provider API access.
+- **FR-25:** Rule Runs must produce traceable Inferred Results; accepted inferred claims require explicit confirmation and preserve provenance.
+- **FR-26:** Portable JSON import/export must be full-fidelity for Knowledge Base round trip.
+- **FR-27:** Markdown export must be human-readable, not guaranteed full-fidelity round trip.
+- **FR-28:** CSV/table import/export must be a structured subset flow.
+- **FR-29:** PostgreSQL dump/restore must be documented as operator/admin maintenance.
+- **FR-30:** Audit Events must record authenticated users for AI proposals, accepted AI writes, rejected proposals, user edits, imports, exports, deletes, remote AI call metadata, role changes, token changes, and significant settings changes.
 
 ## Non-Goals
 
-- No public module marketplace in the first version.
-- No real-time collaboration, public sharing platform, comments, presence, or fine-grained per-entity/claim permissions in the first version. V1 includes only coarse knowledge-base-level roles: owner, admin, editor, and viewer.
-- No mandatory cloud account, mandatory third-party cloud storage, or cloud-first sync. Local/server user accounts may exist for access control and multi-user boundaries. Optional self-hosted or user-managed cloud/server deployment is allowed.
-- No mobile-native offline sync implementation in the first version.
-- No calendar, GPS, social-contact, or external contact integrations in the first version.
+- No mandatory cloud account, mandatory third-party cloud storage, or cloud-first sync.
+- No public module marketplace in V1.
+- No real-time collaboration, public sharing platform, comments, presence, or fine-grained per-entity/claim permissions in V1.
+- No mobile-native offline sync implementation in V1.
+- No fully disconnected browser-only graph database operation when backend/database are unavailable.
+- No calendar, GPS, social-contact, or external contact integrations in V1.
 - No first-class cross-media ingestion for images, PDFs, web pages, calendar/GPS logs, or chat exports.
 - No AI-generated writes that bypass user confirmation.
-- No remote AI provider processing without explicit user opt-in.
-- No fully unrestricted plugin system that can read or mutate user data without permission controls.
+- No remote AI provider processing without explicit layered opt-in.
+- No hidden remote calls that fabricate mock/demo AI behavior.
+- No unrestricted Prolog runtime, arbitrary recursion, arbitrary JavaScript in rules, unrestricted negation-as-failure, or rule access to filesystem/network/process/provider APIs.
+- No Redis or required external queue service for V1 jobs.
+- No Electron/Tauri/native sidecar requirement for V1.
+- No Kubernetes manifests or provider-specific cloud integrations in V1.
 
 ## Design Considerations
 
-- The app should make graph structure visible without forcing users to think in database terms.
-- AI proposals should be shown as clear diffs, e.g. “Create Person: Simon,” “Add Claim: Simon attended ICRA 2025,” or “Set Person.school = Tsinghua University.”
-- Provenance should be visible wherever claims are displayed, but compact enough not to overwhelm normal browsing.
-- Network view should support selecting nodes/edges and opening detail drawers without losing graph context.
+- The UI should say **Knowledge Base**, not workspace.
+- Graph structure should be visible without forcing users to think in database terms.
+- AI Proposals should appear as clear diffs, e.g. “Create Person: Simon,” “Add Claim: Simon attended ICRA 2025,” or “Set Person.school = Tsinghua University.”
+- Provenance should be visible wherever claims appear, but compact enough for normal browsing.
+- Remote AI actions must show badges/labels before calls are made.
+- Runtime mock AI must be labeled `Mock AI / deterministic demo output`.
+- Network view should support selecting nodes/edges and opening detail drawers without losing context.
 - Timeline/card view should work for both life events and plot events.
-- Table view should support bulk inspection and filtering for users who prefer structured editing.
-- Custom schema creation should be lightweight and guided; it should not require plugin development.
-- Reasoning output should distinguish stored claims from inferred results using labels or badges.
+- Table view should support bulk inspection/filtering for structured editing.
+- Reasoning output should distinguish stored Claims, Inferred Results, and Accepted Inferred Claims.
+- Custom schema creation should be lightweight and guided; it must not require plugin development.
 
 ## Technical Considerations
 
-- The first implementation must use a relational-graph hybrid data model backed by PostgreSQL plus Apache AGE as the source of truth for knowledge-base data.
-- The app may use Dexie.js/IndexedDB only for non-canonical browser-local data such as UI preferences, temporary client cache, draft state, or offline-tolerant read caches. Dexie/IndexedDB must not be treated as the canonical v1 knowledge-base store.
-- The data access layer must be isolated behind repository/service abstractions so graph storage, full-text/vector indexing, backup/restore, and future storage changes do not leak into UI components.
-- Claims should be modeled as first-class records rather than only direct edges so they can carry confidence, time range, provenance, source citations, and multiple arguments.
-- AI command parsing must use strict schemas and validation before proposals are displayed or executed.
-- Local RAG should index entities, claims, notes, sources, aliases, tags, and recent activity.
-- Remote LLM integration must be isolated behind explicit user settings and must expose clear consent copy.
-- Prolog-like/Datalog-style restricted reasoning should be implemented in a way that can reference stored claims and return inferred results with traceability.
-- Custom schemas should be versioned or otherwise migration-aware so future schema edits do not silently corrupt existing graph data.
-- Import flows should generate reviewable proposed changes rather than directly mutating graph data.
-- Export should be complete enough to reconstruct the knowledge base, including schemas and provenance. V1 must support portable JSON import/export, Markdown export, CSV/table import/export, and full database backup/restore where available through PostgreSQL-compatible dump/restore tooling.
+- The data access layer must be isolated behind repository/service abstractions so storage, search, projection, backup/restore, and future storage changes do not leak into UI components.
+- API boundaries should validate route params, query params, request bodies, and responses with Zod/shared types where practical.
+- The API and worker containers must not depend on local disk state for correctness.
+- Environment variables provide server-global secrets/config. In-app settings may provide user-level provider overrides where allowed.
+- Secrets such as API keys must never be included in portable Knowledge Base exports.
+- Raw LLM prompt/response retention is disabled by default, user-configurable for debugging, and must never include API keys.
+- Browser storage such as IndexedDB/Dexie may only store non-canonical UI preferences, draft state, temporary cache, or offline-tolerant read caches.
+- Database migrations may run on startup only when explicitly enabled by configuration; otherwise deployments use documented migration commands and fail safely on incompatible schemas.
 
-### Resolved Platform and Runtime Decisions
+## Ralph / Amp Definition of Done
 
-- The first implementation must be a platform-agnostic webapp, not a desktop-only application.
-- The v1 runtime requires a self-hostable web backend for serving the app, coordinating local or remote AI endpoints, exposing platform-neutral service APIs, and accessing the PostgreSQL plus Apache AGE database. The backend must be able to run on a user's local machine/LAN and should also be deployable to a user-managed cloud server or VPS.
-- The v1 knowledge base source of truth must live in PostgreSQL plus Apache AGE, not in browser-managed storage. Browser storage may be used only for non-canonical UI preferences, drafts, or caches.
-- Core manual graph workflows must work without third-party internet services when the web backend and database are running and reachable. V1 does not require fully disconnected browser-only operation when the backend/database are unavailable.
-- The target browser scope is desktop and mobile browsers. Mobile browsers may use the web UI when connected to the local/server/cloud backend; full mobile-browser-local graph database operation is not required in v1. Implementation should avoid APIs that make the UI Chromium-desktop-only unless a standards-based fallback is provided.
-- Local AI generation must not require bundled local model weights in v1. The app may support an optional user-installed local HTTP inference endpoint, such as an Ollama-compatible or OpenAI-compatible local server, while still functioning without it.
-- The v1 architecture should not assume Electron, Tauri, native sidecars, or desktop-only packaging. Code may leave room for future desktop wrappers, but v1 acceptance criteria must be satisfiable as a webapp.
+For any implementation story:
 
-### Resolved Storage, Search, and Backup Decisions
-
-- PostgreSQL plus Apache AGE is the v1 canonical storage engine and graph-query substrate.
-- The repository/service layer must model the graph as a relational-graph hybrid: relational tables store canonical entity, claim, note, source, schema, rule, provenance, and audit metadata; Apache AGE stores or derives graph structures needed for graph traversal/querying.
-- The app must provide Docker Compose or equivalent developer/user setup automation for PostgreSQL plus Apache AGE.
-- V1 search without AI configured must support full-text token search, graph filters, and vector search when embeddings are available.
-- Portable backup/export must include JSON import/export, Markdown export, and CSV/table import/export. Full database backup/restore must also be supported where available through PostgreSQL-compatible dump/restore tooling.
-- Portable imports/exports are scoped to a knowledge base and available to knowledge-base owners/admins. Full database backup/restore is a server-operator/admin maintenance function, not a normal per-user action.
-- The app should warn users that local/server database persistence depends on the configured database volume/backups and that browser site data or server volumes may be deleted outside the app.
-
-### Resolved AI Provider, Embedding, and Test Decisions
-
-- All LLM and embedding integrations must go through provider adapter interfaces. UI components and graph repositories must not call vendor SDKs or provider HTTP APIs directly.
-- V1 local inference must support both Ollama-native HTTP APIs and OpenAI-compatible local HTTP endpoints behind one adapter layer.
-- V1 remote LLM support must include OpenAI and Anthropic behind one adapter layer. Remote providers remain disabled until explicitly configured and allowed by the selected privacy mode.
-- Provider settings may be configured through both environment variables and in-app settings. Environment variables override in-app settings when both are present.
-- Secrets such as API keys must not be included in portable graph exports. If stored through in-app settings, they must be separated from exported knowledge-base data.
-- When no local or remote LLM is configured, manual graph workflows, full-text search, graph-filter search, and vector search with existing embeddings must continue to work. Generated answers, LLM extraction proposals, and LLM command parsing must be disabled or shown as unavailable; the system must not fabricate AI output with hidden remote calls.
-- Embeddings must be supported through both local and remote embedding providers behind one adapter. Remote embeddings require explicit opt-in and privacy handling as remote AI provider processing, with separate consent from remote LLM calls where configured.
-- Vector embeddings must be stored in PostgreSQL using `pgvector`.
-- Normal automated tests and CI must use deterministic mock LLM and embedding providers. Optional integration tests may call real local or remote providers only when the required endpoint configuration or API keys are explicitly present.
-
-### Resolved AI Privacy and Consent Decisions
-
-- V1 must expose four AI privacy modes: `No AI`, `Local AI`, `Remote per request`, and `Remote always allowed`.
-- Fresh installs must default to `No AI`. Manual graph workflows and full-text/graph search must work in this mode; local and remote AI providers must be configured explicitly.
-- Remote LLM processing requires both a global remote-enable setting and either per-request user confirmation (`Remote per request`) or an explicit always-allowed mode (`Remote always allowed`).
-- Remote embeddings require separate consent from remote LLM calls because embedding jobs may batch-index larger portions of the knowledge base.
-- Remote data sharing scope must be configurable between at least two options: minimal scope, which sends only the current user input and explicitly selected citations/context; and RAG context scope, which may send retrieved relevant notes, claims, entities, and source excerpts needed for the current task.
-- The app must show visible badges or labels when an AI feature will use a remote provider.
-- In `Remote per request` mode, confirmation dialogs must show the provider, model, feature being used, and categories of content that will be sent before the remote call is made.
-- The audit trail must record remote AI call metadata including timestamp, provider, model, feature, selected privacy mode, and categories of content sent. The audit trail must not store full prompts, full note content, API keys, or full model responses by default.
-- Accepted AI writes remain separately audited with proposal, provenance, citation, confidence, and user-confirmation metadata.
-
-### Resolved Structured AI Output and Proposal Decisions
-
-- Structured LLM outputs must be defined with Zod schemas in code. Schemas should be exported to JSON Schema where provider APIs, documentation, or validation tooling need JSON Schema.
-- The shared schema layer must cover at minimum extraction candidates, graph edit proposals, command interpretations, answer-with-citations payloads, provider configuration, and audit metadata.
-- When an LLM returns invalid or partially valid structured output, the system should retry once with a repair prompt. After the retry, valid items may be kept and invalid items must be discarded from executable proposals.
-- Invalid or discarded structured-output items may be retained in debugging logs when the user or developer has enabled raw AI debug retention. They must not be executable and must not appear as normal pending graph proposals.
-- LLM-generated graph edit proposals may include create, update, delete, and merge operations, but none may be applied without explicit user confirmation.
-- The review UI must support both batch-level actions and item-level accept, reject, and edit actions.
-- Confidence must store both model-provided confidence and system validation confidence when available. UI may display a derived low/medium/high label, but the underlying numeric scores should be retained.
-- Accepted AI-created or AI-modified claims are stored as normal graph claims, while provenance must continue to show AI origin, source/citation, provider/model where available, timestamp, confidence, and user-confirmation metadata.
-- Raw LLM prompt/response retention must be user-configurable. It must be disabled by default for privacy, may be enabled for debugging/reproducibility, and must never include API keys.
-
-### Resolved Implementation Stack and Repository Decisions
-
-- V1 must use TypeScript across the frontend, backend, and shared packages, running on Node.js for backend/server tooling.
-- The frontend must use React plus Vite.
-- The backend must use Express with a strict TypeScript/Zod project template. Agents must not implement free-form untyped Express routes; request bodies, query parameters, route params, and responses should be validated or typed through shared Zod schemas where practical.
-- The repository should be organized as a monorepo with `apps/web`, `apps/api`, and `packages/shared` or equivalent package boundaries for shared schemas/types/utilities.
-- The web UI must communicate with the backend through REST JSON APIs with Zod validation at API boundaries.
-- PostgreSQL schema management must use Drizzle ORM and Drizzle migrations.
-- Docker Compose must be provided for PostgreSQL plus Apache AGE, `pgvector`, and optional local inference services where practical. Manual installation/setup documentation must also be provided for users or developers who do not use Docker Compose.
-
-### Resolved Access Control, Networking, and Knowledge-Base Scope Decisions
-
-- V1 must support multi-user accounts on the local/server backend. These are local/server product accounts, not mandatory cloud accounts.
-- The backend must bind to `localhost` by default. Users or administrators may explicitly opt into LAN-accessible binding for mobile or other-device browser access.
-- LAN/mobile browser access requires full username/password account authentication. Trusted-LAN unauthenticated access is not acceptable in v1.
-- HTTPS is not mandatory for localhost development/use. The backend should support HTTPS when the user or administrator provides certificates, and documentation should warn users about HTTP risks when enabling LAN access.
-- V1 must support multiple knowledge bases selectable in the UI.
-- The data model must include stable identifiers, ownership/scope fields where appropriate, timestamps, and audit metadata sufficient to support future cloud sync/account features, but v1 must not implement cloud sync UI or cloud sync APIs.
-
-### Resolved Multi-User Permission and Account Decisions
-
-- V1 must support role-based access per knowledge base.
-- V1 roles must include owner, admin, editor, and viewer.
-- Owners can manage the knowledge base, delete/archive it, assign roles, manage knowledge-base settings, and perform owner/admin exports.
-- Admins can manage users/roles within the knowledge base, manage knowledge-base settings, inspect audit/job status, and perform admin exports, but cannot supersede the owner for destructive owner-only actions unless explicitly granted by the owner or server operator.
-- Editors can create, edit, merge, and soft-delete graph content, run imports that generate reviewable changes, run AI-assisted proposal flows allowed by the knowledge-base/provider settings, and accept/reject proposals within their edit scope.
-- Viewers can read/browse/search the knowledge base and view permitted provenance/audit-derived metadata, but cannot mutate graph content, accept proposals, manage users, change provider settings, or run imports. Viewer access to AI answer generation may be allowed only if it does not create graph writes and complies with privacy/provider settings.
-- Full database backup/restore and server-global configuration remain server-operator/admin maintenance responsibilities outside normal knowledge-base role actions.
-- AI provider settings and API keys must support server-global defaults plus per-user overrides. Environment-variable provider settings remain server-global overrides where configured.
-- Audit logs must record which authenticated local/server user performed each auditable action.
-- Raw AI debug logs, prompts, and responses are visible only to the user who generated them, unless a later explicit permission model changes this.
-- First-run setup must create the initial admin user, and a settings UI must support basic user management and role assignment after setup.
-
-### Resolved Self-Hosted and Cloud-Deployable Backend Direction
-
-- The backend must be designed as a self-hostable service that can run locally, on a LAN server, or on a user-managed cloud server/VPS.
-- The web client must be able to connect to a remotely hosted backend over HTTP(S), subject to authentication and deployment configuration.
-- Optional cloud/server deployment must not change the privacy baseline: there is still no mandatory vendor-hosted account, no mandatory third-party storage, and no remote AI provider processing without the configured consent flow.
-- Deployment documentation should distinguish local development, local/LAN production-style use, and user-managed cloud/VPS deployment.
-
-### Resolved Deployment, Origin, and Operations Decisions
-
-- V1 must provide a Docker Compose reference deployment for local, LAN, VPS, and self-hosted use. The reference deployment should include a single stateless Node API container and a PostgreSQL container with Apache AGE and `pgvector` enabled.
-- The Node API container must be stateless and configurable through environment variables so future Kubernetes or platform-as-a-service deployments remain possible. V1 must not include Kubernetes manifests or provider-specific cloud integrations.
-- The API must be able to serve the built frontend assets for simple single-origin deployments. The frontend must also be deployable separately as static assets configured with an API base URL.
-- CORS must use configurable allowed origins with localhost-oriented defaults for development. V1 must not allow all origins by default.
-- Server-global secrets and deployment configuration must be provided through environment variables. In-app settings may provide user-level provider overrides where allowed by the permissions model.
-- V1 account recovery must not depend on email. Password/admin recovery should be handled through CLI, environment-seeded reset, or documented manual database procedure.
-- Database migrations may run on startup only when explicitly enabled by configuration. Otherwise, deployments should use documented migration commands and fail safely when the schema is incompatible.
-- Public internet exposure is supported only when the operator configures HTTPS or a trusted TLS-terminating reverse proxy, allowed origins, strong authentication, and deployment hardening. Documentation must warn against exposing an unsecured HTTP deployment publicly.
-
-### Resolved Authentication, Session, and API Security Decisions
-
-- Browser authentication must use server-side sessions with secure HTTP-only cookies. Cookie security settings must be configurable for localhost development versus HTTPS deployments.
-- Server-side session state must be stored in a PostgreSQL session table. Production/reference deployments must not rely on in-memory session state, so the Node API container remains stateless.
-- V1 must support personal access tokens per user for non-browser clients, import/export automation, or scripts. Token creation and revocation must be auditable.
-- Passwords must be hashed with Argon2id.
-- Cookie-authenticated mutation requests must include CSRF protection.
-- The backend must implement general per-user and/or per-IP rate limiting for authentication routes and expensive endpoints, including AI, import/export, search, and backup/restore operations where appropriate.
-- Account creation must be admin-controlled after first-run setup creates the initial admin. Public self-registration must not be enabled by default.
-- Every knowledge-base API route must enforce role/permission checks on the backend. UI-only hiding of unauthorized actions is insufficient.
-
-### Resolved Graph Persistence and Schema Representation Decisions
-
-- Canonical knowledge-base data must live in relational PostgreSQL tables. Apache AGE is a projected graph query/index layer, not the canonical source of truth.
-- Relational writes and `graph_outbox` events must be recorded in the same database transaction. A background projector must consume the outbox and update the AGE graph projection. The system must also support full graph projection rebuilds or on-demand repair from canonical relational tables.
-- Multi-argument claims must be represented in the graph projection as claim nodes connected to entity nodes by role-labeled edges. Agents must not reduce canonical claims to direct binary entity-to-entity edges only.
-- Custom entity and claim properties must be stored in JSONB columns with schema validation.
-- Stable IDs must use UUIDv7.
-- User and AI delete actions should soft-delete entities, claims, notes, sources, schemas, and rules by default while preserving auditability. Hard-delete should be reserved for explicit admin purge/maintenance flows.
-- Schema definitions must be versioned, and stored data points must reference the schema version used for validation at creation/update time.
-
-### Resolved Background Job and Worker Decisions
-
-- V1 background work must use PostgreSQL-backed job and outbox tables. Agents must not introduce Redis or another required external queue service for v1.
-- Workers must support both simple in-process execution inside the API process and a separate worker process mode for scaling or production-style deployments.
-- Durable job state, queue state, retry state, and projection state must live in PostgreSQL. The API and worker containers must not depend on local disk state for correctness.
-- V1 background jobs include at minimum Apache AGE graph projection, embedding indexing, AI extraction/answer jobs where asynchronous execution is useful, import/export jobs, and backup/restore jobs.
-- Failed jobs must retry with capped exponential backoff and move to a dead-letter/failed state after a configured maximum number of attempts.
-- The UI must show user-visible status for that user's imports, AI jobs, indexing tasks, and backup/export operations. Admins must be able to inspect global job status and failed/dead-letter jobs.
-
-### Resolved Prolog-Style Reasoning Direction
-
-- V1 reasoning must use a restricted Datalog/Horn-clause rule layer implemented in TypeScript, exposed through a Prolog-like syntax in the UI.
-- The rule engine should compile rules to SQL and/or Apache AGE queries where practical. Agents must not introduce an unrestricted external Prolog runtime as a required v1 dependency.
-- Rule execution should run on the backend for stored graph data. Browser-side execution may be used for editing previews, validation, or examples, but persisted graph reasoning must be backend-authoritative.
-- User-authored rules must be sandboxed as pure declarative rules with no filesystem, network, process, arbitrary JavaScript, or provider API access.
-- V1 rules should support Horn clauses over entities/claims plus comparison predicates for dates and numbers. More advanced Prolog features may be deferred.
-- Normal inferred results may be cached as derived results with invalidation. When a user accepts an inferred result as a graph update, it must be materialized as a separate inferred/accepted claim distinct from original user-entered or AI-extracted claims.
-- Rules may create reviewable graph edit proposals, but rules must not auto-write claims without user confirmation.
-- Rule authoring must provide inline validation before save and a runtime error panel for execution failures.
-
-### Resolved Rule Language Syntax and Compiler Decisions
-
-- V1 must support both a text rule syntax and a guided builder UI. The canonical text syntax is Datalog-like with explicit variables, for example: `knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).`
-- Low-level graph predicates are canonical. At minimum, rules should be able to reference predicates equivalent to `entity(id, type, name)`, `claim(id, predicate)`, and `arg(claimId, role, entityId)`.
-- The system may generate higher-level schema predicates, such as `met(?personA, ?personB, ?event)`, but generated predicates must compile down to canonical low-level facts.
-- Arbitrary user recursion is out of scope for v1. V1 may provide built-in recursive templates such as path within a maximum depth, transitive closure, and related-within-N-hops.
-- Built-in filters must include equality, date comparisons, number comparisons, string contains/prefix matching, and tag membership. Geospatial helper predicates may be deferred unless required by a core v1 scenario.
-- Stratified negation with safety checks is the target negation model. If implementation risk is high, agents may initially ship no negation and add stratified negation after the compiler is stable, but they must not implement unrestricted Prolog negation-as-failure in v1.
-- Invalid rules may be saved as drafts, but invalid rules cannot be enabled or executed against the knowledge base.
-- Built-in rule packs must cover both personal relationship management and reading/character-map modules.
-
-### Resolved Custom Schema Evolution and Migration Decisions
-
-- When a custom schema changes, the user must be able to choose whether existing data keeps its old schema version, is migrated through a reviewable migration flow, or is left under the old schema while a new schema/version is used going forward.
-- Compatible schema changes that may be applied without migrating existing data include adding optional fields, changing display labels/descriptions/view metadata, and loosening validation rules.
-- Breaking schema changes should create or activate a new schema version. Existing data may remain on the old referenced schema version and should not be silently invalidated or rewritten.
-- AI extraction must use the latest active schema version by default.
-- Validation warnings for old or mismatched data should be visible in schema/admin views and on affected entity/claim detail pages, while preserving the fact that the data may still be valid under its referenced old schema version.
-- AI may assist schema migrations by proposing reviewable migration plans or graph edit proposals, but AI-assisted migrations must never auto-apply without user confirmation.
-
-### Resolved Implementation Staging and Autonomous Workflow Decisions
-
-- V1 implementation should be staged through vertical, demoable milestones rather than purely backend-only or frontend-only phases: foundation, manual graph, AI/RAG, reasoning, and polish.
-- The minimum first milestone is a bootable app with authentication, database connectivity, knowledge-base selection, and basic entity/claim CRUD.
-- The first user-facing graph demo milestone is manual graph CRUD plus search and basic views.
-- The first autonomous implementation wave may defer advanced implementations, but not their architecture. Full custom schema/rule UI, real remote/local AI providers, import/export/backup, and advanced multi-user UX may be deferred, while interfaces, tables, stubs, permission middleware, audit model, and outbox/job foundations must exist from the start where they affect later compatibility.
-- Every implementation story must include API tests where applicable, UI browser verification where applicable, and typecheck/lint. Agents must update relevant tests and pass the standard verification commands before considering a story complete.
-- Mock AI providers are allowed before real provider adapters are implemented, but only behind the final adapter interfaces and clearly marked as mock in the UI/configuration where exposed at runtime.
-- The relational canonical model should be implemented first. Foundation and manual graph milestones may initially stub Apache AGE projection, but the projection interfaces, `graph_outbox`, and repair/rebuild boundaries must exist so later AGE implementation does not require changing canonical write paths. Before v1 completion, real AGE projection/querying must support graph traversal features that depend on it.
-
-### Resolved Verification, Tooling, and Definition-of-Done Decisions
-
-- The monorepo must use `pnpm` as the package manager.
-- Standard package scripts must include `format`, `format:check`, `typecheck`, `lint`, `test`, `test:api`, `test:e2e`, `verify:quick`, and `verify`.
-- `pnpm verify:quick` should run the fast checks suitable for most iteration, at minimum formatting check, typecheck, lint, and non-e2e tests.
-- `pnpm verify` should run the full standard verification suite, including `format:check`, `typecheck`, `lint`, `test`, `test:api`, and `test:e2e`.
-- Agents should auto-format changed code with the standard formatter before final verification.
-- Critical UI flows must have Playwright e2e coverage. Stories with UI acceptance criteria must also be verified in a browser using the appropriate browser/dev-browser workflow.
-- API tests must run against a test PostgreSQL container with migrations applied. Tests must not depend on a developer's manually populated local database.
-- A story may be considered complete with AGE, AI, import/export, or backup subsystems stubbed only when the story is not specifically about that subsystem and the final interfaces/stubs are documented and tested.
+- Confirm the story target milestone and do not implement out-of-scope items.
+- Preserve the canonical terminology: Knowledge Base and `knowledge_base_id`.
+- Add or update shared Zod schemas for API contracts where applicable.
+- Add backend permission checks; do not rely on UI-only restrictions.
+- Add Audit Events for auditable mutations and remote AI metadata where applicable.
+- For canonical graph writes, write relational rows and `graph_outbox` events in one transaction.
+- Keep stubs only where the story allows them; stubs must be visible in runtime/admin UI or logs if user/operator-facing.
+- Add/update API tests for backend behavior.
+- Add/update UI tests and browser verification using dev-browser skill for UI stories.
+- Run the narrowest meaningful verification during iteration and `pnpm verify:quick` before marking a normal story complete.
+- Run `pnpm verify` for milestone completion and V1 completion.
+- Do not hard-code test-only behavior into production paths.
+- Do not call vendor AI SDKs or provider HTTP APIs outside provider adapters.
+- Do not treat Apache AGE as canonical storage.
 
 ## Success Metrics
 
-- A new user can create or access a self-hosted/local-server knowledge base and add their first entity/claim without signing into a cloud service.
-- With a real or mock AI provider configured, a user can capture a paragraph and review AI-proposed graph updates in under 60 seconds.
+- A new user can create or access a self-hosted/local-server Knowledge Base and add their first entity/claim without signing into a cloud service.
+- Manual graph workflows and full-text/graph search work in `No AI` mode.
+- With a configured mock/local/remote provider, a user can capture a paragraph and review proposed graph updates in under 60 seconds.
 - 100% of AI-created claims include provenance/source, confidence, and creation metadata.
-- 0 AI-generated writes occur without explicit user confirmation in default mode.
-- Users can answer at least five representative questions across the two showcase domains using search/command/RAG:
+- 0 AI-generated writes occur without explicit user confirmation.
+- Users can answer at least five representative questions across showcase domains using search/command/RAG where configured:
   - “Who did I meet at this event?”
   - “Who do I know in this city?”
   - “What events involve this person?”
   - “How are these two characters connected?”
   - “Which claims support this answer?”
-- Built-in Prolog-like/Datalog-style restricted rules can produce traceable inferred results for both relationship management and reading/character-map data.
+- Built-in restricted Datalog/Horn-clause rules produce traceable Inferred Results for both relationship management and reading/character-map data.
 - Users can create one custom entity type and one custom claim predicate in-app without editing code.
-- Users can export their graph data and re-import it without losing entities, claims, sources, schemas, or provenance.
+- Portable JSON export/import can reconstruct a Knowledge Base without losing entities, claims, claim arguments, notes, sources, citations, schemas, rules, or provenance.
 
 ## Open Questions
 
-- None currently. Reopen this section when new product or architecture decisions become ambiguous.
+- What seed/demo dataset should be used for the first user-facing demo and V1 e2e tests?
+- Which minimal set of built-in claim predicates should ship before custom predicates are available?
+- Should V1 expose raw AI debug retention only through user settings, or also through server/operator configuration?
+
+## Changelog for This PRD Revision
+
+- Added a glossary and normalized user-facing terminology to **Knowledge Base** with database field `knowledge_base_id`.
+- Replaced ambiguous storage wording with the canonical rule: relational PostgreSQL tables are canonical; Apache AGE is a derived Graph Projection.
+- Added a milestone matrix for M0 Foundation through M4 Polish/Hardening and mapped every story to a target milestone.
+- Split broad stories into 34 smaller implementation stories suitable for Ralph/Amp iterations.
+- Added story-level Target milestone, Allowed stubs, Definition of done, Verification expectations, and Out of scope annotations.
+- Clarified Module semantics as schema/view/rule-pack bundles inside a Knowledge Base, not separate databases or permission scopes.
+- Clarified Note/Source modeling as canonical provenance records that may be projected into graph views.
+- Added layered AI privacy policy semantics across server, Knowledge Base, and user settings, including viewer AI behavior.
+- Added mock AI provider constraints for development/test/demo use and visible runtime labeling.
+- Narrowed V1 custom schema scope to custom entity type, custom claim predicate, and JSONB property validation, with schema version references from the start.
+- Narrowed V1 reasoning scope to restricted Datalog/Horn-clause text rules, built-in rule packs, low-level predicates, and result traces.
+- Clarified portable JSON versus Markdown/CSV export and operator PostgreSQL backup responsibilities.
+- Added personal relationship remote-sharing sensitivity requirements.
+- Added a Ralph / Amp Definition of Done section for autonomous implementation consistency.
