@@ -2,11 +2,11 @@
 
 ## Status
 
-- **Document state:** Improved work-in-progress PRD for Ralph / Amp multi-agent implementation.
+- **Document state:** Ralph-ready work-in-progress PRD for a single monolithic autonomous build loop.
 - **V1 definition:** V1 means milestones **M0 Foundation** through **M4 Polish/Hardening** are complete.
-- **First autonomous implementation wave:** M0 Foundation plus the architecture seams/stubs required by later milestones.
+- **First autonomous implementation wave:** M0 Foundation plus the centralized architecture seams required by later milestones.
 - **First user-facing demo:** M1 Manual Graph.
-- **Implementation rule:** Do not implement code from this PRD until a story is selected for execution.
+- **Implementation rule:** The loop autonomously selects the most important not-yet-done item from `fix_plan.md` within the active milestone.
 
 ## Introduction
 
@@ -36,8 +36,8 @@ V1 must showcase the same graph-note foundation through two built-in modules:
 - **Accepted Inferred Claim:** A Claim created from an Inferred Result after explicit user confirmation. It remains distinct from original user-entered or AI-extracted claims through provenance metadata.
 - **Schema Definition:** A stored definition of entity types, claim predicates, JSONB property schemas, compatible argument roles, validation rules, and optional view metadata.
 - **Schema Version:** An immutable or migration-aware version of a Schema Definition. Stored entities/claims reference the schema version used for validation.
-- **Rule Definition:** A stored restricted Datalog/Horn-clause rule, built-in rule-pack rule, or draft rule associated with a Knowledge Base and optionally a Module/schema.
-- **Rule Run:** One execution of a Rule Definition or rule pack against a Knowledge Base, producing traceable Inferred Results or validation/runtime errors.
+- **Rule Definition:** A stored restricted Datalog/Horn-clause rule, built-in rule-pack rule, or draft rule associated with a Knowledge Base and optionally a Module/schema. V1 rules may use bounded/depth-limited recursion with an explicit configurable depth/iteration cap.
+- **Rule Run:** One execution of a Rule Definition or rule pack against a Knowledge Base, producing traceable Inferred Results or validation/runtime errors. Rule Runs must enforce configured recursion/iteration limits.
 - **Graph Projection:** A derived Apache AGE graph index/query projection rebuilt from canonical relational PostgreSQL tables and `graph_outbox` events.
 - **Audit Event:** An immutable record of security-, privacy-, or data-impacting actions such as login, role change, user edit, AI Proposal, accepted AI write, import, export, delete, remote AI call metadata, job status action, or token change.
 - **Job / Background Job:** Durable PostgreSQL-backed work item for AGE projection, embedding indexing, AI extraction/answers, imports, exports, backups, or similar asynchronous tasks.
@@ -59,9 +59,70 @@ V1 must showcase the same graph-note foundation through two built-in modules:
 | --- | --- | --- | --- |
 | **M0 Foundation** | Bootable secure monorepo app with database, auth, Knowledge Base scope, canonical schema, jobs/outbox seams, and visible stubs. | A developer/operator can run the app, sign in, select/create a Knowledge Base, and call typed health/session/KB APIs. | US-001 to US-007 |
 | **M1 Manual Graph** | First user-facing graph demo with manual CRUD, search, basic views, permissions, audit, and source/note display. | A user can create entities/claims/notes/sources, view them in network/table/detail/source views, and search without AI. | US-008 to US-014 |
-| **M2 AI/RAG** | Optional AI provider layer, proposals, command parsing, citations, privacy layering, embeddings, and mock/demo controls. | With mock/local/remote provider configured, a user captures text, reviews proposed edits, and asks cited questions without auto-writes. | US-015 to US-021 |
+| **M2 AI/RAG** | Optional AI provider layer, proposals, command parsing, citations, privacy layering, embeddings, and mock/demo controls. | With mock/local provider configured, or a remote skeleton later verified by an operator, a user captures text, reviews proposed edits, and asks cited questions without auto-writes. | US-015 to US-021 |
 | **M3 Reasoning** | Restricted Datalog/Horn-clause rule packs, text rules, rule runs, traces, inferred results, and accepted inferred claims. | Built-in rules infer traceable relationship/reading results and users can author simple safe text rules. | US-022 to US-026 |
 | **M4 Polish/Hardening** | Custom schema UI completion, import/export, built-in module polish, jobs/admin UX, deployment/docs, security hardening, and e2e coverage. | V1-ready self-hosted app with portable JSON export/import, polished Modules, operational docs, and full verification. | US-027 to US-034 |
+
+## Ralph Operating Model
+
+### Execution Model
+
+- V1 is built by one monolithic Ralph loop operating on one repository.
+- The loop may fan out to many subagents for codebase search and bounded file-write tasks.
+- Exactly one subagent may run build/test/verification at a time to avoid back-pressure overload.
+- A story usually spans many loops; each loop does one most-important item, records learnings, and leaves the tree in the best verifiable state it can.
+- The loop chooses the next item autonomously from `fix_plan.md` within the active milestone; there is no separate manual story-selection gate.
+
+### Repository Operating Files
+
+| File/path | Purpose | Loop usage |
+| --- | --- | --- |
+| `specs/` | Single source of truth for one-concern-per-file implementation specs derived from this PRD. | The loop allocates only the relevant spec files for the current `fix_plan.md` item instead of the whole PRD. |
+| `fix_plan.md` | Prioritized append/prune TODO stack. | Bootstrapped from US stories plus the milestone matrix; sorted by priority within the active milestone; updated every turn with complete/incomplete status, discovered bugs, deferred manual checks, and pruned completed items. |
+| `AGENT.md` | Operational source of truth for build/run/test commands, verification tiers, and environment setup. | Updated briefly when the loop learns a correct command or setup detail; never used for status reports. |
+
+### `specs/` File Map
+
+- `specs/architecture.md` — stack, monorepo boundaries, source-of-truth rules, AGE projection seam.
+- `specs/data-model.md` — canonical tables, claims/arguments, jobs, audit, and `graph_outbox`.
+- `specs/auth-security.md` — accounts, sessions, CSRF, roles, rate limits, audit security events.
+- `specs/ai-privacy.md` — policy layering, deterministic mock rules, provider readiness, remote consent.
+- `specs/reasoning.md` — restricted Datalog/Horn-clause syntax, bounded recursion, predicates, traces.
+- `specs/modules/personal-relationship.md` — personal relationship schemas, views, privacy defaults, rule packs.
+- `specs/modules/reading-character.md` — reading/character schemas, timeline views, rule packs.
+- `specs/import-export.md` — portable JSON, Markdown/CSV subset behavior, import proposal flows.
+- `specs/deployment.md` — local/LAN/VPS deployment, CORS, binding, backups, verification commands.
+- `specs/glossary.md` — canonical terms and database naming.
+
+Per-story acceptance criteria from this PRD must be mirrored into the relevant spec file before or during implementation so future loops can work from small deterministic context. If a spec and this PRD conflict, update the spec/PRD pair before coding.
+
+### Dependency Ordering
+
+| Story | Prerequisites | Ordering note |
+| --- | --- | --- |
+| US-001 | None | Establish package/workspace scripts first. |
+| US-002 | US-001 | Database container/migrations depend on workspace shape. |
+| US-003 | US-001, US-002 | Sessions require database foundation. |
+| US-004 | US-003 | Knowledge Base role checks require authenticated users. |
+| US-005 | US-002, US-004 | Canonical tables must be scoped by `knowledge_base_id`. |
+| US-006 | US-005 | Outbox/projector seam depends on canonical graph tables. |
+| US-007 | US-005 | Jobs share Knowledge Base scope and audit patterns. |
+| US-008 to US-014 | US-003 to US-007 | Manual graph CRUD/views/search require auth, KB scope, canonical tables, outbox, and jobs seam. |
+| US-015 | US-001 | Provider adapters can start once shared types exist. |
+| US-016 | US-003, US-004, US-015 | AI policy depends on users, Knowledge Bases, and provider config. |
+| US-017 to US-020 | US-011, US-015, US-016 | Capture/proposals/answers require notes/sources, adapters, and privacy policy. |
+| US-021 | US-007, US-012, US-015, US-016 | Embeddings depend on jobs, search, adapters, and consent. |
+| US-022 | US-005, US-027 spec decisions | Rule packs rely on canonical schemas; M3 may implement built-in schema definitions before M4 UI polish. |
+| US-023 | US-005, US-022 | Text authoring depends on stored rules and low-level predicates. |
+| US-024 | US-007, US-023 | Rule runs use jobs/status and validated rules. |
+| US-025 | US-024, US-009 | Accepted inferred claims reuse claim write and provenance paths. |
+| US-026 | US-006, US-007, US-013, US-024 | AGE projection is real by end of M3 and supports traversal-dependent views/rules. |
+| US-027 to US-028 | US-005, US-008, US-009 | Custom schemas build on canonical schema references and CRUD validation. |
+| US-029 to US-030 | US-013, US-022, US-026, US-027 | Module polish relies on views, rule packs, AGE traversal, and schemas. |
+| US-031 | US-007, US-011, US-018 | Import uses jobs, sources, and proposal review. |
+| US-032 | US-005, US-023, US-027 | Export/import must include graph, rules, schema versions, and provenance. |
+| US-033 | US-001 to US-007 | Deployment docs require foundation services and commands. |
+| US-034 | All prior V1 stories | Final verification/hardening closes V1. |
 
 ## Cross-Cutting Implementation Constraints
 
@@ -75,6 +136,16 @@ V1 must showcase the same graph-note foundation through two built-in modules:
 - A background projector consumes `graph_outbox` and updates the AGE projection.
 - M0/M1 may stub the AGE projector, but projection interfaces, outbox records, and rebuild/repair boundaries must exist early.
 
+### Centralized early seams
+
+M0 must establish these seams so later milestones do not rewrite foundations:
+
+- AGE projector interface, `graph_outbox`, projection status, and rebuild/repair boundary.
+- PostgreSQL-backed jobs/worker interface for projection, AI, embeddings, imports, exports, and backups.
+- LLM and embedding provider adapter interfaces with deterministic mock and local-provider paths.
+- Schema-definition/schema-version references on graph records.
+- Rule-engine interface for parse/validate/run/trace, with bounded recursion limits.
+
 ### Technology stack
 
 - TypeScript everywhere on Node.js.
@@ -85,6 +156,23 @@ V1 must showcase the same graph-note foundation through two built-in modules:
 - Database: PostgreSQL with Drizzle ORM/migrations, `pgvector`, Apache AGE extension/projection, and PostgreSQL-backed jobs/outbox.
 - Package manager: `pnpm`.
 - Standard scripts: `format`, `format:check`, `typecheck`, `lint`, `test`, `test:api`, `test:e2e`, `verify:quick`, and `verify`.
+
+### Back-pressure and verification tiers
+
+- **Fast inner loop:** `typecheck` + lint/static checks + targeted unit tests, with no containers. This is the fast wheel after every meaningful code change.
+- **Medium tier:** `pnpm verify:quick` before marking a normal `fix_plan.md` item or story slice complete.
+- **Full tier:** `pnpm verify` for milestone and V1 completion; includes `format:check`, `typecheck`, `lint`, `test`, `test:api` against a PostgreSQL container with AGE + `pgvector`, and `test:e2e`.
+- TypeScript typecheck and lint are static-analyzer back-pressure and must remain fast enough for frequent use.
+- Tests must use deterministic mock AI/embedding providers unless explicitly testing configured local providers.
+- Container-backed suites must use isolated/reset test databases per run and are not part of the fast inner loop.
+- Playwright e2e in CI is the authoritative UI back-pressure. Interactive browser verification is best-effort if tooling is available; if unavailable, record a deferred manual check in `fix_plan.md` and keep the loop moving.
+
+### Subagent and search policy
+
+- Many subagents may search the codebase or perform bounded file-write tasks.
+- Exactly one subagent may run build/test/verification at any time.
+- Before adding a table, repository, route, adapter, component, or command, search the codebase and specs first; do not assume it is unimplemented.
+- Search findings that affect future work must be summarized in the relevant spec or `fix_plan.md`, not left only in transient chat context.
 
 ### Authentication, authorization, and security
 
@@ -121,10 +209,18 @@ Required behavior:
 ### Mock AI provider rules
 
 - Mock AI providers are only for development, tests, demos, and early milestones.
+- The deterministic mock LLM and deterministic mock embedding provider must be functionally working by V1 completion and usable by tests/e2e/demo flows.
 - If exposed in runtime UI, mock AI must be behind a development/demo flag.
 - Runtime mock AI must be visibly labeled `Mock AI / deterministic demo output`.
 - Fresh production installs still default to `No AI`.
 - The app must not fabricate AI output via hidden remote calls.
+
+### Provider readiness for V1
+
+- V1 completion requires working deterministic mock providers.
+- V1 completion requires working local inference through Ollama-native HTTP and OpenAI-compatible local HTTP endpoints.
+- Remote OpenAI and Anthropic adapters may ship as configured-but-untested skeletons if they validate configuration, enforce privacy policy, never bypass adapters, and are visibly documented as unverified in runtime/admin docs.
+- Normal tests must not require remote provider credentials or network calls.
 
 ### Note and Source modeling
 
@@ -154,7 +250,13 @@ M3 minimum reasoning includes:
 - Simple restricted text rules.
 - Result trace.
 
-V1 rule syntax is restricted Datalog-like text syntax with explicit variables exposed through a Prolog-like UI. Guided rule builder, stratified negation, and graph edit proposal generation may be staged after the first reasoning milestone. Unrestricted Prolog, arbitrary recursion, arbitrary JavaScript, filesystem/network/process access, and unrestricted Prolog negation-as-failure are out of scope.
+V1 rule syntax is restricted Datalog-like text syntax with explicit variables exposed through a Prolog-like UI. Bounded recursion is in scope when protected by a configurable depth/iteration cap and sufficient for transitive-closure-style use cases such as relationship, family, and timeline inference. Guided rule builder, stratified negation, and graph edit proposal generation may be staged after the first reasoning milestone. Unbounded/arbitrary recursion, unrestricted Prolog, arbitrary JavaScript, filesystem/network/process access, and unrestricted Prolog negation-as-failure are out of scope.
+
+### Stub vs placeholder policy
+
+- **Sanctioned seam/stub:** Allowed only when declared in the story's **Allowed stubs**, visible at runtime through logs/admin/UI labels or documented clearly, limited to a non-critical path, and recorded in `fix_plan.md` until replaced.
+- **Forbidden placeholder:** Fake/minimal logic on a promised or critical V1 path, silent no-ops, hard-coded test-only returns in production code, hidden remote behavior behind a mock label, or any stub not declared as allowed.
+- The loop must not introduce forbidden placeholders. If it discovers one, it must add a `fix_plan.md` item and either fix it immediately when it blocks the active item or prioritize it within the current milestone.
 
 ### Import/export/backup scope
 
@@ -185,7 +287,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - [ ] React + Vite web app and Express API app boot locally.
 - [ ] Shared Zod schema package can be imported by both web and API.
 
-**Allowed stubs:** Empty UI shell, placeholder routes, placeholder tests.  
+**Allowed stubs:** Empty UI shell, typed smoke routes, scaffold tests.
 **Definition of done:** `pnpm verify:quick` passes and README explains local dev startup.  
 **Verification expectations:** Typecheck/lint/unit smoke tests.  
 **Out of scope:** Domain graph CRUD, real auth UI polish, AGE projection.
@@ -303,7 +405,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Advanced custom schema property editor may be basic JSON.  
 **Definition of done:** API and UI support create/read/update for entities with role checks.  
-**Verification expectations:** API tests, UI component/route tests, browser verification using dev-browser skill, `pnpm verify:quick`.  
+**Verification expectations:** API tests, UI component/route tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`, `pnpm verify:quick`.
 **Out of scope:** Merge, AI extraction, guided schema creation.
 
 ### US-009: Manually create and edit claims
@@ -320,7 +422,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Predicate choices may use built-in defaults before custom predicates ship.  
 **Definition of done:** API/UI support create/read/update for claims with multi-argument persistence.  
-**Verification expectations:** API tests, browser verification using dev-browser skill, `pnpm verify:quick`.  
+**Verification expectations:** API tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`, `pnpm verify:quick`.
 **Out of scope:** AI proposals, reasoning-derived claims.
 
 ### US-010: Delete and merge graph records safely
@@ -337,7 +439,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Hard-delete/purge admin tooling may be absent.  
 **Definition of done:** Merge/delete are reversible/auditable through soft-delete data and tests cover linked claims.  
-**Verification expectations:** API tests and browser verification using dev-browser skill.  
+**Verification expectations:** API tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Automated duplicate detection.
 
 ### US-011: Capture Notes and Sources manually
@@ -354,7 +456,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Import-specific parsing may be deferred to M4.  
 **Definition of done:** A Note/Source can be created, viewed, cited by a claim, and searched.  
-**Verification expectations:** API tests, browser verification using dev-browser skill.  
+**Verification expectations:** API tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** AI extraction proposals, full Markdown/table import.
 
 ### US-012: Provide manual search and filters
@@ -370,7 +472,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Vector search may be disabled until M2 embeddings.  
 **Definition of done:** Users can find manually created graph records in `No AI` mode.  
-**Verification expectations:** API search tests and browser verification using dev-browser skill.  
+**Verification expectations:** API search tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Natural-language AI command parsing.
 
 ### US-013: Build basic graph views
@@ -388,7 +490,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Network layout may use relational query data while AGE projection is stubbed.  
 **Definition of done:** Manual graph demo can move between table/network/detail/source views.  
-**Verification expectations:** Browser verification using dev-browser skill, component tests where useful, `pnpm verify:quick`.  
+**Verification expectations:** Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`, component tests where useful, `pnpm verify:quick`.
 **Out of scope:** Advanced graph analytics, high-volume graph performance tuning.
 
 ### US-014: Enforce audit and permissions in manual graph flows
@@ -404,7 +506,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Audit UI may be simple table/log view.  
 **Definition of done:** Permission bypass attempts fail at backend route/service layer.  
-**Verification expectations:** API permission/audit tests and browser verification for hidden/disabled unauthorized UI.  
+**Verification expectations:** API permission/audit tests and UI test/e2e coverage for hidden/disabled unauthorized UI; interactive browser verification best-effort if available.
 **Out of scope:** Fine-grained field-level or entity-level ACLs.
 
 ### US-015: Configure AI provider adapter layer
@@ -414,12 +516,12 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Acceptance Criteria:**
 - [ ] LLM and embedding providers share typed adapter interfaces.
-- [ ] Local inference supports Ollama-native HTTP APIs and OpenAI-compatible local HTTP endpoints.
-- [ ] Remote LLM support includes OpenAI and Anthropic behind adapters.
+- [ ] Local inference supports Ollama-native HTTP APIs and OpenAI-compatible local HTTP endpoints and works in V1 without remote credentials.
+- [ ] Remote LLM support includes OpenAI and Anthropic behind adapters; V1 may ship these as configured-but-untested skeletons if policy/config validation is complete.
 - [ ] Provider config schemas use Zod and separate secrets from portable Knowledge Base exports.
 - [ ] Normal tests use deterministic mock LLM/embedding providers.
 
-**Allowed stubs:** Real providers may be adapter skeletons until configured tests exist; deterministic mock is required.  
+**Allowed stubs:** Remote OpenAI/Anthropic adapters may be configured-but-untested skeletons; deterministic mock and local providers may not be stubbed for V1 completion.
 **Definition of done:** No UI/repository code directly imports vendor SDKs or provider HTTP clients.  
 **Verification expectations:** Unit tests for adapter selection/config validation and mock provider behavior.  
 **Out of scope:** Production model quality tuning.
@@ -439,7 +541,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Some provider choices may be disabled until adapters are complete.  
 **Definition of done:** Policy tests prove user settings cannot bypass stricter KB/server policies.  
-**Verification expectations:** API/service tests and browser verification using dev-browser skill.  
+**Verification expectations:** API/service tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Enterprise policy management or SSO.
 
 ### US-017: Capture text into AI proposal review queue
@@ -449,14 +551,15 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Acceptance Criteria:**
 - [ ] Quick-capture stores original text as Note or Source before extraction.
-- [ ] With configured local/remote/mock AI, extraction creates AI Proposals for candidate entities/claims.
+- [ ] With configured deterministic mock or local AI, extraction creates AI Proposals for candidate entities/claims.
+- [ ] Remote extraction adapters may be present as configured-but-untested skeletons and must be visibly documented as unverified until tested by an operator.
 - [ ] With no AI, capture stores the note/source and shows setup/unavailable state without blocking manual review/search.
 - [ ] Rejected proposals remain linked to the source note as rejected/dismissed extraction candidates.
 - [ ] Runtime mock output, if exposed, is behind dev/demo flag and labeled `Mock AI / deterministic demo output`.
 
-**Allowed stubs:** Mock provider may be used for demo/test; real provider extraction quality may be basic.  
+**Allowed stubs:** Mock provider may be used for demo/test; mock and local extraction quality may be basic but functional; remote extraction may use configured-but-untested adapter skeletons.
 **Definition of done:** AI-generated changes are pending Proposals only and never direct writes.  
-**Verification expectations:** API proposal tests, browser verification using dev-browser skill, privacy policy tests.  
+**Verification expectations:** API proposal tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`, privacy policy tests.
 **Out of scope:** Bulk import extraction; automatic background extraction of all existing notes.
 
 ### US-018: Review and apply graph proposals
@@ -473,7 +576,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Delete/merge proposal types may initially be hidden unless safely supported.  
 **Definition of done:** No AI proposal can mutate the graph without explicit authorized user confirmation.  
-**Verification expectations:** API tests for proposal validation/apply/reject, browser verification using dev-browser skill.  
+**Verification expectations:** API tests for proposal validation/apply/reject, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Autonomous AI agents that apply edits.
 
 ### US-019: Add universal command/search interface
@@ -491,7 +594,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Supported command set may be small at first.  
 **Definition of done:** Command interface cannot execute unvalidated AI output.  
-**Verification expectations:** Schema validation tests, API tests, browser verification using dev-browser skill.  
+**Verification expectations:** Schema validation tests, API tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Voice commands, agentic multi-step automation.
 
 ### US-020: Provide provenance-aware AI answers
@@ -500,16 +603,16 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 **Description:** As a user, I want AI answers to cite graph claims and source notes so I can verify why an answer was produced.
 
 **Acceptance Criteria:**
-- [ ] Configured AI answers include citations to claims, Notes, Sources, or Source Excerpts used as evidence.
+- [ ] Configured mock/local AI answers include citations to claims, Notes, Sources, or Source Excerpts used as evidence; remote adapters may remain unverified skeletons for V1.
 - [ ] No-AI mode shows setup/unavailable state and offers manual search results where applicable.
 - [ ] Each cited claim displays predicate, connected entities, confidence, and provenance metadata.
 - [ ] Users can click citations to open claim/source/note detail views.
 - [ ] Answers distinguish known facts, inferred facts, uncertain claims, and missing information.
 - [ ] Viewer answer generation is read-only and only allowed when policy permits it.
 
-**Allowed stubs:** Mock/demo answers may be deterministic and labeled.  
+**Allowed stubs:** Mock/demo answers may be deterministic and labeled; remote answer adapters may be configured-but-untested skeletons.
 **Definition of done:** Answers are never uncited when evidence exists and cannot create graph writes.  
-**Verification expectations:** API answer schema tests, browser verification using dev-browser skill, viewer permission tests.  
+**Verification expectations:** API answer schema tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`, viewer permission tests.
 **Out of scope:** Long-running autonomous research agents.
 
 ### US-021: Index embeddings through jobs
@@ -524,7 +627,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - [ ] Existing embeddings can power vector search even when generation providers are currently unavailable.
 - [ ] Job status is visible to users for their Knowledge Base indexing tasks.
 
-**Allowed stubs:** Local/mock embedding provider can be deterministic for tests.  
+**Allowed stubs:** Deterministic mock embedding provider is allowed for tests; remote embedding adapters may be configured-but-untested skeletons, but local/mock embedding generation must work for V1.
 **Definition of done:** Embedding generation is asynchronous, auditable where remote, and does not block manual search.  
 **Verification expectations:** Job tests, search tests, privacy policy tests.  
 **Out of scope:** Cross-Knowledge Base vector indexes.
@@ -542,7 +645,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Rule set may be small but must produce traceable results on seed/demo data.  
 **Definition of done:** Built-in packs can be viewed and run against sample graph data.  
-**Verification expectations:** Rule integration tests and browser verification using dev-browser skill.  
+**Verification expectations:** Rule integration tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Marketplace rule packs.
 
 ### US-023: Support restricted text rule authoring
@@ -555,12 +658,13 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - [ ] Low-level predicates include equivalents of `entity(id, type, name)`, `claim(id, predicate)`, and `arg(claimId, role, entityId)`.
 - [ ] Rule validation runs before save/enable.
 - [ ] Invalid rules may be saved as drafts but cannot be enabled or executed.
-- [ ] Rules have no filesystem, network, process, arbitrary JavaScript, provider API, unrestricted recursion, or unrestricted negation access.
+- [ ] Rules have no filesystem, network, process, arbitrary JavaScript, provider API, unbounded/arbitrary recursion, or unrestricted negation access.
+- [ ] Bounded recursion validates and enforces a configurable depth/iteration cap.
 
 **Allowed stubs:** Guided builder and negation may be deferred.  
 **Definition of done:** Users can save, validate, enable, disable, and view text rules safely.  
-**Verification expectations:** Parser/compiler validation tests and browser verification using dev-browser skill.  
-**Out of scope:** Unrestricted Prolog runtime, arbitrary recursion.
+**Verification expectations:** Parser/compiler validation tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
+**Out of scope:** Unrestricted Prolog runtime, unbounded/arbitrary recursion, unrestricted negation-as-failure.
 
 ### US-024: Run rules with traces
 
@@ -569,6 +673,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Acceptance Criteria:**
 - [ ] Rule execution runs on the backend against stored Knowledge Base data.
+- [ ] Rule Runs enforce depth/iteration limits for bounded recursion and report limit-exceeded errors safely.
 - [ ] Rule Runs record status, start/end timestamps, errors, and triggering user/job.
 - [ ] Inferred Results show source rules and source claims/arguments used.
 - [ ] Rule errors are displayed without corrupting claims, schemas, or rules.
@@ -576,7 +681,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Compilation may target SQL and/or relational queries before AGE traversal is complete.  
 **Definition of done:** A rule run over sample data produces traceable results or safe errors.  
-**Verification expectations:** Rule engine tests, API tests, browser verification using dev-browser skill.  
+**Verification expectations:** Rule engine tests, API tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Automatic graph writes from rules.
 
 ### US-025: Accept inferred results as claims
@@ -592,7 +697,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Batch accept may be deferred.  
 **Definition of done:** Accepted inferred claims round-trip through detail/search/views with provenance intact.  
-**Verification expectations:** API tests and browser verification using dev-browser skill.  
+**Verification expectations:** API tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Rule-generated proposals that mutate multiple graph records.
 
 ### US-026: Add AGE-backed traversal where needed
@@ -626,7 +731,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** View defaults, extraction hints, and full guided migration UI may be separate M4 work.  
 **Definition of done:** A user can create one custom entity type and one custom claim predicate and use both in manual CRUD.  
-**Verification expectations:** API validation tests and browser verification using dev-browser skill.  
+**Verification expectations:** API validation tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Plugin development SDK, public module marketplace.
 
 ### US-028: Support schema version evolution basics
@@ -643,7 +748,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Full guided migration UI may be minimal or deferred within M4 if versioning is complete.  
 **Definition of done:** Stored data keeps schema-version references and breaking changes do not rewrite it silently.  
-**Verification expectations:** Schema API tests and browser verification using dev-browser skill.  
+**Verification expectations:** Schema API tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** Automated complex migration planning.
 
 ### US-029: Polish personal relationship Module
@@ -660,7 +765,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** External contact/calendar/GPS integrations are absent.  
 **Definition of done:** Seed/demo data demonstrates relationship CRUD, recall, views, and at least one rule pack.  
-**Verification expectations:** Browser verification using dev-browser skill, e2e happy path, permission/privacy tests.  
+**Verification expectations:** Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`, e2e happy path, permission/privacy tests.
 **Out of scope:** Social network import, contact sync, automated location logging.
 
 ### US-030: Polish reading / character-map Module
@@ -677,7 +782,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Cross-media PDF/ebook parsing may be absent.  
 **Definition of done:** Seed/demo data demonstrates character graph, timeline, claims, citations, and reasoning.  
-**Verification expectations:** Browser verification using dev-browser skill and e2e happy path.  
+**Verification expectations:** Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md` and e2e happy path.
 **Out of scope:** Full manuscript editor or ebook reader.
 
 ### US-031: Import portable and structured data through reviewable flows
@@ -694,7 +799,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Advanced format detection and cross-media import are absent.  
 **Definition of done:** Text/Markdown and CSV subset imports can create reviewable proposals and accepted records.  
-**Verification expectations:** Import API/job tests and browser verification using dev-browser skill.  
+**Verification expectations:** Import API/job tests and Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md`.
 **Out of scope:** PDF/web/chat/calendar/GPS import.
 
 ### US-032: Export and backup appropriately
@@ -712,7 +817,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Allowed stubs:** Backup CLI/docs may be separate from owner/admin UI.  
 **Definition of done:** Exported JSON can reconstruct a test Knowledge Base without losing graph/provenance/schema/rule data.  
-**Verification expectations:** Round-trip export/import tests, browser verification using dev-browser skill for UI.  
+**Verification expectations:** Round-trip export/import tests, Playwright e2e/UI coverage as applicable; interactive browser verification best-effort if available, otherwise record deferred manual check in `fix_plan.md` for UI.
 **Out of scope:** Cloud backup service, automatic sync.
 
 ### US-033: Harden deployment and operations
@@ -743,12 +848,12 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - [ ] `pnpm verify` runs `format:check`, `typecheck`, `lint`, `test`, `test:api`, and `test:e2e`.
 - [ ] Critical UI flows have Playwright e2e coverage: login/setup, Knowledge Base selection, manual entity/claim CRUD, search/views, AI proposal review with mock provider, reasoning run, JSON export/import.
 - [ ] API tests run against a test PostgreSQL container with migrations applied.
-- [ ] Browser verification using dev-browser skill is completed for stories with UI acceptance.
+- [ ] Interactive browser verification is attempted for UI stories if tooling is available; unavailable tooling is recorded as deferred manual checks in `fix_plan.md` and does not block V1 when Playwright is green.
 - [ ] Stubs remaining in V1 are documented, visible to users/admins when runtime-facing, and not on critical promised paths.
 
 **Allowed stubs:** Only explicitly documented non-critical integrations.  
 **Definition of done:** Full `pnpm verify` passes in a clean environment and V1 success metrics can be demonstrated.  
-**Verification expectations:** Full standard verification suite plus browser verification.  
+**Verification expectations:** Full standard verification suite plus Playwright e2e; interactive browser verification best-effort if available.
 **Out of scope:** Post-V1 roadmap features.
 
 ## Functional Requirements
@@ -775,9 +880,9 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - **FR-20:** The personal relationship Module must default remote sharing to minimal and require additional prominent confirmation for Remote RAG context sharing.
 - **FR-21:** The system must support custom entity types, custom claim predicates, and JSONB property schema validation at V1 minimum.
 - **FR-22:** Schema definitions must be versioned, and stored records must reference the validating schema version.
-- **FR-23:** The system must support restricted Datalog/Horn-clause rules with explicit variables and Prolog-like UI syntax.
-- **FR-24:** Rules must run in a sandboxed backend-authoritative engine with no filesystem/network/process/arbitrary JavaScript/provider API access.
-- **FR-25:** Rule Runs must produce traceable Inferred Results; accepted inferred claims require explicit confirmation and preserve provenance.
+- **FR-23:** The system must support restricted Datalog/Horn-clause rules with explicit variables, Prolog-like UI syntax, and bounded recursion for transitive-closure-style inference.
+- **FR-24:** Rules must run in a sandboxed backend-authoritative engine with configurable depth/iteration caps and no filesystem/network/process/arbitrary JavaScript/provider API access.
+- **FR-25:** Rule Runs must produce traceable Inferred Results, including safe limit-exceeded errors; accepted inferred claims require explicit confirmation and preserve provenance.
 - **FR-26:** Portable JSON import/export must be full-fidelity for Knowledge Base round trip.
 - **FR-27:** Markdown export must be human-readable, not guaranteed full-fidelity round trip.
 - **FR-28:** CSV/table import/export must be a structured subset flow.
@@ -796,7 +901,7 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - No AI-generated writes that bypass user confirmation.
 - No remote AI provider processing without explicit layered opt-in.
 - No hidden remote calls that fabricate mock/demo AI behavior.
-- No unrestricted Prolog runtime, arbitrary recursion, arbitrary JavaScript in rules, unrestricted negation-as-failure, or rule access to filesystem/network/process/provider APIs.
+- No unrestricted Prolog runtime, unbounded/arbitrary recursion, arbitrary JavaScript in rules, unrestricted negation-as-failure, or rule access to filesystem/network/process/provider APIs.
 - No Redis or required external queue service for V1 jobs.
 - No Electron/Tauri/native sidecar requirement for V1.
 - No Kubernetes manifests or provider-specific cloud integrations in V1.
@@ -828,28 +933,36 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 ## Ralph / Amp Definition of Done
 
-For any implementation story:
+For any implementation loop or story slice:
 
+- Select the most important not-yet-done item from `fix_plan.md` within the active milestone.
+- Load only the PRD/spec context needed for that item; update the relevant spec if acceptance criteria or learned commands change.
 - Confirm the story target milestone and do not implement out-of-scope items.
 - Preserve the canonical terminology: Knowledge Base and `knowledge_base_id`.
+- Search before implementing tables, repositories, routes, adapters, components, and commands.
 - Add or update shared Zod schemas for API contracts where applicable.
 - Add backend permission checks; do not rely on UI-only restrictions.
 - Add Audit Events for auditable mutations and remote AI metadata where applicable.
 - For canonical graph writes, write relational rows and `graph_outbox` events in one transaction.
-- Keep stubs only where the story allows them; stubs must be visible in runtime/admin UI or logs if user/operator-facing.
+- Keep only sanctioned seams/stubs; stubs must be declared in the story, visible if runtime-facing, non-critical, and recorded in `fix_plan.md`.
+- Do not introduce forbidden placeholders or hard-code test-only behavior into production paths.
 - Add/update API tests for backend behavior.
-- Add/update UI tests and browser verification using dev-browser skill for UI stories.
-- Run the narrowest meaningful verification during iteration and `pnpm verify:quick` before marking a normal story complete.
+- Add/update UI tests and Playwright e2e/UI coverage as applicable for UI stories; interactive browser verification is best-effort and never a hard blocker.
+- Capture why a test or implementation decision matters in test docstrings, spec notes, or concise comments so future loops do not depend on prior chat context.
+- Run the fast inner loop after meaningful changes and `pnpm verify:quick` before marking a normal story item complete.
 - Run `pnpm verify` for milestone completion and V1 completion.
-- Do not hard-code test-only behavior into production paths.
+- Use exactly one build/test subagent at a time.
 - Do not call vendor AI SDKs or provider HTTP APIs outside provider adapters.
 - Do not treat Apache AGE as canonical storage.
+- Before ending the loop, update `fix_plan.md` with completed/incomplete status, discovered bugs, deferred manual checks, and next-priority notes.
+- When the relevant verification tier is green, `git add -A` and commit with a descriptive message. On a fully green build/test state, create or increment a semver git tag starting at `0.0.0` and bumping patch.
+- If the tree is broken, try focused self-recovery; if reset is cheaper, document why in `fix_plan.md`. Bugs discovered mid-task are added to `fix_plan.md` and may be fixed by subagents even when adjacent to the active item.
 
 ## Success Metrics
 
 - A new user can create or access a self-hosted/local-server Knowledge Base and add their first entity/claim without signing into a cloud service.
 - Manual graph workflows and full-text/graph search work in `No AI` mode.
-- With a configured mock/local/remote provider, a user can capture a paragraph and review proposed graph updates in under 60 seconds.
+- With the deterministic mock provider, a user can capture a paragraph and review proposed graph updates in under 60 seconds in CI/e2e or a clean local dev environment; local providers should meet the same target where hardware permits.
 - 100% of AI-created claims include provenance/source, confidence, and creation metadata.
 - 0 AI-generated writes occur without explicit user confirmation.
 - Users can answer at least five representative questions across showcase domains using search/command/RAG where configured:
@@ -858,7 +971,7 @@ For any implementation story:
   - “What events involve this person?”
   - “How are these two characters connected?”
   - “Which claims support this answer?”
-- Built-in restricted Datalog/Horn-clause rules produce traceable Inferred Results for both relationship management and reading/character-map data.
+- Built-in restricted Datalog/Horn-clause rules, including bounded recursive examples, produce traceable Inferred Results for both relationship management and reading/character-map data.
 - Users can create one custom entity type and one custom claim predicate in-app without editing code.
 - Portable JSON export/import can reconstruct a Knowledge Base without losing entities, claims, claim arguments, notes, sources, citations, schemas, rules, or provenance.
 
@@ -870,6 +983,9 @@ For any implementation story:
 
 ## Changelog for This PRD Revision
 
+- Added Ralph operating files and execution rules: `specs/` as decomposed source of truth, `fix_plan.md` as the autonomous working stack, `AGENT.md` as command/setup source of truth, single-loop execution, subagent policy, dependency ordering, and commit/tag cadence.
+- Added centralized M0 seams, testable sanctioned-stub versus forbidden-placeholder policy, search-before-implement requirements, and verification tiers for fast inner loop, `verify:quick`, and full `verify`.
+- Encoded locked decisions: Apache AGE required by V1/M3, bounded recursion in scope with explicit caps, mock/local providers functional by V1 while remote adapters may be skeletons, and Playwright as authoritative UI back-pressure with best-effort interactive browser checks.
 - Added a glossary and normalized user-facing terminology to **Knowledge Base** with database field `knowledge_base_id`.
 - Replaced ambiguous storage wording with the canonical rule: relational PostgreSQL tables are canonical; Apache AGE is a derived Graph Projection.
 - Added a milestone matrix for M0 Foundation through M4 Polish/Hardening and mapped every story to a target milestone.
