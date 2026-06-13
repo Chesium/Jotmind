@@ -4,20 +4,26 @@ import {
   kbRoleSatisfies,
   type AccountRole,
   type AuthState,
+  type Claim,
+  type ClaimArgumentKind,
+  type CreateClaimArgument,
   type Entity,
   type KnowledgeBase,
 } from '@jotmind/schemas';
 import {
   createAccount,
+  createClaim,
   createEntity,
   createKnowledgeBase,
   getMe,
   getSetupStatus,
+  listClaims,
   listEntities,
   listKnowledgeBases,
   login,
   logout,
   setupAdmin,
+  updateClaim,
   updateEntity,
 } from './api.js';
 
@@ -284,6 +290,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       </form>
       {error && <p data-testid="kb-error">{error}</p>}
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
+      {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}
     </section>
   );
 }
@@ -505,6 +512,352 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
         <p data-testid="entities-readonly">You have read-only access to this Knowledge Base.</p>
       )}
       {error && <p data-testid="entities-error">{error}</p>}
+    </section>
+  );
+}
+
+interface ClaimArgumentForm {
+  role: string;
+  argumentKind: ClaimArgumentKind;
+  entityId: string;
+  value: string;
+}
+
+function newArgumentForm(): ClaimArgumentForm {
+  return { role: '', argumentKind: 'entity', entityId: '', value: '' };
+}
+
+interface ClaimFormState {
+  predicate: string;
+  description: string;
+  confidence: string;
+  validStart: string;
+  validEnd: string;
+  arguments: ClaimArgumentForm[];
+}
+
+function emptyClaimForm(): ClaimFormState {
+  return {
+    predicate: '',
+    description: '',
+    confidence: '',
+    validStart: '',
+    validEnd: '',
+    arguments: [newArgumentForm()],
+  };
+}
+
+function claimToForm(claim: Claim): ClaimFormState {
+  return {
+    predicate: claim.predicate,
+    description: claim.description ?? '',
+    confidence: claim.confidence === null ? '' : String(claim.confidence),
+    validStart: claim.validStart ? claim.validStart.slice(0, 10) : '',
+    validEnd: claim.validEnd ? claim.validEnd.slice(0, 10) : '',
+    arguments:
+      claim.arguments.length > 0
+        ? claim.arguments.map((arg) => ({
+            role: arg.role,
+            argumentKind: arg.argumentKind,
+            entityId: arg.entityId ?? '',
+            value:
+              arg.argumentKind === 'literal' && arg.value !== undefined && arg.value !== null
+                ? typeof arg.value === 'string'
+                  ? arg.value
+                  : JSON.stringify(arg.value)
+                : '',
+          }))
+        : [newArgumentForm()],
+  };
+}
+
+/** Look up an entity's display name for rendering claim arguments. */
+function entityLabel(entities: Entity[], id: string | null): string {
+  if (!id) return '(unknown)';
+  return entities.find((e) => e.id === id)?.name ?? '(unknown)';
+}
+
+function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
+  const canEdit = kbRoleSatisfies(kb.role, 'editor');
+  const [items, setItems] = useState<Claim[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [form, setForm] = useState<ClaimFormState>(emptyClaimForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      const [claims, ents] = await Promise.all([listClaims(kb.id), listEntities(kb.id)]);
+      setItems(claims);
+      setEntities(ents);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load claims');
+    }
+  }, [kb.id]);
+
+  useEffect(() => {
+    setForm(emptyClaimForm());
+    setEditingId(null);
+    void refresh();
+  }, [refresh]);
+
+  function setArgument(index: number, patch: Partial<ClaimArgumentForm>) {
+    setForm((f) => ({
+      ...f,
+      arguments: f.arguments.map((arg, i) => (i === index ? { ...arg, ...patch } : arg)),
+    }));
+  }
+
+  function addArgument() {
+    setForm((f) => ({ ...f, arguments: [...f.arguments, newArgumentForm()] }));
+  }
+
+  function removeArgument(index: number) {
+    setForm((f) => ({
+      ...f,
+      arguments: f.arguments.length > 1 ? f.arguments.filter((_, i) => i !== index) : f.arguments,
+    }));
+  }
+
+  function buildArguments(): CreateClaimArgument[] {
+    return form.arguments.map((arg) => {
+      const role = arg.role.trim();
+      if (arg.argumentKind === 'entity') {
+        return { role, argumentKind: 'entity' as const, entityId: arg.entityId };
+      }
+      // Try to parse the literal as JSON, falling back to the raw string.
+      let value: unknown = arg.value;
+      try {
+        value = JSON.parse(arg.value);
+      } catch {
+        value = arg.value;
+      }
+      return { role, argumentKind: 'literal' as const, value };
+    });
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const confidence = form.confidence.trim() === '' ? undefined : Number(form.confidence);
+      const payload = {
+        predicate: form.predicate.trim(),
+        description: form.description.trim() || undefined,
+        confidence,
+        validStart: form.validStart ? new Date(form.validStart).toISOString() : undefined,
+        validEnd: form.validEnd ? new Date(form.validEnd).toISOString() : undefined,
+        arguments: buildArguments(),
+      };
+      if (editingId) {
+        await updateClaim(
+          kb.id,
+          editingId,
+          {
+            ...payload,
+            description: payload.description ?? null,
+            confidence: payload.confidence ?? null,
+            validStart: payload.validStart ?? null,
+            validEnd: payload.validEnd ?? null,
+          },
+          csrfToken,
+        );
+      } else {
+        await createClaim(kb.id, payload, csrfToken);
+      }
+      setForm(emptyClaimForm());
+      setEditingId(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save claim');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEdit(claim: Claim) {
+    setEditingId(claim.id);
+    setForm(claimToForm(claim));
+    setError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setForm(emptyClaimForm());
+  }
+
+  return (
+    <section aria-label="claims" data-testid="claims">
+      <h3>Claims in {kb.name}</h3>
+      {items.length === 0 ? (
+        <p data-testid="claims-empty">No claims yet.</p>
+      ) : (
+        <ul data-testid="claims-list">
+          {items.map((claim) => (
+            <li key={claim.id} data-testid={`claim-${claim.id}`}>
+              <strong>{claim.predicate}</strong>
+              {claim.confidence !== null && <> (confidence {claim.confidence})</>}
+              <ul>
+                {claim.arguments.map((arg) => (
+                  <li key={arg.id}>
+                    {arg.role}:{' '}
+                    {arg.argumentKind === 'entity'
+                      ? entityLabel(entities, arg.entityId)
+                      : `"${String(arg.value)}"`}
+                  </li>
+                ))}
+              </ul>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => startEdit(claim)}
+                  data-testid={`claim-edit-${claim.id}`}
+                >
+                  Edit
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit ? (
+        <form onSubmit={submit} aria-label={editingId ? 'edit-claim' : 'create-claim'}>
+          <h4>{editingId ? 'Edit claim' : 'Add claim'}</h4>
+          <label>
+            Predicate
+            <input
+              type="text"
+              value={form.predicate}
+              onChange={(e) => setForm({ ...form, predicate: e.target.value })}
+              required
+              data-testid="claim-predicate"
+            />
+          </label>
+          <label>
+            Description
+            <input
+              type="text"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              data-testid="claim-description"
+            />
+          </label>
+          <label>
+            Confidence (0–1)
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value={form.confidence}
+              onChange={(e) => setForm({ ...form, confidence: e.target.value })}
+              data-testid="claim-confidence"
+            />
+          </label>
+          <label>
+            Valid from
+            <input
+              type="date"
+              value={form.validStart}
+              onChange={(e) => setForm({ ...form, validStart: e.target.value })}
+              data-testid="claim-valid-start"
+            />
+          </label>
+          <label>
+            Valid to
+            <input
+              type="date"
+              value={form.validEnd}
+              onChange={(e) => setForm({ ...form, validEnd: e.target.value })}
+              data-testid="claim-valid-end"
+            />
+          </label>
+          <fieldset>
+            <legend>Arguments</legend>
+            {form.arguments.map((arg, index) => (
+              <div key={index} data-testid={`claim-argument-${String(index)}`}>
+                <label>
+                  Role
+                  <input
+                    type="text"
+                    value={arg.role}
+                    onChange={(e) => setArgument(index, { role: e.target.value })}
+                    required
+                    data-testid={`claim-arg-role-${String(index)}`}
+                  />
+                </label>
+                <label>
+                  Kind
+                  <select
+                    value={arg.argumentKind}
+                    onChange={(e) =>
+                      setArgument(index, { argumentKind: e.target.value as ClaimArgumentKind })
+                    }
+                    data-testid={`claim-arg-kind-${String(index)}`}
+                  >
+                    <option value="entity">entity</option>
+                    <option value="literal">literal</option>
+                  </select>
+                </label>
+                {arg.argumentKind === 'entity' ? (
+                  <label>
+                    Entity
+                    <select
+                      value={arg.entityId}
+                      onChange={(e) => setArgument(index, { entityId: e.target.value })}
+                      required
+                      data-testid={`claim-arg-entity-${String(index)}`}
+                    >
+                      <option value="">Select an entity…</option>
+                      {entities.map((entity) => (
+                        <option key={entity.id} value={entity.id}>
+                          {entity.name} ({entity.type})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <label>
+                    Value
+                    <input
+                      type="text"
+                      value={arg.value}
+                      onChange={(e) => setArgument(index, { value: e.target.value })}
+                      data-testid={`claim-arg-value-${String(index)}`}
+                    />
+                  </label>
+                )}
+                {form.arguments.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeArgument(index)}
+                    data-testid={`claim-arg-remove-${String(index)}`}
+                  >
+                    Remove argument
+                  </button>
+                )}
+              </div>
+            ))}
+            <button type="button" onClick={addArgument} data-testid="claim-add-argument">
+              Add argument
+            </button>
+          </fieldset>
+          <button type="submit" disabled={busy} data-testid="claim-submit">
+            {editingId ? 'Save changes' : 'Add claim'}
+          </button>
+          {editingId && (
+            <button type="button" onClick={cancelEdit} data-testid="claim-cancel">
+              Cancel
+            </button>
+          )}
+        </form>
+      ) : (
+        <p data-testid="claims-readonly">You have read-only access to this Knowledge Base.</p>
+      )}
+      {error && <p data-testid="claims-error">{error}</p>}
     </section>
   );
 }

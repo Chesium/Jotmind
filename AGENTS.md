@@ -233,6 +233,41 @@ origin (exactly one of note/source), entity not-self-merge, status enums.
   Custom properties are entered as a JSON object string; aliases/tags are
   comma-separated inputs.
 
+## Claims (manual create/edit, US-009)
+
+- Claim CRUD lives in `apps/api/src/claims/`: `store.ts` (`ClaimStore`
+  interface + `dbClaimStore`, returns `ClaimWithArguments` = `ClaimRow` +
+  `arguments: ClaimArgumentRow[]`) and `index.ts` (`createClaimRouter`). Mounted
+  at **`/api/knowledge-bases/:kbId/claims`** (`mergeParams: true`), AFTER the KB
+  router. `createApp` seam is `claimStore`. Role gating / 404-for-non-members /
+  CSRF mirror the entity router exactly.
+- **Claims are multi-argument, NOT binary edges.** A claim row carries
+  `predicate` + optional `description`/`confidence`/`validStart`/`validEnd`/
+  `properties`; its role-labeled arguments live in the separate `claim_arguments`
+  table. `dbClaimStore.createClaim` inserts the claim AND its arguments (with
+  sequential `position`) in ONE transaction, plus `enqueueGraphOutbox(tx, …)`
+  (`claim.created`) and an `audit_events` insert — same dual outbox+audit pattern
+  as entities. `updateClaim` updates metadata and, when `fields.arguments` is
+  present, **replaces the full argument set** (hard-delete old rows + reinsert) so
+  argument roles/order can be edited; emits `claim.updated`.
+- Each argument is either `argumentKind:'entity'` (`entityId` set, `value` null)
+  or `argumentKind:'literal'` (`value` JSONB set, `entityId` null) — enforced by
+  the `claim_arguments_kind_check` DB constraint. Literal SQL NULL is rejected by
+  that constraint.
+- Shared Zod shapes in `@jotmind/schemas` (`graph.ts`): `claimSchema` (includes
+  `arguments`), `claimListSchema`, `createClaimArgumentSchema` (`.superRefine`:
+  entity needs `entityId`+no `value`, literal needs `value`+no `entityId`;
+  `argumentKind` defaults to `'entity'`), `createClaimSchema` (predicate + ≥1
+  argument required, `.refine` validStart≤validEnd), `updateClaimSchema`
+  (all-optional, ≥1 field, optional arguments-replace with ≥1 item). The store's
+  `value` columns are `z.unknown()` (JSONB).
+- Web: `apps/web/src/api.ts` (`listClaims`/`createClaim`/`updateClaim`) + the
+  `<Claims>` component in `App.tsx` (rendered after `<Entities>` for the selected
+  KB). It fetches BOTH claims and entities (entity dropdowns for entity args).
+  **Gotcha:** `<Claims>` only refetches entities when `kb.id` changes, so
+  entities created in `<Entities>` won't appear in the claim form until a reload
+  — acceptable for now; revisit if live cross-component sync is needed.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

@@ -1,5 +1,7 @@
 import {
   authStateSchema,
+  claimListSchema,
+  claimSchema,
   entityListSchema,
   entitySchema,
   knowledgeBaseListSchema,
@@ -8,11 +10,14 @@ import {
   setupStatusSchema,
   type AccountRole,
   type AuthState,
+  type Claim,
+  type CreateClaim,
   type CreateEntity,
   type Entity,
   type KnowledgeBase,
   type PublicUser,
   type SetupStatus,
+  type UpdateClaim,
   type UpdateEntity,
 } from '@jotmind/schemas';
 
@@ -147,4 +152,46 @@ export async function updateEntity(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return entitySchema.parse(await res.json());
+}
+
+/** List claims in a Knowledge Base. */
+export async function listClaims(knowledgeBaseId: string): Promise<Claim[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return claimListSchema.parse(await res.json());
+}
+
+/** Create a claim in a Knowledge Base (editor+). */
+export async function createClaim(
+  knowledgeBaseId: string,
+  input: CreateClaim,
+  csrfToken: string,
+): Promise<Claim> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return claimSchema.parse(await res.json());
+}
+
+/** Edit a claim in a Knowledge Base (editor+). */
+export async function updateClaim(
+  knowledgeBaseId: string,
+  claimId: string,
+  input: UpdateClaim,
+  csrfToken: string,
+): Promise<Claim> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims/${claimId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return claimSchema.parse(await res.json());
 }

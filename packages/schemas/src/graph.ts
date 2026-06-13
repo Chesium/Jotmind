@@ -129,6 +129,151 @@ export const updateEntitySchema = z
 export type UpdateEntity = z.infer<typeof updateEntitySchema>;
 
 // ---------------------------------------------------------------------------
+// Claim shapes (US-009)
+//
+// Claims are provenance-aware graph facts. They have a `predicate`, optional
+// description/confidence/valid-time range, and ONE OR MORE role-labeled
+// arguments — multi-argument relations are NOT reduced to binary edges. Each
+// argument is either an entity reference (`argumentKind = 'entity'`) or a
+// literal value (`argumentKind = 'literal'`). Editors can create and edit
+// claims (including their argument roles); viewers are read-only (enforced by
+// KB role middleware on the API).
+// ---------------------------------------------------------------------------
+
+/** Kind of a claim argument: an entity reference or a literal value. */
+export const CLAIM_ARGUMENT_KINDS = ['entity', 'literal'] as const;
+export const claimArgumentKindSchema = z.enum(CLAIM_ARGUMENT_KINDS);
+export type ClaimArgumentKind = z.infer<typeof claimArgumentKindSchema>;
+
+/** Public shape of a claim argument as returned by the API. */
+export const claimArgumentSchema = z.object({
+  id: z.string().uuid(),
+  role: z.string(),
+  position: z.number().int().nonnegative(),
+  argumentKind: claimArgumentKindSchema,
+  entityId: z.string().uuid().nullable(),
+  value: z.unknown(),
+});
+export type ClaimArgument = z.infer<typeof claimArgumentSchema>;
+
+/** Public shape of a claim (with its arguments) as returned by the API. */
+export const claimSchema = z.object({
+  id: z.string().uuid(),
+  knowledgeBaseId: z.string().uuid(),
+  predicate: z.string(),
+  description: z.string().nullable(),
+  confidence: z.number().nullable(),
+  validStart: z.string().datetime().nullable(),
+  validEnd: z.string().datetime().nullable(),
+  properties: z.record(z.unknown()),
+  schemaVersionId: z.string().uuid().nullable(),
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  arguments: z.array(claimArgumentSchema),
+});
+export type Claim = z.infer<typeof claimSchema>;
+
+/** A list of claims (as returned by `GET .../claims`). */
+export const claimListSchema = z.array(claimSchema);
+
+/**
+ * Payload to create a single claim argument. `role` is required; an `entity`
+ * argument requires `entityId` (and no `value`), a `literal` argument requires
+ * `value` (and no `entityId`).
+ */
+export const createClaimArgumentSchema = z
+  .object({
+    role: z.string().trim().min(1).max(200),
+    argumentKind: claimArgumentKindSchema.default('entity'),
+    entityId: z.string().uuid().optional(),
+    value: z.unknown().optional(),
+  })
+  .superRefine((arg, ctx) => {
+    if (arg.argumentKind === 'entity') {
+      if (!arg.entityId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'An entity argument requires entityId',
+          path: ['entityId'],
+        });
+      }
+      if (arg.value !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'An entity argument must not have a literal value',
+          path: ['value'],
+        });
+      }
+    } else {
+      if (arg.value === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'A literal argument requires a value',
+          path: ['value'],
+        });
+      }
+      if (arg.entityId !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'A literal argument must not reference an entity',
+          path: ['entityId'],
+        });
+      }
+    }
+  });
+export type CreateClaimArgument = z.infer<typeof createClaimArgumentSchema>;
+
+function validTimeOrdered(data: { validStart?: string | null; validEnd?: string | null }): boolean {
+  if (!data.validStart || !data.validEnd) return true;
+  return Date.parse(data.validStart) <= Date.parse(data.validEnd);
+}
+
+/** Payload to create a claim. `predicate` and at least one argument required. */
+export const createClaimSchema = z
+  .object({
+    predicate: z.string().trim().min(1).max(200),
+    description: z.string().trim().max(5000).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    validStart: z.string().datetime().optional(),
+    validEnd: z.string().datetime().optional(),
+    properties: z.record(z.unknown()).optional(),
+    arguments: z.array(createClaimArgumentSchema).min(1, 'At least one argument is required'),
+  })
+  .refine(validTimeOrdered, {
+    message: 'validStart must be on or before validEnd',
+    path: ['validEnd'],
+  });
+export type CreateClaim = z.infer<typeof createClaimSchema>;
+
+/**
+ * Payload to edit a claim. All fields optional; at least one is required. When
+ * `arguments` is provided it REPLACES the full argument set (so argument roles
+ * can be edited), and must contain at least one argument.
+ */
+export const updateClaimSchema = z
+  .object({
+    predicate: z.string().trim().min(1).max(200).optional(),
+    description: z.string().trim().max(5000).nullable().optional(),
+    confidence: z.number().min(0).max(1).nullable().optional(),
+    validStart: z.string().datetime().nullable().optional(),
+    validEnd: z.string().datetime().nullable().optional(),
+    properties: z.record(z.unknown()).optional(),
+    arguments: z
+      .array(createClaimArgumentSchema)
+      .min(1, 'At least one argument is required')
+      .optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one field is required',
+  })
+  .refine(validTimeOrdered, {
+    message: 'validStart must be on or before validEnd',
+    path: ['validEnd'],
+  });
+export type UpdateClaim = z.infer<typeof updateClaimSchema>;
+
+// ---------------------------------------------------------------------------
 // Custom-property validation hooks (US-005 AC3)
 //
 // Custom properties live in JSONB columns (`entities.properties`,

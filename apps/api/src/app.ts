@@ -11,6 +11,7 @@ import { createAuthRouter } from './auth/index.js';
 import { dbAuthStore, type AuthStore } from './auth/store.js';
 import { createKnowledgeBaseRouter, type KnowledgeBaseStore } from './kb/index.js';
 import { createEntityRouter, type EntityStore } from './entities/index.js';
+import { createClaimRouter, type ClaimStore } from './claims/index.js';
 import {
   createGraphRouter,
   stubProjector,
@@ -47,6 +48,11 @@ export interface AppOptions {
    * PostgreSQL-backed store.
    */
   entityStore?: EntityStore;
+  /**
+   * Claim store (US-009). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  claimStore?: ClaimStore;
   /**
    * Graph projection store. Injectable for unit tests. Defaults to the
    * PostgreSQL-backed store.
@@ -85,6 +91,10 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(
     '/api/knowledge-bases/:kbId/entities',
     createEntityRouter({ store: options.entityStore, kbStore: options.kbStore, authStore }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/claims',
+    createClaimRouter({ store: options.claimStore, kbStore: options.kbStore, authStore }),
   );
   app.use(
     '/api/graph',

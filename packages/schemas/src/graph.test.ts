@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_ENTITY_TYPES,
+  createClaimSchema,
   createEntitySchema,
+  updateClaimSchema,
   updateEntitySchema,
   type PropertySchema,
   validateCustomProperties,
@@ -42,6 +44,101 @@ describe('updateEntitySchema', () => {
   it('allows partial updates including null description', () => {
     expect(updateEntitySchema.safeParse({ name: 'Tail recursion' }).success).toBe(true);
     expect(updateEntitySchema.safeParse({ description: null }).success).toBe(true);
+  });
+});
+
+const ENTITY_A = '22222222-2222-2222-2222-222222222222';
+const ENTITY_B = '33333333-3333-3333-3333-333333333333';
+
+describe('createClaimSchema', () => {
+  it('requires a predicate and at least one argument', () => {
+    expect(createClaimSchema.safeParse({ predicate: 'met', arguments: [] }).success).toBe(false);
+    expect(
+      createClaimSchema.safeParse({
+        arguments: [{ role: 'subject', argumentKind: 'entity', entityId: ENTITY_A }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts a multi-argument claim with entity and literal arguments', () => {
+    const parsed = createClaimSchema.parse({
+      predicate: 'met',
+      confidence: 0.7,
+      arguments: [
+        { role: 'subject', argumentKind: 'entity', entityId: ENTITY_A },
+        { role: 'object', argumentKind: 'entity', entityId: ENTITY_B },
+        { role: 'location', argumentKind: 'literal', value: 'Berlin' },
+      ],
+    });
+    expect(parsed.arguments).toHaveLength(3);
+    expect(parsed.arguments[2]?.value).toBe('Berlin');
+  });
+
+  it('defaults argumentKind to entity', () => {
+    const parsed = createClaimSchema.parse({
+      predicate: 'met',
+      arguments: [{ role: 'subject', entityId: ENTITY_A }],
+    });
+    expect(parsed.arguments[0]?.argumentKind).toBe('entity');
+  });
+
+  it('rejects an entity argument without entityId', () => {
+    expect(
+      createClaimSchema.safeParse({
+        predicate: 'met',
+        arguments: [{ role: 'subject', argumentKind: 'entity' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a literal argument without a value', () => {
+    expect(
+      createClaimSchema.safeParse({
+        predicate: 'met',
+        arguments: [{ role: 'location', argumentKind: 'literal' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a valid-time range where start is after end', () => {
+    expect(
+      createClaimSchema.safeParse({
+        predicate: 'met',
+        validStart: '2021-01-01T00:00:00.000Z',
+        validEnd: '2020-01-01T00:00:00.000Z',
+        arguments: [{ role: 'subject', argumentKind: 'entity', entityId: ENTITY_A }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects confidence outside 0..1', () => {
+    expect(
+      createClaimSchema.safeParse({
+        predicate: 'met',
+        confidence: 1.5,
+        arguments: [{ role: 'subject', argumentKind: 'entity', entityId: ENTITY_A }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('updateClaimSchema', () => {
+  it('rejects an empty payload', () => {
+    expect(updateClaimSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('allows partial metadata updates including null description', () => {
+    expect(updateClaimSchema.safeParse({ predicate: 'knew' }).success).toBe(true);
+    expect(updateClaimSchema.safeParse({ description: null }).success).toBe(true);
+  });
+
+  it('allows replacing the argument set but rejects an empty one', () => {
+    expect(
+      updateClaimSchema.safeParse({
+        arguments: [{ role: 'attendee', argumentKind: 'entity', entityId: ENTITY_A }],
+      }).success,
+    ).toBe(true);
+    expect(updateClaimSchema.safeParse({ arguments: [] }).success).toBe(false);
   });
 });
 
