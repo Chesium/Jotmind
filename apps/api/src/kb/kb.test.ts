@@ -5,11 +5,13 @@ import {
   auditEventSchema,
   kbMemberSchema,
   knowledgeBaseSchema,
+  publicJobSchema,
   type KbRole,
 } from '@jotmind/schemas';
 import { createApp } from '../app.js';
-import type { AuditEventRow, SessionRow, UserRow } from '../db/schema.js';
+import type { AuditEventRow, JobRow, SessionRow, UserRow } from '../db/schema.js';
 import { type AuthStore } from '../auth/index.js';
+import type { JobStore } from '../jobs/index.js';
 import type {
   AssignRoleInput,
   CreateKnowledgeBaseInput,
@@ -327,5 +329,115 @@ describe('knowledge bases: role-based access control', () => {
       .post(`/api/knowledge-bases/${kbId}/members`)
       .send({ userId: viewerId, role: 'editor' });
     expect(res.status).toBe(403);
+  });
+});
+
+/** In-memory JobStore exposing only `list` (the KB jobs endpoint needs nothing else). */
+function createMemoryJobStore(rows: JobRow[]): JobStore {
+  const notImplemented = () => Promise.reject(new Error('not implemented'));
+  return {
+    enqueue: notImplemented,
+    claimNext: notImplemented,
+    markSucceeded: notImplemented,
+    markForRetry: notImplemented,
+    markFailed: notImplemented,
+    getById: (id) => Promise.resolve(rows.find((r) => r.id === id)),
+    list: (filter = {}) =>
+      Promise.resolve(
+        rows.filter((r) =>
+          filter.knowledgeBaseId ? r.knowledgeBaseId === filter.knowledgeBaseId : true,
+        ),
+      ),
+    countByStatus: notImplemented,
+  };
+}
+
+function makeJob(knowledgeBaseId: string | null): JobRow {
+  const now = new Date();
+  return {
+    id: randomUUID(),
+    knowledgeBaseId,
+    type: 'embedding.index',
+    status: 'queued',
+    attempts: 0,
+    maxAttempts: 5,
+    runAfter: now,
+    payload: {},
+    result: null,
+    failureReason: null,
+    ownerUserId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+describe('knowledge bases: job status for admins/owners', () => {
+  let authStore: AuthStore;
+  let kbStore: KnowledgeBaseStore;
+  let app: ReturnType<typeof createApp>;
+  let kbId: string;
+  let ownerAgent: ReturnType<typeof request.agent>;
+  let ownerCsrf: string;
+  let viewerId: string;
+
+  let jobRows: JobRow[];
+
+  beforeEach(async () => {
+    authStore = createMemoryAuthStore();
+    kbStore = createMemoryKbStore(authStore);
+    jobRows = [];
+    // `createMemoryJobStore.list` reads `jobRows` lazily, so we can seed jobs
+    // after the KB is created while reusing the same app instance/agent.
+    app = createApp({ authStore, kbStore, jobStore: createMemoryJobStore(jobRows) });
+
+    const setup = await setupAdminAgent(app);
+    ownerAgent = setup.agent;
+    ownerCsrf = setup.csrfToken;
+
+    await ownerAgent
+      .post('/api/auth/users')
+      .set('x-csrf-token', ownerCsrf)
+      .send({ email: 'viewer@example.com', password: 'viewerpass1', role: 'member' });
+    viewerId = (await authStore.getUserByEmail('viewer@example.com'))?.id ?? '';
+
+    const created = await ownerAgent
+      .post('/api/knowledge-bases')
+      .set('x-csrf-token', ownerCsrf)
+      .send({ name: 'Jobs KB' });
+    kbId = created.body.id as string;
+
+    // Seed one job in this KB and one in another KB to prove scoping.
+    jobRows.push(makeJob(kbId), makeJob(randomUUID()));
+  });
+
+  it('lets an admin/owner inspect jobs scoped to their Knowledge Base', async () => {
+    const res = await ownerAgent.get(`/api/knowledge-bases/${kbId}/jobs`);
+    expect(res.status).toBe(200);
+    const jobs = res.body.jobs.map((j: unknown) => publicJobSchema.parse(j));
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].knowledgeBaseId).toBe(kbId);
+  });
+
+  it('forbids viewers from inspecting job status', async () => {
+    await ownerAgent
+      .post(`/api/knowledge-bases/${kbId}/members`)
+      .set('x-csrf-token', ownerCsrf)
+      .send({ userId: viewerId, role: 'viewer' as KbRole });
+
+    const viewerAgent = request.agent(app);
+    await viewerAgent
+      .post('/api/auth/login')
+      .send({ email: 'viewer@example.com', password: 'viewerpass1' });
+    const res = await viewerAgent.get(`/api/knowledge-bases/${kbId}/jobs`);
+    expect(res.status).toBe(403);
+  });
+
+  it('hides job status for non-members as 404', async () => {
+    const otherAgent = request.agent(app);
+    await otherAgent
+      .post('/api/auth/login')
+      .send({ email: 'viewer@example.com', password: 'viewerpass1' });
+    const res = await otherAgent.get(`/api/knowledge-bases/${kbId}/jobs`);
+    expect(res.status).toBe(404);
   });
 });

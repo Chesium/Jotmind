@@ -111,7 +111,10 @@ export function createApp(options: AppOptions = {}): Express {
   }
 
   app.use('/api/auth', createAuthRouter({ store: authStore }));
-  app.use('/api/knowledge-bases', createKnowledgeBaseRouter({ store: options.kbStore, authStore }));
+  app.use(
+    '/api/knowledge-bases',
+    createKnowledgeBaseRouter({ store: options.kbStore, authStore, jobStore: options.jobStore }),
+  );
   app.use(
     '/api/knowledge-bases/:kbId/entities',
     createEntityRouter({ store: options.entityStore, kbStore: options.kbStore, authStore }),

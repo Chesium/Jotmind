@@ -12,6 +12,7 @@ import {
 import type { AuditEventRow } from '../db/schema.js';
 import { asyncHandler, requireAuth, requireCsrf, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
+import { dbJobStore, toPublicJob, type JobStore } from '../jobs/index.js';
 import {
   dbKnowledgeBaseStore,
   type KbMemberRecord,
@@ -69,6 +70,7 @@ function toAuditEvent(row: AuditEventRow) {
 export interface KnowledgeBaseRouterOptions {
   store?: KnowledgeBaseStore;
   authStore?: AuthStore;
+  jobStore?: JobStore;
 }
 
 /**
@@ -79,6 +81,7 @@ export interface KnowledgeBaseRouterOptions {
 export function createKnowledgeBaseRouter(options: KnowledgeBaseRouterOptions = {}): Router {
   const store = options.store ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
+  const jobStore = options.jobStore ?? dbJobStore;
   const router = Router();
   const authed = requireAuth(authStore);
 
@@ -200,6 +203,18 @@ export function createKnowledgeBaseRouter(options: KnowledgeBaseRouterOptions = 
     asyncHandler(async (req, res) => {
       const events = await store.listAuditEvents(req.params.id as string);
       res.json(events.map(toAuditEvent));
+    }),
+  );
+
+  // Knowledge Base job status (admin/owner only). Lets KB admins inspect the
+  // background jobs scoped to their Knowledge Base without system-admin access.
+  router.get(
+    '/:id/jobs',
+    authed,
+    requireKbRole('admin'),
+    asyncHandler(async (req, res) => {
+      const jobs = await jobStore.list({ knowledgeBaseId: req.params.id as string });
+      res.json({ jobs: jobs.map(toPublicJob) });
     }),
   );
 

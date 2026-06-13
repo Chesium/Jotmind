@@ -266,3 +266,16 @@ Thread: https://ampcode.com/threads/T-019ec18a-37ee-7313-81d8-dd1bbc641a06
   - Network view avoids a heavy graph-layout dependency by using a simple SVG circular layout; fine for small KBs. If a future story needs large/interactive graphs, consider a real layout lib then (US-026 AGE traversal may inform this).
   - Large web components belong in their own files now that App.tsx is ~1.7k lines; import into App.tsx. Don't keep growing App.tsx.
 ---
+
+## Sat 13 Jun 2026 23:32 +08 - US-014
+Thread: https://ampcode.com/threads/T-019ec194-ab8d-77cf-ba1b-84f01e353091
+- Enforced/consolidated audit + permissions for manual graph flows. Most of US-014 was already satisfied by US-004-013: every graph mutation (entity/claim/note/source create/update/delete, entity merge, KB role assignment) writes an audit_events row with actorUserId in the SAME tx as the canonical write; viewers are read-only (mutations gated editor+requireCsrf, reads gated viewer); KB audit summary endpoint (GET /:id/audit, admin+) already existed.
+- Gap closed (AC4 "admins/owners can inspect ... job status"): added KB-scoped job status endpoint GET /api/knowledge-bases/:id/jobs (admin+). The KB router now takes an injectable jobStore and reuses jobStore.list({knowledgeBaseId}) + toPublicJob from jobs/index.ts. createApp passes options.jobStore into createKnowledgeBaseRouter.
+- Web: new apps/web/src/KbAdmin.tsx (own file — App.tsx is huge) rendered in <KnowledgeBases> after <Capture>, gated by kbRoleSatisfies(kb.role,'admin') (returns null for non-admins). Shows audit summary + job status. Added listKbAudit/listKbJobs to apps/web/src/api.ts.
+- Files changed: apps/api/src/kb/index.ts (jobStore seam + /:id/jobs route), apps/api/src/app.ts (pass jobStore to KB router), apps/api/src/kb/kb.test.ts (in-memory JobStore fake + 3 tests: admin 200 scoped, viewer 403, non-member 404), apps/web/src/api.ts, apps/web/src/KbAdmin.tsx (new), apps/web/src/App.tsx, AGENTS.md, prd.json, progress.txt.
+- Verified: pnpm verify fully green (typecheck/lint/format/test + e2e). KB jobs endpoint unit tests pass (kb.test.ts 12 tests). Ran kb integration test against live compose DB (passed). Browser-verified the admin panel via a TEMP Playwright config/spec (API w/ DATABASE_URL + web dev, reuseExistingServer): first-run setup -> create KB -> select -> assert <kb-admin> shows "knowledge_base.created" audit event + "No background jobs" job section; screenshot confirmed; temp files deleted.
+- **Learnings for future iterations:**
+  - When reusing the KB router's ownerAgent across createApp instances in tests, the agent is bound to ONE app instance — don't rebuild the app after the agent is created with different store injections, or the agent will hit the old app. Use a mutable array the in-memory store reads lazily (store.list reads jobRows[] at call time) so you can seed data after KB creation while keeping the SAME app/agent.
+  - The KB select button testid is `kb-select-<uuid>` (the KB id, NOT the name); in Playwright select by role+name text inside getByTestId('kb-list') instead.
+  - System-wide job API (/api/jobs) stays system-admin only; the KB-scoped /:id/jobs is the per-KB view for KB admins/owners. Later stories adding settings should add a viewer-blocked settings mutation + audit row to fully satisfy AC1's "setting changes" (settings don't exist yet — US-016).
+---

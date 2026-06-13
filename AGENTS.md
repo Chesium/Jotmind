@@ -81,11 +81,12 @@
   `auth.ts`) gate server account creation; KB roles (`owner > admin > editor > viewer`, in
   `packages/schemas/src/knowledge-base.ts`) gate per-KB access. A `member` account can `own` a KB.
   Use `kbRoleSatisfies(role, required)` / `KB_ROLE_RANK` for "at least role X" checks.
-- Routes: `createKnowledgeBaseRouter({ store, authStore })` mounted at `/api/knowledge-bases`
-  (`apps/api/src/kb/index.ts`). `GET /` (list own), `POST /` (create → creator becomes owner),
-  `GET /:id` (viewer+), `GET /:id/members` + `POST /:id/members` (admin+), `GET /:id/audit`
-  (admin+). `requireKbRole(min)` loads the caller's membership for `:id` and returns **404** for
-  non-members (hides existence) and 403 for insufficient role.
+- Routes: `createKnowledgeBaseRouter({ store, authStore, jobStore })` mounted at
+  `/api/knowledge-bases` (`apps/api/src/kb/index.ts`). `GET /` (list own), `POST /` (create →
+  creator becomes owner), `GET /:id` (viewer+), `GET /:id/members` + `POST /:id/members` (admin+),
+  `GET /:id/audit` (admin+), `GET /:id/jobs` (admin+, KB-scoped job status — reuses `jobStore.list`
+  - `toPublicJob` from `jobs/index.ts`). `requireKbRole(min)` loads the caller's membership for
+    `:id` and returns **404** for non-members (hides existence) and 403 for insufficient role.
 - Reuse the shared auth middleware exported from `auth/index.ts`: `requireAuth(authStore)`,
   `requireCsrf`, `asyncHandler`. All cookie-auth mutations need `requireCsrf`.
 - Audit + membership writes happen in the **same DB transaction** as the canonical write (see
@@ -396,6 +397,25 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `getByTestId('graph-views')` (or a table row) when a testid isn't unique
   page-wide. Network/table rows use `data-testid="network-node-<id>"` /
   `table-row-<id>`; view tabs are `view-tab-{network,timeline,table,sources}`.
+
+## Audit & permissions in graph flows (US-014)
+
+- US-014 is mostly a **consolidation/enforcement** story — audit + role gating
+  were already added per-domain (US-004–013). Every security-relevant mutation
+  (entity/claim/note/source create/update/delete, entity merge, KB role
+  assignment) already writes an `audit_events` row with `actorUserId` in the
+  same tx as the canonical write. Viewers are read-only everywhere (mutations
+  require `editor`+`requireCsrf`; reads require `viewer`). When adding NEW
+  mutating flows (proposals/imports/settings in later stories) follow the same
+  pattern so this stays true.
+- **KB-scoped job status:** `GET /api/knowledge-bases/:id/jobs` (admin+) lets KB
+  admins/owners inspect background jobs for their KB without a system-admin
+  account (system-wide `/api/jobs` is still admin-only). It injects `jobStore`
+  into the KB router and reuses `jobStore.list({knowledgeBaseId})` + `toPublicJob`.
+- Web admin panel: `apps/web/src/KbAdmin.tsx` (own file, imported into
+  `<KnowledgeBases>` after `<Capture>`) renders the audit summary + job status,
+  gated by `kbRoleSatisfies(kb.role, 'admin')` (returns null for non-admins).
+  API client helpers `listKbAudit`/`listKbJobs` are in `apps/web/src/api.ts`.
 
 ## Validation
 

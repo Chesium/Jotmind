@@ -244,8 +244,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Consolidation/enforcement story: audit + role gating were already in place per-domain (US-004-013). Verified all graph mutations (entity/claim/note/source create/update/delete, entity merge, KB role assignment) write audit_events with actorUserId in the same tx; viewers are read-only (mutations require editor+CSRF, reads require viewer). Added KB-scoped job status endpoint GET /api/knowledge-bases/:id/jobs (admin+, injects jobStore, reuses jobStore.list+toPublicJob) so KB admins/owners can inspect their KB jobs without system-admin. Web: apps/web/src/KbAdmin.tsx panel (audit summary + job status, gated by kbRoleSatisfies(kb.role,admin)) + listKbAudit/listKbJobs in api.ts. pnpm verify green; KB jobs endpoint unit-tested (admin 200 scoped, viewer 403, non-member 404); browser-verified the admin panel against live DB via Playwright (screenshot)."
     },
     {
       "id": "US-015",

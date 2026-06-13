@@ -1,4 +1,5 @@
 import {
+  auditEventSchema,
   authStateSchema,
   claimListSchema,
   claimSchema,
@@ -9,6 +10,7 @@ import {
   knowledgeBaseSchema,
   noteListSchema,
   noteSchema,
+  publicJobSchema,
   publicUserSchema,
   setupStatusSchema,
   searchResponseSchema,
@@ -17,6 +19,7 @@ import {
   sourceListSchema,
   sourceSchema,
   type AccountRole,
+  type AuditEvent,
   type AuthState,
   type Claim,
   type CreateClaim,
@@ -28,6 +31,7 @@ import {
   type EntityImpact,
   type KnowledgeBase,
   type Note,
+  type PublicJob,
   type PublicUser,
   type SearchQuery,
   type SearchResponse,
@@ -460,4 +464,24 @@ export async function search(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return searchResponseSchema.parse(await res.json());
+}
+
+/** Knowledge Base audit summary (admin/owner only). Newest events first. */
+export async function listKbAudit(knowledgeBaseId: string): Promise<AuditEvent[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/audit`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as unknown[];
+  return body.map((e) => auditEventSchema.parse(e));
+}
+
+/** Background jobs scoped to a Knowledge Base (admin/owner only). */
+export async function listKbJobs(knowledgeBaseId: string): Promise<PublicJob[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/jobs`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as { jobs: unknown[] };
+  return body.jobs.map((j) => publicJobSchema.parse(j));
 }
