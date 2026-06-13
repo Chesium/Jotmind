@@ -173,8 +173,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Soft-delete + Archive&Pointer merge for entities/claims. Deletes (dbEntityStore.deleteEntity / dbClaimStore.deleteClaim) set deletedAt, emit <target>.deleted outbox + audit in one tx (claim delete also soft-deletes claim_arguments). Entity merge (dbEntityStore.mergeEntities): source soft-deleted with merged_into_id->survivor (no compound node), aliases/tags set-unioned + source name kept as alias, properties target-wins; claim_arguments retargeted source->target with provenance.historical_source_entities appended; emits entity.updated+entity.deleted+claim.updated per claim + entity.merged audit. Routes: DELETE/POST :id/merge (editor+CSRF), GET :id/impact (viewer) for confirmations; claim DELETE (editor+CSRF). Viewers 403, non-members 404. Web App.tsx: Delete/Merge buttons + impact-aware window.confirm. No migration (merged_into_id/provenance from US-005). pnpm verify:quick green; full API+integration tests green vs live DB; Playwright browser flow verified (setup->KB->entities->claim->delete claim->merge->delete entity)."
     },
     {
       "id": "US-011",

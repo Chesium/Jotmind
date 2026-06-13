@@ -10,6 +10,7 @@ import type {
   ClaimStore,
   ClaimWithArguments,
   CreateClaimInput,
+  DeleteClaimInput,
   UpdateClaimInput,
 } from './store.js';
 
@@ -174,6 +175,24 @@ function createMemoryClaimStore(): ClaimStore & {
         actorUserId: input.actorUserId,
         targetId: c.id,
         metadata: { changed: Object.keys(f) },
+      });
+      return Promise.resolve(c);
+    },
+    deleteClaim: (input: DeleteClaimInput) => {
+      const c = byId.get(input.id);
+      if (!c || c.knowledgeBaseId !== input.knowledgeBaseId || c.deletedAt !== null) {
+        return Promise.resolve(undefined);
+      }
+      const now = new Date();
+      c.deletedAt = now;
+      c.updatedAt = now;
+      for (const arg of c.arguments) arg.deletedAt = now;
+      outbox.push({ eventType: 'deleted', targetId: c.id });
+      audits.push({
+        action: 'claim.deleted',
+        actorUserId: input.actorUserId,
+        targetId: c.id,
+        metadata: { predicate: c.predicate },
       });
       return Promise.resolve(c);
     },
@@ -402,6 +421,63 @@ describe('claims API', () => {
       .patch(`/api/knowledge-bases/${KB_ID}/claims/${randomUUID()}`)
       .set('x-csrf-token', csrfToken)
       .send({ predicate: 'nope' });
+    expect(res.status).toBe(404);
+  });
+
+  async function createClaim(
+    agent: ReturnType<typeof request.agent>,
+    csrfToken: string,
+  ): Promise<string> {
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/claims`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        predicate: 'met',
+        arguments: [{ role: 'subject', argumentKind: 'entity', entityId: ENTITY_A }],
+      });
+    return res.body.id as string;
+  }
+
+  it('soft-deletes a claim and records audit + outbox events', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createClaim(agent, csrfToken);
+
+    const res = await agent
+      .delete(`/api/knowledge-bases/${KB_ID}/claims/${id}`)
+      .set('x-csrf-token', csrfToken);
+    expect(res.status).toBe(204);
+
+    const list = await agent.get(`/api/knowledge-bases/${KB_ID}/claims`);
+    expect(list.body).toEqual([]);
+
+    expect(claimStore.outbox.some((e) => e.eventType === 'deleted' && e.targetId === id)).toBe(
+      true,
+    );
+    expect(claimStore.audits.some((a) => a.action === 'claim.deleted')).toBe(true);
+  });
+
+  it('requires CSRF and editor role to delete', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createClaim(agent, csrfToken);
+
+    const noCsrf = await agent.delete(`/api/knowledge-bases/${KB_ID}/claims/${id}`);
+    expect(noCsrf.status).toBe(403);
+
+    kbStore.setRole(KB_ID, userId, 'viewer');
+    const asViewer = await agent
+      .delete(`/api/knowledge-bases/${KB_ID}/claims/${id}`)
+      .set('x-csrf-token', csrfToken);
+    expect(asViewer.status).toBe(403);
+  });
+
+  it('returns 404 deleting a missing claim', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const res = await agent
+      .delete(`/api/knowledge-bases/${KB_ID}/claims/${randomUUID()}`)
+      .set('x-csrf-token', csrfToken);
     expect(res.status).toBe(404);
   });
 });

@@ -6,7 +6,13 @@ import { createApp } from '../app.js';
 import type { EntityRow, SessionRow, UserRow } from '../db/schema.js';
 import { type AuthStore } from '../auth/index.js';
 import type { KnowledgeBaseStore } from '../kb/store.js';
-import type { CreateEntityInput, EntityStore, UpdateEntityInput } from './store.js';
+import type {
+  CreateEntityInput,
+  DeleteEntityInput,
+  EntityStore,
+  MergeEntitiesInput,
+  UpdateEntityInput,
+} from './store.js';
 
 /** Minimal in-memory AuthStore (mirrors kb/kb.test.ts) for setup/login. */
 function createMemoryAuthStore(): AuthStore {
@@ -82,6 +88,7 @@ interface OutboxRecord {
   knowledgeBaseId: string;
   eventType: 'created' | 'updated' | 'deleted';
   targetId: string;
+  targetType?: 'entity' | 'claim';
 }
 
 /** In-memory EntityStore that records audit + outbox side-effects for assertions. */
@@ -155,6 +162,98 @@ function createMemoryEntityStore(): EntityStore & {
         metadata: { changed: Object.keys(f) },
       });
       return Promise.resolve(e);
+    },
+    deleteEntity: (input: DeleteEntityInput) => {
+      const e = byId.get(input.id);
+      if (!e || e.knowledgeBaseId !== input.knowledgeBaseId || e.deletedAt !== null) {
+        return Promise.resolve(undefined);
+      }
+      e.deletedAt = new Date();
+      e.updatedAt = new Date();
+      outbox.push({
+        knowledgeBaseId: e.knowledgeBaseId,
+        eventType: 'deleted',
+        targetType: 'entity',
+        targetId: e.id,
+      });
+      audits.push({
+        knowledgeBaseId: e.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'entity.deleted',
+        targetId: e.id,
+        metadata: { type: e.type, name: e.name },
+      });
+      return Promise.resolve(e);
+    },
+    mergeEntities: (input: MergeEntitiesInput) => {
+      if (input.sourceId === input.targetId) {
+        return Promise.resolve({ ok: false as const, reason: 'same_entity' as const });
+      }
+      const source = byId.get(input.sourceId);
+      if (
+        !source ||
+        source.knowledgeBaseId !== input.knowledgeBaseId ||
+        source.deletedAt !== null
+      ) {
+        return Promise.resolve({ ok: false as const, reason: 'source_not_found' as const });
+      }
+      const target = byId.get(input.targetId);
+      if (
+        !target ||
+        target.knowledgeBaseId !== input.knowledgeBaseId ||
+        target.deletedAt !== null
+      ) {
+        return Promise.resolve({ ok: false as const, reason: 'target_not_found' as const });
+      }
+      const now = new Date();
+      const aliasSet = new Set<string>([
+        ...(target.aliases as string[]),
+        ...(source.aliases as string[]),
+      ]);
+      if (source.name !== target.name) aliasSet.add(source.name);
+      target.aliases = [...aliasSet];
+      target.tags = [
+        ...new Set<string>([...(target.tags as string[]), ...(source.tags as string[])]),
+      ];
+      target.properties = {
+        ...(source.properties as Record<string, unknown>),
+        ...(target.properties as Record<string, unknown>),
+      };
+      target.updatedAt = now;
+      source.deletedAt = now;
+      source.mergedIntoId = target.id;
+      source.updatedAt = now;
+      outbox.push(
+        {
+          knowledgeBaseId: input.knowledgeBaseId,
+          eventType: 'updated',
+          targetType: 'entity',
+          targetId: target.id,
+        },
+        {
+          knowledgeBaseId: input.knowledgeBaseId,
+          eventType: 'deleted',
+          targetType: 'entity',
+          targetId: source.id,
+        },
+      );
+      audits.push({
+        knowledgeBaseId: input.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'entity.merged',
+        targetId: target.id,
+        metadata: { sourceId: source.id, targetId: target.id, retargetedClaimCount: 0 },
+      });
+      return Promise.resolve({ ok: true as const, entity: target, retargetedClaimCount: 0 });
+    },
+    getEntityImpact: (kb, id) => {
+      const e = byId.get(id);
+      if (!e || e.knowledgeBaseId !== kb || e.deletedAt !== null) {
+        return Promise.resolve(undefined);
+      }
+      // The in-memory fake does not track claims; impact is exercised in the
+      // integration tests against a live DB.
+      return Promise.resolve({ claims: [] });
     },
   };
 }
@@ -318,5 +417,133 @@ describe('entities API', () => {
       .set('x-csrf-token', csrfToken)
       .send({ name: 'Nope' });
     expect(res.status).toBe(404);
+  });
+
+  async function createEntity(
+    agent: ReturnType<typeof request.agent>,
+    csrfToken: string,
+    name: string,
+  ): Promise<string> {
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities`)
+      .set('x-csrf-token', csrfToken)
+      .send({ type: 'Person', name });
+    return res.body.id as string;
+  }
+
+  it('soft-deletes an entity and records audit + outbox events', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createEntity(agent, csrfToken, 'Ada');
+
+    const res = await agent
+      .delete(`/api/knowledge-bases/${KB_ID}/entities/${id}`)
+      .set('x-csrf-token', csrfToken);
+    expect(res.status).toBe(204);
+
+    // No longer listed (soft-deleted).
+    const list = await agent.get(`/api/knowledge-bases/${KB_ID}/entities`);
+    expect(list.body).toEqual([]);
+
+    expect(entityStore.outbox.some((e) => e.eventType === 'deleted' && e.targetId === id)).toBe(
+      true,
+    );
+    expect(entityStore.audits.some((a) => a.action === 'entity.deleted')).toBe(true);
+  });
+
+  it('requires CSRF and editor role to delete', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createEntity(agent, csrfToken, 'Ada');
+
+    const noCsrf = await agent.delete(`/api/knowledge-bases/${KB_ID}/entities/${id}`);
+    expect(noCsrf.status).toBe(403);
+
+    kbStore.setRole(KB_ID, userId, 'viewer');
+    const asViewer = await agent
+      .delete(`/api/knowledge-bases/${KB_ID}/entities/${id}`)
+      .set('x-csrf-token', csrfToken);
+    expect(asViewer.status).toBe(403);
+  });
+
+  it('returns 404 deleting a missing entity', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const res = await agent
+      .delete(`/api/knowledge-bases/${KB_ID}/entities/${randomUUID()}`)
+      .set('x-csrf-token', csrfToken);
+    expect(res.status).toBe(404);
+  });
+
+  it('exposes delete/merge impact to viewers', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createEntity(agent, csrfToken, 'Ada');
+
+    const res = await agent.get(`/api/knowledge-bases/${KB_ID}/entities/${id}/impact`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ claims: [] });
+  });
+
+  it('merges one entity into another (archive & pointer)', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const sourceId = await createEntity(agent, csrfToken, 'Ada L.');
+    const targetId = await createEntity(agent, csrfToken, 'Ada Lovelace');
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities/${sourceId}/merge`)
+      .set('x-csrf-token', csrfToken)
+      .send({ targetId });
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(targetId);
+    // Source name preserved as an alias on the survivor.
+    expect(res.body.aliases).toContain('Ada L.');
+
+    // Source is archived (no longer listed); survivor remains.
+    const list = await agent.get(`/api/knowledge-bases/${KB_ID}/entities`);
+    const ids = (list.body as { id: string }[]).map((e) => e.id);
+    expect(ids).toContain(targetId);
+    expect(ids).not.toContain(sourceId);
+
+    expect(entityStore.audits.some((a) => a.action === 'entity.merged')).toBe(true);
+  });
+
+  it('rejects merging an entity into itself', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createEntity(agent, csrfToken, 'Ada');
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities/${id}/merge`)
+      .set('x-csrf-token', csrfToken)
+      .send({ targetId: id });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 merging into a missing target', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const sourceId = await createEntity(agent, csrfToken, 'Ada');
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities/${sourceId}/merge`)
+      .set('x-csrf-token', csrfToken)
+      .send({ targetId: randomUUID() });
+    expect(res.status).toBe(404);
+  });
+
+  it('forbids viewers from merging', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const sourceId = await createEntity(agent, csrfToken, 'Ada');
+    const targetId = await createEntity(agent, csrfToken, 'Ada Lovelace');
+
+    kbStore.setRole(KB_ID, userId, 'viewer');
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities/${sourceId}/merge`)
+      .set('x-csrf-token', csrfToken)
+      .send({ targetId });
+    expect(res.status).toBe(403);
   });
 });

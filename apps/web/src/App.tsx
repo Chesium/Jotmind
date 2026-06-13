@@ -15,6 +15,9 @@ import {
   createClaim,
   createEntity,
   createKnowledgeBase,
+  deleteClaim,
+  deleteEntity,
+  getEntityImpact,
   getMe,
   getSetupStatus,
   listClaims,
@@ -22,6 +25,7 @@ import {
   listKnowledgeBases,
   login,
   logout,
+  mergeEntity,
   setupAdmin,
   updateClaim,
   updateEntity,
@@ -331,6 +335,7 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   const [items, setItems] = useState<Entity[]>([]);
   const [form, setForm] = useState<EntityFormState>(EMPTY_ENTITY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [mergeTargets, setMergeTargets] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -413,6 +418,60 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     setForm(EMPTY_ENTITY_FORM);
   }
 
+  async function handleDelete(entity: Entity) {
+    setError(null);
+    try {
+      const impact = await getEntityImpact(kb.id, entity.id);
+      const detail =
+        impact.claims.length > 0
+          ? `It is referenced by ${String(impact.claims.length)} claim(s): ${impact.claims
+              .map((c) => c.predicate)
+              .join(', ')}. They will remain but point at a deleted entity.`
+          : 'No claims reference it.';
+      if (!window.confirm(`Delete "${entity.name}"? ${detail}`)) return;
+      await deleteEntity(kb.id, entity.id, csrfToken);
+      if (editingId === entity.id) cancelEdit();
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete entity');
+    }
+  }
+
+  async function handleMerge(source: Entity) {
+    setError(null);
+    const targetId = mergeTargets[source.id];
+    if (!targetId) {
+      setError('Select an entity to merge into.');
+      return;
+    }
+    const target = items.find((e) => e.id === targetId);
+    try {
+      const impact = await getEntityImpact(kb.id, source.id);
+      const detail =
+        impact.claims.length > 0
+          ? ` ${String(impact.claims.length)} claim(s) will be retargeted to the survivor.`
+          : '';
+      if (
+        !window.confirm(
+          `Merge "${source.name}" into "${target?.name ?? 'selected entity'}"? ` +
+            `"${source.name}" will be archived and its aliases/properties folded into the survivor.${detail}`,
+        )
+      ) {
+        return;
+      }
+      await mergeEntity(kb.id, source.id, targetId, csrfToken);
+      if (editingId === source.id) cancelEdit();
+      setMergeTargets((m) => {
+        const next = { ...m };
+        delete next[source.id];
+        return next;
+      });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not merge entity');
+    }
+  }
+
   return (
     <section aria-label="entities" data-testid="entities">
       <h3>Entities in {kb.name}</h3>
@@ -425,13 +484,48 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
               <strong>{entity.name}</strong> ({entity.type})
               {entity.aliases.length > 0 && <> — aka {entity.aliases.join(', ')}</>}
               {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => startEdit(entity)}
-                  data-testid={`entity-edit-${entity.id}`}
-                >
-                  Edit
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => startEdit(entity)}
+                    data-testid={`entity-edit-${entity.id}`}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(entity)}
+                    data-testid={`entity-delete-${entity.id}`}
+                  >
+                    Delete
+                  </button>
+                  <label>
+                    Merge into
+                    <select
+                      value={mergeTargets[entity.id] ?? ''}
+                      onChange={(e) =>
+                        setMergeTargets((m) => ({ ...m, [entity.id]: e.target.value }))
+                      }
+                      data-testid={`entity-merge-target-${entity.id}`}
+                    >
+                      <option value="">Select survivor…</option>
+                      {items
+                        .filter((other) => other.id !== entity.id)
+                        .map((other) => (
+                          <option key={other.id} value={other.id}>
+                            {other.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void handleMerge(entity)}
+                    data-testid={`entity-merge-${entity.id}`}
+                  >
+                    Merge
+                  </button>
+                </>
               )}
             </li>
           ))}
@@ -689,6 +783,20 @@ function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     setForm(emptyClaimForm());
   }
 
+  async function handleDelete(claim: Claim) {
+    setError(null);
+    if (!window.confirm(`Delete claim "${claim.predicate}"? This cannot be easily undone.`)) {
+      return;
+    }
+    try {
+      await deleteClaim(kb.id, claim.id, csrfToken);
+      if (editingId === claim.id) cancelEdit();
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete claim');
+    }
+  }
+
   return (
     <section aria-label="claims" data-testid="claims">
       <h3>Claims in {kb.name}</h3>
@@ -711,13 +819,22 @@ function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
                 ))}
               </ul>
               {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => startEdit(claim)}
-                  data-testid={`claim-edit-${claim.id}`}
-                >
-                  Edit
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => startEdit(claim)}
+                    data-testid={`claim-edit-${claim.id}`}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(claim)}
+                    data-testid={`claim-delete-${claim.id}`}
+                  >
+                    Delete
+                  </button>
+                </>
               )}
             </li>
           ))}

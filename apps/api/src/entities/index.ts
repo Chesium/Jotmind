@@ -3,6 +3,7 @@ import {
   createEntitySchema,
   entitySchema,
   kbRoleSatisfies,
+  mergeEntitySchema,
   updateEntitySchema,
   type Entity,
   type KbRole,
@@ -130,6 +131,78 @@ export function createEntityRouter(options: EntityRouterOptions = {}): Router {
         return;
       }
       res.json(toEntity(entity));
+    }),
+  );
+
+  // Explain the impact of deleting/merging an entity: claims that reference it
+  // (viewer+). Surfaced in delete/merge confirmation dialogs (US-010 AC2).
+  router.get(
+    '/:entityId/impact',
+    authed,
+    requireKbRole('viewer'),
+    asyncHandler(async (req, res) => {
+      const impact = await store.getEntityImpact(
+        req.params.kbId as string,
+        req.params.entityId as string,
+      );
+      if (!impact) {
+        res.status(404).json({ error: 'Entity not found' });
+        return;
+      }
+      res.json(impact);
+    }),
+  );
+
+  // Soft-delete an entity (editor+). Viewers are read-only (US-010 AC1/AC7).
+  router.delete(
+    '/:entityId',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const ctx = req.auth as AuthContext;
+      const entity = await store.deleteEntity({
+        knowledgeBaseId: req.params.kbId as string,
+        id: req.params.entityId as string,
+        actorUserId: ctx.user.id,
+      });
+      if (!entity) {
+        res.status(404).json({ error: 'Entity not found' });
+        return;
+      }
+      res.status(204).end();
+    }),
+  );
+
+  // Merge this entity (source) into a survivor (editor+). Archive & Pointer
+  // behavior preserves provenance and retargets claims (US-010 AC3-AC6).
+  router.post(
+    '/:entityId/merge',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const ctx = req.auth as AuthContext;
+      const parsed = mergeEntitySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid merge details' });
+        return;
+      }
+      const result = await store.mergeEntities({
+        knowledgeBaseId: req.params.kbId as string,
+        sourceId: req.params.entityId as string,
+        targetId: parsed.data.targetId,
+        actorUserId: ctx.user.id,
+      });
+      if (!result.ok) {
+        if (result.reason === 'same_entity') {
+          res.status(400).json({ error: 'Cannot merge an entity into itself' });
+          return;
+        }
+        res.status(404).json({ error: 'Entity not found' });
+        return;
+      }
+      res.json(toEntity(result.entity));
     }),
   );
 

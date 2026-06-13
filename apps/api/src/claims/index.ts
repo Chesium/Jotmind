@@ -178,5 +178,26 @@ export function createClaimRouter(options: ClaimRouterOptions = {}): Router {
     }),
   );
 
+  // Soft-delete a claim (editor+). Viewers are read-only (US-010 AC1/AC7).
+  router.delete(
+    '/:claimId',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const ctx = req.auth as AuthContext;
+      const claim = await store.deleteClaim({
+        knowledgeBaseId: req.params.kbId as string,
+        id: req.params.claimId as string,
+        actorUserId: ctx.user.id,
+      });
+      if (!claim) {
+        res.status(404).json({ error: 'Claim not found' });
+        return;
+      }
+      res.status(204).end();
+    }),
+  );
+
   return router;
 }

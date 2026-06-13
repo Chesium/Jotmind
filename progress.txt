@@ -190,3 +190,22 @@ Thread: https://ampcode.com/threads/T-019ec142-3146-727d-a3fa-008938680ebf
   - Web gotcha: <Claims> only refetches entities when kb.id changes, so entities just created in <Entities> won't show in the claim form's entity dropdown until a page reload (re-select KB after reload). Verified in browser via reload+reselect. If a future story needs live cross-component sync, lift entity state up.
   - US-010 (next) = delete + merge graph records safely (soft-delete deletedAt, entity merge via mergedIntoId + provenance.historical_source_entities). Reuse the outbox+audit-in-one-tx pattern with eventType 'deleted'.
 ---
+
+## Sat 13 Jun 2026 22:19 +08 - US-010
+Thread: https://ampcode.com/threads/T-019ec14e-0078-70ac-b158-92be1097d0d0
+- Implemented safe soft-delete + Archive&Pointer merge for graph records (entities, claims). Notes/Sources have no store yet (US-011) — their delete reuses this same soft-delete + outbox + audit pattern when added.
+- apps/api/src/entities/store.ts: EntityStore gains deleteEntity (soft-delete, entity.deleted outbox+audit), getEntityImpact (claims referencing an entity, for confirmations), mergeEntities (Archive & Pointer). Merge folds aliases/tags (set-union) + source name as alias, properties target-wins, soft-deletes source with merged_into_id->survivor, retargets claim_arguments source->target, appends provenance.historical_source_entities, emits entity.updated+entity.deleted+claim.updated(per claim)+entity.merged audit — all one tx. Returns discriminated MergeEntitiesResult.
+- apps/api/src/entities/index.ts: DELETE /:entityId, POST /:entityId/merge (mergeEntitySchema body {targetId}), GET /:entityId/impact. Reuse local requireKbRole (viewer reads / editor mutations + requireCsrf). same_entity->400, source/target_not_found->404.
+- apps/api/src/claims/store.ts + index.ts: deleteClaim (soft-delete claim + its claim_arguments, claim.deleted outbox+audit) and DELETE /:claimId.
+- packages/schemas/src/graph.ts: mergeEntitySchema, entityImpactSchema/entityImpactClaimSchema (+ types).
+- apps/web/src/api.ts: deleteEntity, mergeEntity, getEntityImpact, deleteClaim. apps/web/src/App.tsx: <Entities> rows get Delete + "Merge into" survivor <select> + Merge (impact-aware window.confirm); <Claims> rows get Delete. mergeTargets state per entity.
+- Tests: entities.test.ts + claims.test.ts in-memory fakes extended (deleteEntity/mergeEntities/getEntityImpact/deleteClaim) + router tests (delete/merge/impact role-gating, CSRF, 404/400). entities.integration.test.ts + claims.integration.test.ts: live-DB delete/merge/impact/provenance/retarget/outbox/audit assertions (truncate now includes claims/claim_arguments).
+- Verified: pnpm verify:quick green; full `DATABASE_URL=... pnpm --filter @jotmind/api test` 114/114 green (integration no longer skipped); Playwright browser flow green (setup->KB->2 entities->claim->delete claim->merge entities (survivor remains)->delete entity).
+- **Learnings for future iterations:**
+  - See AGENTS.md "Delete & merge (US-010)". No migration needed: entities.merged_into_id + claims.provenance JSONB already existed from US-005 schema.
+  - Soft-delete is the rule for ALL canonical graph records: set deletedAt, emit <target>.deleted outbox + audit in the same tx; reads already filter deletedAt IS NULL. Deleting a parent (claim) should soft-delete its children (claim_arguments) too.
+  - Merge is Archive & Pointer (NOT a compound node): soft-delete source + merged_into_id, fold props/aliases/tags into survivor, retarget claim_arguments, append provenance.historical_source_entities. Use a discriminated result type so the router maps reasons to 400/404 cleanly.
+  - Delete/merge confirmation impact (AC2) is served by GET /:entityId/impact (viewer) returning affected claims; the web confirm dialog uses it. The in-memory test fake returns empty impact (no claim tracking) — impact correctness is covered by the integration test.
+  - dev-browser skill still unavailable: verify UI via a TEMP playwright config (two webServers: API w/ DATABASE_URL + reuseExistingServer:true, web dev) after truncating the DB so first-run setup shows; wait for auth-loading to be hidden before interacting; delete temp files + test-results after.
+  - US-011 next: add Notes/Sources stores + routers; give them the same soft-delete (deleteNote/deleteSource) so US-010 AC ("note/source deletes are soft-deletes") is fully satisfied.
+---

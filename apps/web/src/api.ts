@@ -2,6 +2,7 @@ import {
   authStateSchema,
   claimListSchema,
   claimSchema,
+  entityImpactSchema,
   entityListSchema,
   entitySchema,
   knowledgeBaseListSchema,
@@ -14,6 +15,7 @@ import {
   type CreateClaim,
   type CreateEntity,
   type Entity,
+  type EntityImpact,
   type KnowledgeBase,
   type PublicUser,
   type SetupStatus,
@@ -154,6 +156,49 @@ export async function updateEntity(
   return entitySchema.parse(await res.json());
 }
 
+/** Fetch the claims affected by deleting/merging an entity (US-010). */
+export async function getEntityImpact(
+  knowledgeBaseId: string,
+  entityId: string,
+): Promise<EntityImpact> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}/impact`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return entityImpactSchema.parse(await res.json());
+}
+
+/** Soft-delete an entity in a Knowledge Base (editor+). */
+export async function deleteEntity(
+  knowledgeBaseId: string,
+  entityId: string,
+  csrfToken: string,
+): Promise<void> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'x-csrf-token': csrfToken },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+}
+
+/** Merge one entity (source) into another (survivor) in a Knowledge Base (editor+). */
+export async function mergeEntity(
+  knowledgeBaseId: string,
+  sourceId: string,
+  targetId: string,
+  csrfToken: string,
+): Promise<Entity> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${sourceId}/merge`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ targetId }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return entitySchema.parse(await res.json());
+}
+
 /** List claims in a Knowledge Base. */
 export async function listClaims(knowledgeBaseId: string): Promise<Claim[]> {
   const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims`, {
@@ -177,6 +222,20 @@ export async function createClaim(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return claimSchema.parse(await res.json());
+}
+
+/** Soft-delete a claim in a Knowledge Base (editor+). */
+export async function deleteClaim(
+  knowledgeBaseId: string,
+  claimId: string,
+  csrfToken: string,
+): Promise<void> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims/${claimId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'x-csrf-token': csrfToken },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
 }
 
 /** Edit a claim in a Knowledge Base (editor+). */

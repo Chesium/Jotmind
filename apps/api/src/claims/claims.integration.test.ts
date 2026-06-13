@@ -166,6 +166,54 @@ describe.skipIf(!hasDatabase)('claim writes integration', () => {
     ).rejects.toThrow();
   });
 
+  it('soft-deletes a claim and its arguments, emitting claim.deleted (US-010)', async () => {
+    const claim = await dbClaimStore.createClaim({
+      knowledgeBaseId: kbId,
+      predicate: 'met',
+      arguments: [
+        { role: 'subject', argumentKind: 'entity', entityId: entityA },
+        { role: 'object', argumentKind: 'entity', entityId: entityB },
+      ],
+      actorUserId: userId,
+    });
+
+    const deleted = await dbClaimStore.deleteClaim({
+      knowledgeBaseId: kbId,
+      id: claim.id,
+      actorUserId: userId,
+    });
+    expect(deleted?.deletedAt).toBeTruthy();
+
+    // Hidden from reads; row still exists (soft-delete).
+    expect(await dbClaimStore.getClaim(kbId, claim.id)).toBeUndefined();
+    const claimRows = await getDb().select().from(claims).where(eq(claims.id, claim.id));
+    expect(claimRows).toHaveLength(1);
+
+    // Arguments are soft-deleted too.
+    const args = await getDb()
+      .select()
+      .from(claimArguments)
+      .where(eq(claimArguments.claimId, claim.id));
+    expect(args.every((a) => a.deletedAt !== null)).toBe(true);
+
+    const outbox = await getDb()
+      .select()
+      .from(graphOutbox)
+      .where(and(eq(graphOutbox.targetId, claim.id), eq(graphOutbox.eventType, 'claim.deleted')));
+    expect(outbox).toHaveLength(1);
+
+    const audit = await getDb()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.targetId, claim.id), eq(auditEvents.action, 'claim.deleted')));
+    expect(audit).toHaveLength(1);
+
+    // Deleting again is a no-op.
+    expect(
+      await dbClaimStore.deleteClaim({ knowledgeBaseId: kbId, id: claim.id, actorUserId: userId }),
+    ).toBeUndefined();
+  });
+
   it('lists only non-deleted claims with their arguments, scoped by KB', async () => {
     await dbClaimStore.createClaim({
       knowledgeBaseId: kbId,

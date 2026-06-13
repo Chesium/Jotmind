@@ -113,6 +113,35 @@ export const createEntitySchema = z.object({
 });
 export type CreateEntity = z.infer<typeof createEntitySchema>;
 
+/**
+ * Payload to merge one entity into another (US-010). The entity identified by
+ * the route (`:entityId`) is the *source* that gets archived; `targetId` is the
+ * *survivor* it merges into. They must differ (enforced server-side too).
+ */
+export const mergeEntitySchema = z.object({
+  targetId: z.string().uuid(),
+});
+export type MergeEntity = z.infer<typeof mergeEntitySchema>;
+
+/**
+ * A single claim affected by deleting/merging an entity (US-010). Used to
+ * explain the impact of a destructive action before it is confirmed.
+ */
+export const entityImpactClaimSchema = z.object({
+  id: z.string().uuid(),
+  predicate: z.string(),
+});
+export type EntityImpactClaim = z.infer<typeof entityImpactClaimSchema>;
+
+/**
+ * The impact of deleting/merging an entity: the (non-deleted) claims that
+ * reference it. Surfaced in delete/merge confirmations (US-010 AC2).
+ */
+export const entityImpactSchema = z.object({
+  claims: z.array(entityImpactClaimSchema),
+});
+export type EntityImpact = z.infer<typeof entityImpactSchema>;
+
 /** Payload to edit an entity. All fields optional; at least one is required. */
 export const updateEntitySchema = z
   .object({

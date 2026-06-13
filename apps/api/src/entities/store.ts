@@ -1,6 +1,13 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
-import { auditEvents, entities, type EntityRow, type NewEntityRow } from '../db/schema.js';
+import {
+  auditEvents,
+  claimArguments,
+  claims,
+  entities,
+  type EntityRow,
+  type NewEntityRow,
+} from '../db/schema.js';
 import { enqueueGraphOutbox } from '../graph/outbox.js';
 
 export interface CreateEntityInput {
@@ -32,6 +39,37 @@ export interface UpdateEntityInput {
   fields: UpdateEntityFields;
 }
 
+export interface DeleteEntityInput {
+  knowledgeBaseId: string;
+  id: string;
+  actorUserId: string;
+}
+
+export interface MergeEntitiesInput {
+  knowledgeBaseId: string;
+  /** The entity to archive (soft-delete + point at the survivor). */
+  sourceId: string;
+  /** The surviving entity that absorbs the source. */
+  targetId: string;
+  actorUserId: string;
+}
+
+/** A claim that references an entity, used to explain delete/merge impact. */
+export interface EntityImpactClaim {
+  id: string;
+  predicate: string;
+}
+
+/** The (non-deleted) claims that reference an entity (US-010 AC2). */
+export interface EntityImpact {
+  claims: EntityImpactClaim[];
+}
+
+/** Outcome of an entity merge (US-010). */
+export type MergeEntitiesResult =
+  | { ok: true; entity: EntityRow; retargetedClaimCount: number }
+  | { ok: false; reason: 'source_not_found' | 'target_not_found' | 'same_entity' };
+
 /**
  * Persistence boundary for entities (US-008). Defined as an interface so route
  * handlers can run against an in-memory fake in unit tests (no live DB) while
@@ -47,6 +85,16 @@ export interface EntityStore {
   getEntity(knowledgeBaseId: string, id: string): Promise<EntityRow | undefined>;
   createEntity(input: CreateEntityInput): Promise<EntityRow>;
   updateEntity(input: UpdateEntityInput): Promise<EntityRow | undefined>;
+  /** Soft-delete an entity (US-010). Returns undefined if it does not exist. */
+  deleteEntity(input: DeleteEntityInput): Promise<EntityRow | undefined>;
+  /**
+   * Archive & Pointer merge (US-010): soft-delete `sourceId`, point its
+   * `mergedIntoId` at `targetId`, fold aliases/tags/properties into the
+   * survivor, and retarget claim arguments referencing the source.
+   */
+  mergeEntities(input: MergeEntitiesInput): Promise<MergeEntitiesResult>;
+  /** Claims that reference an entity, to explain delete/merge impact (US-010). */
+  getEntityImpact(knowledgeBaseId: string, id: string): Promise<EntityImpact | undefined>;
 }
 
 /** PostgreSQL-backed EntityStore. Resolves the Drizzle client per call. */
@@ -164,6 +212,215 @@ export const dbEntityStore: EntityStore = {
       });
 
       return entity;
+    });
+  },
+
+  async deleteEntity(input) {
+    return getDb().transaction(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(entities)
+        .where(
+          and(
+            eq(entities.id, input.id),
+            eq(entities.knowledgeBaseId, input.knowledgeBaseId),
+            isNull(entities.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!existing[0]) return undefined;
+
+      const now = new Date();
+      const rows = await tx
+        .update(entities)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(and(eq(entities.id, input.id), eq(entities.knowledgeBaseId, input.knowledgeBaseId)))
+        .returning();
+      const entity = rows[0];
+      if (!entity) throw new Error('Failed to delete entity');
+
+      await enqueueGraphOutbox(tx, {
+        knowledgeBaseId: entity.knowledgeBaseId,
+        eventType: 'deleted',
+        targetType: 'entity',
+        targetId: entity.id,
+        payload: { type: entity.type, name: entity.name },
+      });
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: entity.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'entity.deleted',
+        targetType: 'entity',
+        targetId: entity.id,
+        metadata: { type: entity.type, name: entity.name },
+      });
+
+      return entity;
+    });
+  },
+
+  async getEntityImpact(knowledgeBaseId, id) {
+    const db = getDb();
+    const entity = await db
+      .select({ id: entities.id })
+      .from(entities)
+      .where(
+        and(
+          eq(entities.id, id),
+          eq(entities.knowledgeBaseId, knowledgeBaseId),
+          isNull(entities.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!entity[0]) return undefined;
+
+    const rows = await db
+      .selectDistinct({ id: claims.id, predicate: claims.predicate })
+      .from(claimArguments)
+      .innerJoin(claims, eq(claimArguments.claimId, claims.id))
+      .where(
+        and(
+          eq(claimArguments.entityId, id),
+          isNull(claimArguments.deletedAt),
+          isNull(claims.deletedAt),
+          eq(claims.knowledgeBaseId, knowledgeBaseId),
+        ),
+      );
+    return { claims: rows };
+  },
+
+  async mergeEntities(input) {
+    return getDb().transaction(async (tx) => {
+      if (input.sourceId === input.targetId) {
+        return { ok: false as const, reason: 'same_entity' as const };
+      }
+
+      const loadEntity = async (entityId: string) => {
+        const rows = await tx
+          .select()
+          .from(entities)
+          .where(
+            and(
+              eq(entities.id, entityId),
+              eq(entities.knowledgeBaseId, input.knowledgeBaseId),
+              isNull(entities.deletedAt),
+            ),
+          )
+          .limit(1);
+        return rows[0];
+      };
+
+      const source = await loadEntity(input.sourceId);
+      if (!source) return { ok: false as const, reason: 'source_not_found' as const };
+      const target = await loadEntity(input.targetId);
+      if (!target) return { ok: false as const, reason: 'target_not_found' as const };
+
+      const now = new Date();
+
+      // Fold the source's aliases/tags/properties into the survivor. The
+      // source's display name is preserved as an alias so it stays searchable.
+      const aliasSet = new Set<string>([
+        ...(target.aliases as string[]),
+        ...(source.aliases as string[]),
+      ]);
+      if (source.name !== target.name) aliasSet.add(source.name);
+      const tagSet = new Set<string>([...(target.tags as string[]), ...(source.tags as string[])]);
+      // Target properties win on conflict; the source fills in any gaps.
+      const mergedProperties = {
+        ...(source.properties as Record<string, unknown>),
+        ...(target.properties as Record<string, unknown>),
+      };
+
+      const survivorRows = await tx
+        .update(entities)
+        .set({
+          aliases: [...aliasSet],
+          tags: [...tagSet],
+          properties: mergedProperties,
+          description: target.description ?? source.description,
+          updatedAt: now,
+        })
+        .where(and(eq(entities.id, target.id), eq(entities.knowledgeBaseId, input.knowledgeBaseId)))
+        .returning();
+      const survivor = survivorRows[0];
+      if (!survivor) throw new Error('Failed to update survivor entity');
+
+      // Archive the source: soft-delete + pointer to the survivor.
+      await tx
+        .update(entities)
+        .set({ deletedAt: now, mergedIntoId: target.id, updatedAt: now })
+        .where(
+          and(eq(entities.id, source.id), eq(entities.knowledgeBaseId, input.knowledgeBaseId)),
+        );
+
+      // Retarget claim arguments that referenced the source to the survivor.
+      const affectedArgs = await tx
+        .select({ claimId: claimArguments.claimId })
+        .from(claimArguments)
+        .where(and(eq(claimArguments.entityId, source.id), isNull(claimArguments.deletedAt)));
+      const affectedClaimIds = [...new Set(affectedArgs.map((a) => a.claimId))];
+
+      if (affectedClaimIds.length > 0) {
+        await tx
+          .update(claimArguments)
+          .set({ entityId: target.id, updatedAt: now })
+          .where(and(eq(claimArguments.entityId, source.id), isNull(claimArguments.deletedAt)));
+      }
+
+      // Append the archived entity id to each affected claim's provenance and
+      // emit a claim.updated projection event.
+      for (const claimId of affectedClaimIds) {
+        const claimRows = await tx.select().from(claims).where(eq(claims.id, claimId)).limit(1);
+        const claim = claimRows[0];
+        if (!claim) continue;
+        const provenance = { ...((claim.provenance as Record<string, unknown>) ?? {}) };
+        const historical = Array.isArray(provenance.historical_source_entities)
+          ? [...(provenance.historical_source_entities as string[])]
+          : [];
+        if (!historical.includes(source.id)) historical.push(source.id);
+        provenance.historical_source_entities = historical;
+        await tx.update(claims).set({ provenance, updatedAt: now }).where(eq(claims.id, claimId));
+        await enqueueGraphOutbox(tx, {
+          knowledgeBaseId: input.knowledgeBaseId,
+          eventType: 'updated',
+          targetType: 'claim',
+          targetId: claimId,
+          payload: { retargetedFrom: source.id, retargetedTo: target.id },
+        });
+      }
+
+      await enqueueGraphOutbox(tx, [
+        {
+          knowledgeBaseId: input.knowledgeBaseId,
+          eventType: 'updated',
+          targetType: 'entity',
+          targetId: target.id,
+          payload: { mergedFrom: source.id },
+        },
+        {
+          knowledgeBaseId: input.knowledgeBaseId,
+          eventType: 'deleted',
+          targetType: 'entity',
+          targetId: source.id,
+          payload: { mergedInto: target.id },
+        },
+      ]);
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: input.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'entity.merged',
+        targetType: 'entity',
+        targetId: target.id,
+        metadata: {
+          sourceId: source.id,
+          targetId: target.id,
+          retargetedClaimCount: affectedClaimIds.length,
+        },
+      });
+
+      return { ok: true as const, entity: survivor, retargetedClaimCount: affectedClaimIds.length };
     });
   },
 };

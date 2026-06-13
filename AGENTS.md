@@ -268,6 +268,38 @@ origin (exactly one of note/source), entity not-self-merge, status enums.
   entities created in `<Entities>` won't appear in the claim form until a reload
   — acceptable for now; revisit if live cross-component sync is needed.
 
+## Delete & merge (US-010)
+
+- **All graph deletes are soft-deletes.** `dbEntityStore.deleteEntity` /
+  `dbClaimStore.deleteClaim` set `deletedAt` (never `DELETE`), emit a
+  `<target>.deleted` outbox event + an `entity.deleted`/`claim.deleted` audit row
+  in one transaction. Deleting a claim also soft-deletes its `claim_arguments`.
+  Re-deleting an already-deleted record returns `undefined` (→ 404). Mirror this
+  for notes/sources when US-011 adds their stores.
+- **Entity merge = Archive & Pointer** (`dbEntityStore.mergeEntities`): the
+  source is soft-deleted with `merged_into_id` → survivor (NO compound graph
+  node). Survivor absorbs source aliases/tags (set-union) + the source's display
+  name as an alias; properties merge with **target winning** on key conflicts.
+  Claims referencing the source are retargeted (`claim_arguments.entity_id`
+  source→target) and each affected claim appends the archived id to
+  `provenance.historical_source_entities` (dedup). Emits `entity.updated`
+  (survivor) + `entity.deleted` (source) + `claim.updated` per retargeted claim,
+  and one `entity.merged` audit row — all in one tx.
+- `mergeEntities` returns a discriminated `MergeEntitiesResult`
+  (`{ok:true,entity,retargetedClaimCount}` | `{ok:false,reason}`); the router
+  maps `same_entity`→400, `source_not_found`/`target_not_found`→404.
+- Routes (entity router): `DELETE /:entityId` (editor+CSRF), `POST
+/:entityId/merge` (editor+CSRF, body `{targetId}` via `mergeEntitySchema`),
+  `GET /:entityId/impact` (viewer) → `{claims:[{id,predicate}]}` for delete/merge
+  confirmation dialogs (AC2). Claim router: `DELETE /:claimId` (editor+CSRF).
+  Viewers get 403 on all mutations; non-members 404.
+- Web (`App.tsx`): entity rows have Edit/Delete + a "Merge into" survivor
+  `<select>` + Merge button; claim rows have Edit/Delete. Delete/merge call
+  `getEntityImpact` first and `window.confirm` with the affected-claim summary.
+- Shared shapes in `@jotmind/schemas` `graph.ts`: `mergeEntitySchema`,
+  `entityImpactSchema`/`entityImpactClaimSchema`. The `entities.merged_into_id`
+  column + `claims.provenance` JSONB already existed from US-005 (no migration).
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

@@ -56,6 +56,12 @@ export interface UpdateClaimInput {
   fields: UpdateClaimFields;
 }
 
+export interface DeleteClaimInput {
+  knowledgeBaseId: string;
+  id: string;
+  actorUserId: string;
+}
+
 /**
  * Persistence boundary for claims (US-009). Defined as an interface so route
  * handlers can run against an in-memory fake in unit tests (no live DB) while
@@ -71,6 +77,11 @@ export interface ClaimStore {
   getClaim(knowledgeBaseId: string, id: string): Promise<ClaimWithArguments | undefined>;
   createClaim(input: CreateClaimInput): Promise<ClaimWithArguments>;
   updateClaim(input: UpdateClaimInput): Promise<ClaimWithArguments | undefined>;
+  /**
+   * Soft-delete a claim and its arguments (US-010). Returns the deleted claim
+   * row, or undefined when it does not exist.
+   */
+  deleteClaim(input: DeleteClaimInput): Promise<ClaimRow | undefined>;
 }
 
 /** Load the (non-deleted) arguments for the given claim ids, grouped by claim. */
@@ -252,6 +263,57 @@ export const dbClaimStore: ClaimStore = {
       });
 
       return { ...claim, arguments: byClaim.get(claim.id) ?? [] };
+    });
+  },
+
+  async deleteClaim(input) {
+    return getDb().transaction(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(claims)
+        .where(
+          and(
+            eq(claims.id, input.id),
+            eq(claims.knowledgeBaseId, input.knowledgeBaseId),
+            isNull(claims.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!existing[0]) return undefined;
+
+      const now = new Date();
+      const rows = await tx
+        .update(claims)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(and(eq(claims.id, input.id), eq(claims.knowledgeBaseId, input.knowledgeBaseId)))
+        .returning();
+      const claim = rows[0];
+      if (!claim) throw new Error('Failed to delete claim');
+
+      // Soft-delete the claim's arguments alongside it so reads stay consistent.
+      await tx
+        .update(claimArguments)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(and(eq(claimArguments.claimId, claim.id), isNull(claimArguments.deletedAt)));
+
+      await enqueueGraphOutbox(tx, {
+        knowledgeBaseId: claim.knowledgeBaseId,
+        eventType: 'deleted',
+        targetType: 'claim',
+        targetId: claim.id,
+        payload: { predicate: claim.predicate },
+      });
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: claim.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'claim.deleted',
+        targetType: 'claim',
+        targetId: claim.id,
+        metadata: { predicate: claim.predicate },
+      });
+
+      return claim;
     });
   },
 };
