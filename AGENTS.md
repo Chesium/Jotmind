@@ -367,6 +367,36 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   from the filter form and renders the unified result list plus the
   vector-unavailable notice.
 
+## Graph views (US-013)
+
+- US-013 is **frontend-only** — all data comes from existing endpoints
+  (`listEntities`/`listClaims`/`listNotes`/`listSources`/`listSourceExcerpts`),
+  no new API or schema. The big `App.tsx` (~1.7k lines) was getting unwieldy, so
+  this lives in its own file `apps/web/src/GraphViews.tsx` and is imported into
+  `<KnowledgeBases>` (rendered first when a KB is selected, before `<Search>`).
+  Put further large web components in their own files too.
+- `<GraphViews>` owns ONE shared `selected` Selection (`{kind, id}`) so all
+  views navigate to the same detail/source context. Five views, switched by a
+  tablist: **Network** (dependency-free SVG circular layout — entities on a
+  circle, claim entity-arguments drawn as edges labeled by predicate),
+  **Timeline** (claims by `validStart ?? createdAt`, notes by `createdAt`,
+  `Event`-typed entities — newest first), **Table** (entities/claims toggle,
+  sortable column-header buttons, text filter, tag filter), **Detail** (selected
+  entity/claim → related claims + citations + inline-editable entity metadata via
+  `updateEntity`), and **Sources & Notes** (original note/source content + linked
+  claims from excerpts). Clicking entities/claims/tags/citations calls
+  `navigate`/`navigateTag`.
+- **Cross-component sync gotcha (same as `<Claims>`/`<Capture>`):** `<GraphViews>`
+  fetches its data once per `kb.id`, so entities/claims created in the sibling
+  `<Entities>`/`<Claims>`/`<Capture>` sections won't appear until the KB is
+  re-selected (reload + reselect). Browser tests must reload+reselect after
+  creating records.
+- **Testid collisions across sections:** `<Capture>` already uses
+  `sources-empty`; `<GraphViews>` reuses it too. Scope Playwright/RTL queries to
+  `getByTestId('graph-views')` (or a table row) when a testid isn't unique
+  page-wide. Network/table rows use `data-testid="network-node-<id>"` /
+  `table-row-<id>`; view tabs are `view-tab-{network,timeline,table,sources}`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

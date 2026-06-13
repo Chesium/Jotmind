@@ -44,6 +44,7 @@ import {
   updateClaim,
   updateEntity,
 } from './api.js';
+import { GraphViews } from './GraphViews.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -307,6 +308,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
         </button>
       </form>
       {error && <p data-testid="kb-error">{error}</p>}
+      {selectedKb && <GraphViews kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Search kb={selectedKb} />}
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}

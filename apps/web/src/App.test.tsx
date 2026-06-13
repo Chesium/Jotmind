@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
 
 function mockFetch(handler: (url: string) => { status?: number; body?: unknown }) {
@@ -198,6 +198,92 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByTestId('entities-list')).toHaveTextContent('Ada Lovelace');
     });
+  });
+
+  it('renders graph views and navigates from the table to entity detail', async () => {
+    const kbId = '00000000-0000-0000-0000-0000000000cc';
+    const entityId = '00000000-0000-0000-0000-0000000000e2';
+    const now = new Date().toISOString();
+    const entity = {
+      id: entityId,
+      knowledgeBaseId: kbId,
+      type: 'Person',
+      name: 'Ada Lovelace',
+      aliases: ['Ada'],
+      description: 'Mathematician',
+      tags: ['pioneer'],
+      properties: {},
+      schemaVersionId: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    mockFetch((url) => {
+      if (url.includes('/api/auth/me')) {
+        return {
+          body: {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          },
+        };
+      }
+      if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) return { body: [entity] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/notes`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/sources`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/source-excerpts`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/search`)) return { body: { results: [] } };
+      if (url.includes('/api/knowledge-bases')) {
+        return {
+          body: [
+            {
+              id: kbId,
+              name: 'Views KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-views')).toBeInTheDocument();
+    });
+
+    // Network view shows the entity node.
+    await waitFor(() => {
+      expect(screen.getByTestId(`network-node-${entityId}`)).toBeInTheDocument();
+    });
+
+    // Switch to the table view and open the entity detail.
+    fireEvent.click(screen.getByTestId('view-tab-table'));
+    await waitFor(() => {
+      expect(screen.getByTestId(`table-row-${entityId}`)).toBeInTheDocument();
+    });
+    const row = screen.getByTestId(`table-row-${entityId}`);
+    fireEvent.click(within(row).getByText('Ada Lovelace'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('detail-view')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('detail-description')).toHaveTextContent('Mathematician');
   });
 
   it('shows read-only access for viewers', async () => {

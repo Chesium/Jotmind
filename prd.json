@@ -227,8 +227,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Multiple graph views over the same KB (frontend-only; reuses existing list endpoints, no new API/schema). New apps/web/src/GraphViews.tsx <GraphViews> imported into <KnowledgeBases> (rendered first when a KB is selected). Five views via a tablist sharing ONE selection state so all navigate to the same detail/source context: Network (dependency-free SVG circular layout, entities as nodes + claim entity-arguments as predicate-labeled edges), Timeline (claims by validStart??createdAt, notes by createdAt, Event-typed entities; newest first), Table (entities/claims toggle, sortable column-header buttons, text filter, tag filter), Detail (selected entity/claim -> related claims + citations + inline-editable entity metadata via updateEntity), Sources & Notes (original note/source content + linked claims from excerpts). Clicking entities/claims/tags/citations navigates (navigate/navigateTag). Gotcha: GraphViews fetches once per kb.id (cross-component sync) -> reload+reselect to see records created in sibling sections; reuses sources-empty testid (scope queries to graph-views). Verified: pnpm verify:quick green (8 web tests incl new graph-views nav test); full API suite 152/152 against live compose DB; Playwright+Chromium browser flow (setup -> KB -> 2 entities -> reload+reselect -> Network node visible -> Timeline -> Table row -> entity Detail w/ Related claims + Sources & citations -> Sources & Notes view) + screenshot confirmed; temp pw config/spec removed."
     },
     {
       "id": "US-014",
