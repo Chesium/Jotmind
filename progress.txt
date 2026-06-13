@@ -14,6 +14,10 @@ Started: Sat 13 Jun 2026 08:14:49 PM +08
 - DB stack = PostgreSQL 18 + Apache AGE 1.7.0 + pgvector 0.8.1 via infra/db/Dockerfile (FROM apache/age:latest, compile pgvector). pgvector MUST be >= v0.8.1 (older fails to build on PG 18). PG 18 docker volume MUST mount at /var/lib/postgresql (NOT /data) or the container exits.
 - ORM = Drizzle (drizzle-orm + postgres-js + drizzle-kit) in apps/api. Schema: apps/api/src/db/schema.ts; generate: `pnpm --filter @jotmind/api db:generate`; apply: `db:migrate`. Commit generated apps/api/drizzle/** (SQL + meta/).
 - DB access gated on DATABASE_URL: when unset, checkDatabaseHealth() -> configured:false and /api/health stays ok. DB-needing tests use describe.skipIf(!process.env.DATABASE_URL) so default test:api is green without infra.
+- DB-backed routes: use an injectable store interface (e.g. AuthStore) + DB impl + in-memory fake; inject via createApp options (createApp({checkDatabase, authStore})). Lets route handlers be unit-tested with no live DB. Mirror this for new domains.
+- @node-rs/argon2 `Algorithm` is an ambient const enum -> cannot value-import under verbatimModuleSyntax. Use numeric literal: `const X: Algorithm = 2 as Algorithm` (Argon2id===2). Same caution for any ambient const enum dependency.
+- Auth: Argon2id passwords, PG-backed sessions (sessions table), HTTP-only `jm_session` cookie, CSRF synchronizer token (`jm_csrf` readable cookie + `x-csrf-token` header) on cookie-auth mutations. System account role (admin|member) is separate from KB-scoped roles (US-004+). Web mutations need credentials:include + x-csrf-token.
+- dev-browser skill is NOT available in this env. For required browser verification of UI stories, use Playwright + Chromium (installed) against the running API (write a temp e2e spec, run, screenshot, then delete it).
 
 ## Sat 13 Jun 2026 20:25 +08 - US-001
 Thread: https://ampcode.com/threads/T-019ec0ea-b9f7-74a4-8859-43f08d85d8f4
@@ -45,4 +49,25 @@ Thread: https://ampcode.com/threads/T-019ec0f2-8f1d-770c-9dea-473056778dea
   - apache/age:latest is PG 18 + AGE 1.7.0 and auto-creates the `age` extension on the default DB; still create it idempotently for clarity/other DBs.
   - Keep DB access gated on DATABASE_URL and health graceful (configured:false -> ok) so unit tests / no-DB runs stay green. US-005 will add the real canonical graph tables on top of this Drizzle setup; US-034 will make API tests run against a test PG container (then the integration test stops skipping in CI).
   - To run DB-backed tests locally: `docker compose up -d --build db` then `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind pnpm --filter @jotmind/api test`.
+---
+
+## Sat 13 Jun 2026 20:53 +08 - US-003
+Thread: https://ampcode.com/threads/T-019ec100-c051-7796-9f00-09e9846afce2
+- Implemented local/server accounts + PostgreSQL-backed sessions with Argon2id, HTTP-only session cookies, CSRF, first-run admin setup, and admin-controlled account creation.
+- packages/schemas/src/auth.ts: shared Zod schemas (accountRole admin|member, credentials, createAccount, publicUser, setupStatus, authState). Exported from index.ts.
+- apps/api/src/db/schema.ts: added `users` (uuid pk gen_random_uuid, email unique, password_hash, role default member, timestamps) + `sessions` (text token pk, user_id FK cascade, csrf_token, expires_at, created_at). Migration drizzle/0001_colorful_vampiro.sql.
+- apps/api/src/auth/password.ts: hashPassword/verifyPassword via @node-rs/argon2 (Argon2id). verifyPassword swallows malformed-hash errors -> false.
+- apps/api/src/auth/store.ts: AuthStore interface + dbAuthStore (Drizzle-backed, lazy getDb per call). Injectable for tests.
+- apps/api/src/auth/index.ts: createAuthRouter({store}) mounted at /api/auth in createApp. Endpoints GET /setup-status, POST /setup (first-run admin, 409 if any user), POST /login (401 generic, dummy-verify to blunt user enumeration), GET /me, POST /logout, POST /users (admin-only). issueSession sets jm_session (HttpOnly, Secure in prod/COOKIE_SECURE, SameSite=Lax) + jm_csrf (readable). requireAuth/requireAdmin/requireCsrf middleware; req.auth via global Express Request augmentation. CSRF = synchronizer token compared constant-time (timingSafeEqual).
+- apps/api/src/app.ts: mount cookieParser() + auth router; createApp now accepts {authStore}.
+- apps/web/src/api.ts: typed fetch client (credentials:include, x-csrf-token header on mutations). apps/web/src/App.tsx: phase machine (loading->setup|login->authed); SetupForm/LoginForm/AuthedHome/AccountCreator (admin-only). App.test.tsx rewritten to mock the auth endpoints.
+- Files changed: packages/schemas/src/{auth.ts,index.ts}, apps/api/{package.json, src/db/schema.ts, drizzle/0001*+meta, src/app.ts, src/auth/*}, apps/web/src/{api.ts,App.tsx,App.test.tsx}, README.md (Authentication section), AGENTS.md (Authentication section), .env.example (COOKIE_SECURE), pnpm-lock.yaml.
+- Verified: `pnpm verify` fully green. Brought up compose DB, ran db:migrate, ran live integration tests (auth store create user/session + Argon2id round-trip). Exercised full flow via curl cookie jar: setup-status true->false, setup 201 (HttpOnly cookie), 2nd setup 409, /me, create-account 403 without CSRF / 201 with, member 403 (not admin), logout 204 + /me 401. Playwright browser test: login form renders, login succeeds, "Signed in as admin@example.com" + admin Create-account panel shown, logout returns to Sign in (screenshot captured). Cleaned up temp spec + DB containers.
+- **Learnings for future iterations:**
+  - See AGENTS.md "Authentication" section + Codebase Patterns below. KEY: @node-rs/argon2 `Algorithm` is an ambient const enum -> cannot value-import under verbatimModuleSyntax; use `2 as Algorithm` (Argon2id===2).
+  - Injectable-store pattern is the way to keep DB-backed routes unit-testable without a live DB: define an interface, ship a DB impl + in-memory fake, inject via createApp options. Mirror this for US-004+ (KB routes) and future stories.
+  - createApp injection seams: `{ checkDatabase, authStore }`. Add new seams the same way.
+  - dev-browser skill is NOT available in this environment; used Playwright+Chromium (already installed) against the running API for browser verification. Do the same for future UI stories.
+  - To run DB-backed auth tests: `docker compose up -d --build db`, `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind pnpm --filter @jotmind/api db:migrate`, then `DATABASE_URL=... pnpm --filter @jotmind/api test`.
+  - US-004 (next) adds knowledge_base_id scoping + KB roles (owner/admin/editor/viewer) + role middleware + audit events; the system account role (admin/member) here is separate from KB-scoped roles.
 ---

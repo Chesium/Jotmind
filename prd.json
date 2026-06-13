@@ -50,8 +50,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Local/server accounts + PG-backed sessions. apps/api/src/auth/: password.ts (Argon2id via @node-rs/argon2; Algorithm const enum referenced numerically due to verbatimModuleSyntax), store.ts (injectable AuthStore interface + dbAuthStore), index.ts (createAuthRouter: /setup-status, /setup first-run admin (409 once any user exists), /login, /me, /logout, /users admin-only). Sessions table (token in HTTP-only jm_session cookie, Secure in prod/COOKIE_SECURE) + users table (UUID pk, email unique, role admin|member). CSRF = synchronizer token (jm_csrf readable cookie + x-csrf-token header compared constant-time to session.csrfToken) on all cookie-auth mutations. cookieParser mounted in createApp; createApp({authStore}) injection seam mirrors {checkDatabase}. Web: src/api.ts typed client (credentials:include + csrf header) + App.tsx setup/login/authed+admin account-creator UI. Shared Zod schemas in packages/schemas/src/auth.ts. Tests: 15 unit (in-memory store) + 1 DB integration (skipIf no DATABASE_URL). Migration drizzle/0001. Verified: pnpm verify green; live DB migrate + integration tests pass; full HTTP flow via curl cookie jar (setup/login/me/csrf-403/admin-create/member-403/logout); Playwright browser login flow + screenshot confirmed (dev-browser skill unavailable in env, used Playwright+Chromium instead)."
     },
     {
       "id": "US-004",
