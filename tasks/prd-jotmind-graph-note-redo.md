@@ -24,8 +24,8 @@ V1 must showcase the same graph-note foundation through two built-in modules:
 - **Server instance:** A self-hosted JotMind backend deployment running locally, on a LAN server, or on a user-managed VPS/cloud server. It owns server-global configuration, authentication, sessions, jobs, and database access.
 - **Knowledge Base:** The user-facing scope that contains graph content, schemas, rules, settings, roles, audit events, and import/export data. Database fields must use `knowledge_base_id`.
 - **Module:** An installed schema/view/rule-pack bundle inside a Knowledge Base. A Module is not a separate database and is not a separate permission scope. Personal relationship management and reading/character maps are built-in Modules.
-- **Entity:** A canonical graph object such as Person, Event, Place, Concept, Character, or a custom type. Entities have type, name, aliases, description, tags, JSONB properties, and schema-version references.
-- **Claim:** A canonical fact/observation/relation record with predicate, metadata, provenance, confidence, optional time range, and one or more Claim Arguments.
+- **Entity:** A canonical graph object such as Person, Event, Place, Concept, Character, or a custom type. Entities have type, name, aliases, description, tags, JSONB properties, schema-version references, soft-delete state, and nullable `merged_into_id` pointer used when one Entity is merged into another.
+- **Claim:** A canonical fact/observation/relation record with predicate, metadata, provenance, confidence, optional time range, and one or more Claim Arguments. Claim provenance must be able to record historical source entity IDs when merges retarget arguments, using `provenance.historical_source_entities`.
 - **Claim Argument:** A role-labeled participant in a Claim, e.g. `subject`, `object`, `participant`, `place`, `source`, or module-defined roles.
 - **Note:** A canonical record for captured or written text. Notes may be projected as graph nodes, but they are not ordinary user-created entity types unless a graph projection or schema view exposes them that way.
 - **Source:** A canonical record for imported/captured material, e.g. Markdown, table row set, book excerpt, or plain text source. Sources may be projected as graph nodes, but are provenance records first.
@@ -72,6 +72,8 @@ V1 must showcase the same graph-note foundation through two built-in modules:
 - Exactly one subagent may run build/test/verification at a time to avoid back-pressure overload.
 - A story usually spans many loops; each loop does one most-important item, records learnings, and leaves the tree in the best verifiable state it can.
 - The loop chooses the next item autonomously from `fix_plan.md` within the active milestone; there is no separate manual story-selection gate.
+- Ralph operating files use a strict Monolithic Single-Writer Lock: subagents spawned for code searching or file-writing must operate as stateless execution units that return diffs or findings, while only the primary monolithic loop agent may read, edit, or write `fix_plan.md` and `AGENT.md`.
+- The primary loop must update `fix_plan.md` and `AGENT.md`, when updates are needed, exactly once per cycle at the absolute end of the loop turnaround block to prevent race conditions.
 
 ### Repository Operating Files
 
@@ -134,7 +136,18 @@ Per-story acceptance criteria from this PRD must be mirrored into the relevant s
 - Agents must not treat AGE as canonical storage.
 - Relational writes and `graph_outbox` events must happen in the same transaction.
 - A background projector consumes `graph_outbox` and updates the AGE projection.
+- The projector worker must poll `graph_outbox` with a single-threaded loop per `knowledge_base_id` using a `SELECT ... FOR UPDATE SKIP LOCKED` transaction block so each Knowledge Base has deterministic FIFO projection ordering.
+- Soft deletes are projected as removals: when a relational record sets `deleted_at`, the outbox event commands the projector to completely drop the corresponding AGE node or edge. Un-deleting a record pushes a brand-new insert event to the outbox.
+- AGE rebuilds must use a Read-Fallback State Machine, not app-wide locks or complex blue/green graph swaps. PostgreSQL stores a global `graph_projection_status` value of `synchronized`, `rebuilding`, or `failed`.
+- While `graph_projection_status = 'rebuilding'`, the frontend disables advanced AGE-dependent network/traversal views, displays an `Indexing Graph...` UI state, and core search, table views, and detail pages fall back entirely to raw relational PostgreSQL queries.
 - M0/M1 may stub the AGE projector, but projection interfaces, outbox records, and rebuild/repair boundaries must exist early.
+
+### Merge provenance
+
+- Entity merges must use an Archive & Pointer pattern and must not create nested compound nodes in the graph.
+- The relational `entities` table must include nullable `merged_into_id UUID` alongside soft-delete fields.
+- When Entity A merges into Entity B, the system soft-deletes Entity A, sets `EntityA.merged_into_id = EntityB.id`, updates target IDs of associated claims/edges to point to surviving Entity B, and appends `provenance.historical_source_entities: ["UUID-A"]` to every altered claim.
+- Merge audit events must identify the archived entity, surviving entity, retargeted claims/edges, and provenance metadata changes.
 
 ### Centralized early seams
 
@@ -162,6 +175,8 @@ M0 must establish these seams so later milestones do not rewrite foundations:
 - **Fast inner loop:** `typecheck` + lint/static checks + targeted unit tests, with no containers. This is the fast wheel after every meaningful code change.
 - **Medium tier:** `pnpm verify:quick` before marking a normal `fix_plan.md` item or story slice complete.
 - **Full tier:** `pnpm verify` for milestone and V1 completion; includes `format:check`, `typecheck`, `lint`, `test`, `test:api` against a PostgreSQL container with AGE + `pgvector`, and `test:e2e`.
+- **Adapter Tiering:** `pnpm verify` is the authoritative agent-loop completion check and must run in an isolated sandbox where real AI adapter keys are blocked. It must execute 100% of AI/embedding assertions against deterministic local mock providers.
+- True local inference verification against a running Ollama instance is strictly isolated to a separate manual `pnpm verify:local-ai` command and must not run during routine loops or CI verification.
 - TypeScript typecheck and lint are static-analyzer back-pressure and must remain fast enough for frequent use.
 - Tests must use deterministic mock AI/embedding providers unless explicitly testing configured local providers.
 - Container-backed suites must use isolated/reset test databases per run and are not part of the fast inner loop.
@@ -170,6 +185,7 @@ M0 must establish these seams so later milestones do not rewrite foundations:
 ### Subagent and search policy
 
 - Many subagents may search the codebase or perform bounded file-write tasks.
+- Subagents must not directly read, edit, or write Ralph operating files (`fix_plan.md` or `AGENT.md`); they return findings or diffs for the primary loop to apply under the Monolithic Single-Writer Lock.
 - Exactly one subagent may run build/test/verification at any time.
 - Before adding a table, repository, route, adapter, component, or command, search the codebase and specs first; do not assume it is unimplemented.
 - Search findings that affect future work must be summarized in the relevant spec or `fix_plan.md`, not left only in transient chat context.
@@ -238,6 +254,8 @@ V1 minimum custom schema support includes:
 - Custom claim predicate.
 - JSONB property schema validation.
 - Schema version references from the start.
+- Search and Datalog reasoning across schema versions must use Conceptual String-Matching: core lookups retrieve records by conceptual string type such as `type = "Person"` and ignore `schema_version_id` during retrieval unless a feature explicitly requests one version.
+- When evaluating JSONB fields in a rule, filter, or search predicate, fields missing from older schema versions are lazily evaluated as `null` instead of causing validation failures or runtime errors.
 
 View defaults and extraction hints may be M4 polish. Full guided schema migration UI may be staged later within M4, but stored data must reference schema versions from the start.
 
@@ -249,6 +267,10 @@ M3 minimum reasoning includes:
 - Low-level predicates.
 - Simple restricted text rules.
 - Result trace.
+- Strict Datalog Range-Restriction Safety: the parser/compiler must reject any rule where a variable appears in the head but does not appear in at least one positive, non-negated relational atom in the body.
+- V1 rules may only infer new relations between already existing database entities. Creating existential tokens, skolem functions, or blank nodes in rule heads is strictly forbidden.
+- Compiler-Level Injection: the Datalog-to-SQL/AGE translation layer must automatically inject a hidden `deleted_at IS NULL` predicate onto every clause.
+- Unless a rule explicitly references a valid time variable such as `valid_during(?claim, ?time)`, the engine must automatically wrap underlying query execution with `WHERE valid_start <= NOW() AND (valid_end IS NULL OR valid_end >= NOW())`.
 
 V1 rule syntax is restricted Datalog-like text syntax with explicit variables exposed through a Prolog-like UI. Bounded recursion is in scope when protected by a configurable depth/iteration cap and sufficient for transitive-closure-style use cases such as relationship, family, and timeline inference. Guided rule builder, stratified negation, and graph edit proposal generation may be staged after the first reasoning milestone. Unbounded/arbitrary recursion, unrestricted Prolog, arbitrary JavaScript, filesystem/network/process access, and unrestricted Prolog negation-as-failure are out of scope.
 
@@ -434,6 +456,8 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - [ ] Entity/claim/note/source deletes are soft-deletes by default.
 - [ ] Delete confirmation explains affected claims or linked records.
 - [ ] Entity merge preserves aliases, properties, notes, sources, citations, related claims, audit events, and provenance.
+- [ ] Entity merge uses Archive & Pointer behavior: the archived entity is soft-deleted, `merged_into_id` points to the surviving entity, and no nested compound graph node is created.
+- [ ] Claims/edges that referenced the archived entity are retargeted to the surviving entity and append `provenance.historical_source_entities` with the archived entity ID.
 - [ ] Merge creates graph outbox events and an audit event.
 - [ ] Viewers cannot delete or merge.
 
@@ -656,6 +680,8 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 **Acceptance Criteria:**
 - [ ] Canonical text syntax supports explicit variables, e.g. `knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).`
 - [ ] Low-level predicates include equivalents of `entity(id, type, name)`, `claim(id, predicate)`, and `arg(claimId, role, entityId)`.
+- [ ] Parser/compiler enforces Datalog Range-Restriction Safety: any head variable must appear in at least one positive, non-negated relational atom in the rule body.
+- [ ] Parser/compiler rejects existential tokens, skolem functions, blank nodes, and any rule head that would create a relation involving entities not already present in the database.
 - [ ] Rule validation runs before save/enable.
 - [ ] Invalid rules may be saved as drafts but cannot be enabled or executed.
 - [ ] Rules have no filesystem, network, process, arbitrary JavaScript, provider API, unbounded/arbitrary recursion, or unrestricted negation access.
@@ -674,6 +700,8 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 **Acceptance Criteria:**
 - [ ] Rule execution runs on the backend against stored Knowledge Base data.
 - [ ] Rule Runs enforce depth/iteration limits for bounded recursion and report limit-exceeded errors safely.
+- [ ] Datalog-to-SQL/AGE translation injects hidden `deleted_at IS NULL` predicates into every clause so soft-deleted records are excluded from rule execution.
+- [ ] Unless a rule explicitly references valid time, rule execution automatically applies current-time bounds: `valid_start <= NOW() AND (valid_end IS NULL OR valid_end >= NOW())`.
 - [ ] Rule Runs record status, start/end timestamps, errors, and triggering user/job.
 - [ ] Inferred Results show source rules and source claims/arguments used.
 - [ ] Rule errors are displayed without corrupting claims, schemas, or rules.
@@ -709,6 +737,8 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - [ ] Projector writes entity/claim/argument graph structures to Apache AGE from `graph_outbox`.
 - [ ] Multi-argument claims are projected as claim nodes connected to entity nodes by role-labeled edges.
 - [ ] Projection rebuild/repair can recreate AGE state from relational tables.
+- [ ] Rebuild/repair updates `graph_projection_status` through `rebuilding`, `synchronized`, and `failed` states without locking the app.
+- [ ] While rebuilding, AGE-dependent network/traversal views are disabled with an `Indexing Graph...` UI state, and core search/table/detail pages use relational PostgreSQL fallback queries.
 - [ ] Traversal-dependent views/rules can query AGE through service abstractions.
 - [ ] Projection lag/failure is visible through job/status UI and does not corrupt canonical records.
 
@@ -743,6 +773,8 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 - [ ] Compatible changes may update labels/descriptions/view metadata or loosen validation without rewriting existing data.
 - [ ] Breaking changes create or activate a new schema version.
 - [ ] Existing data may remain valid under its referenced old schema version.
+- [ ] Cross-version search and reasoning retrieve records by conceptual string type (for example `type = "Person"`) rather than requiring matching `schema_version_id`.
+- [ ] Filters/rules evaluating JSONB fields treat properties absent from older schema versions as `null` and do not throw validation or runtime errors.
 - [ ] Validation warnings for old/mismatched data appear in schema/admin views and affected detail pages.
 - [ ] AI-assisted schema migrations, if present, create reviewable proposals and never auto-apply.
 
@@ -846,6 +878,8 @@ V1 rule syntax is restricted Datalog-like text syntax with explicit variables ex
 
 **Acceptance Criteria:**
 - [ ] `pnpm verify` runs `format:check`, `typecheck`, `lint`, `test`, `test:api`, and `test:e2e`.
+- [ ] `pnpm verify` runs with real AI adapter keys blocked and all AI/embedding assertions use deterministic local mock providers only.
+- [ ] Local inference/Ollama checks are excluded from `pnpm verify` and covered only by the manual `pnpm verify:local-ai` command.
 - [ ] Critical UI flows have Playwright e2e coverage: login/setup, Knowledge Base selection, manual entity/claim CRUD, search/views, AI proposal review with mock provider, reasoning run, JSON export/import.
 - [ ] API tests run against a test PostgreSQL container with migrations applied.
 - [ ] Interactive browser verification is attempted for UI stories if tooling is available; unavailable tooling is recorded as deferred manual checks in `fix_plan.md` and does not block V1 when Playwright is green.
