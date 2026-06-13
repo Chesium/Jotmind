@@ -1,0 +1,625 @@
+{
+  "project": "JotMind",
+  "branchName": "ralph/jotmind-graph-note-redo",
+  "description": "JotMind Graph-Note Redo - Privacy-first, self-hostable graph-based personal knowledge app with notes, sources, typed entities, provenance-aware claims, custom schemas, AI proposal review, and restricted Datalog reasoning.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create the monorepo foundation",
+      "description": "As a developer, I need a typed monorepo foundation so autonomous agents can add features consistently.",
+      "acceptanceCriteria": [
+        "Monorepo contains `apps/web`, `apps/api`, and shared package boundaries for schemas/types/utilities.",
+        "`pnpm` package scripts include `format`, `format:check`, `typecheck`, `lint`, `test`, `test:api`, `test:e2e`, `verify:quick`, and `verify`.",
+        "React + Vite web app and Express API app boot locally.",
+        "Shared Zod schema package can be imported by both web and API.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Provision PostgreSQL with required extensions",
+      "description": "As an operator, I need reproducible database setup so the app has a reliable canonical store.",
+      "acceptanceCriteria": [
+        "Docker Compose or equivalent starts PostgreSQL with Apache AGE and `pgvector` available.",
+        "Drizzle migrations can create the initial schema in a clean test database.",
+        "API health check reports database connectivity and required extension availability.",
+        "Docs warn that browser storage is non-canonical and database volume/backups preserve data.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Implement local/server accounts and sessions",
+      "description": "As an operator, I need secure local/server user accounts so Knowledge Bases can have authenticated access control without mandatory cloud accounts.",
+      "acceptanceCriteria": [
+        "First-run setup creates an initial admin user.",
+        "Passwords are hashed with Argon2id.",
+        "Browser auth uses server-side PostgreSQL-backed sessions with secure HTTP-only cookies.",
+        "Cookie-authenticated mutations require CSRF protection.",
+        "Account creation is admin-controlled after first-run setup.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Create Knowledge Base scope and roles",
+      "description": "As a user, I want selectable Knowledge Bases with role-based permissions so different graph scopes can be managed safely.",
+      "acceptanceCriteria": [
+        "Data model uses `knowledge_base_id` for scoped records.",
+        "Users can create/select a Knowledge Base in minimal UI or API.",
+        "Roles exist: owner, admin, editor, viewer.",
+        "Backend middleware enforces role checks on Knowledge Base routes.",
+        "Audit events record role assignments and Knowledge Base creation.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Create canonical graph schema tables",
+      "description": "As a developer, I need canonical relational tables for graph records so later UI, AI, and reasoning features share one consistent data model.",
+      "acceptanceCriteria": [
+        "Tables exist for entities, claims, claim arguments, notes, sources, source excerpts/citations, schema definitions/versions, rule definitions, proposals, audit events, jobs, and `graph_outbox`.",
+        "Canonical records include stable UUIDv7 identifiers, `knowledge_base_id`, timestamps, soft-delete fields, and audit metadata where appropriate.",
+        "Custom properties are stored in JSONB with validation hooks.",
+        "Entities/claims reference schema versions used for validation.",
+        "Notes and Sources are canonical records, not merely entity rows.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add graph outbox and projection seam",
+      "description": "As a developer, I need graph writes and projection seams established early so AGE can remain derived without rewriting canonical write paths later.",
+      "acceptanceCriteria": [
+        "Entity/claim/note/source writes create `graph_outbox` events in the same transaction as canonical relational writes.",
+        "Projector interface can consume outbox events and mark projection state.",
+        "Stub projector is allowed but must be visible in logs/status as stubbed.",
+        "Rebuild/repair interface exists to regenerate projection from relational tables.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add PostgreSQL-backed jobs foundation",
+      "description": "As an operator, I need durable jobs so projection, AI, embeddings, imports, and exports do not depend on process-local state.",
+      "acceptanceCriteria": [
+        "PostgreSQL-backed job table supports status, attempts, retry-after, failure reason, owner user, and `knowledge_base_id` when applicable.",
+        "Worker can run in-process and as a separate process mode.",
+        "Failed jobs retry with capped exponential backoff and then move to failed/dead-letter state.",
+        "Basic admin/status API exposes job status with permission checks.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Manually create and edit entities",
+      "description": "As an editor, I want to create and edit typed entities so I can maintain my graph without relying on AI.",
+      "acceptanceCriteria": [
+        "Editors can create built-in entity types at minimum: Person, Event, Concept, Place, and Module-specific Character where relevant.",
+        "Editors can edit name, aliases, description, tags/groups, and JSONB custom properties.",
+        "Forms validate required fields and schema constraints before save.",
+        "Viewers can read entities but cannot mutate them.",
+        "Entity writes create audit events and graph outbox events.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Manually create and edit claims",
+      "description": "As an editor, I want to create and edit claims so relationships and observations are represented as provenance-aware graph facts.",
+      "acceptanceCriteria": [
+        "Editors can create claims with predicate, description, confidence, optional valid time range, and one or more role-labeled Claim Arguments.",
+        "Claims support multi-argument relations and are not reduced to binary edges in the canonical model.",
+        "Editors can edit claim metadata and argument roles after creation.",
+        "Claim forms validate predicate and argument requirements before saving.",
+        "Claim writes create audit events and graph outbox events.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Delete and merge graph records safely",
+      "description": "As an editor, I want safe delete and merge flows so I can correct graph mistakes without corrupting provenance.",
+      "acceptanceCriteria": [
+        "Entity/claim/note/source deletes are soft-deletes by default.",
+        "Delete confirmation explains affected claims or linked records.",
+        "Entity merge preserves aliases, properties, notes, sources, citations, related claims, audit events, and provenance.",
+        "Entity merge uses Archive & Pointer behavior: the archived entity is soft-deleted, `merged_into_id` points to the surviving entity, and no nested compound graph node is created.",
+        "Claims/edges that referenced the archived entity are retargeted to the surviving entity and append `provenance.historical_source_entities` with the archived entity ID.",
+        "Merge creates graph outbox events and an audit event.",
+        "Viewers cannot delete or merge.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Capture Notes and Sources manually",
+      "description": "As a user, I want to store fragmented text before extraction so original material remains available and citable.",
+      "acceptanceCriteria": [
+        "Users can create Notes from freeform text.",
+        "Users can create Sources for imported/captured text or structured material metadata.",
+        "Source Excerpts/Citations can reference spans or excerpts in Notes/Sources.",
+        "Source/note views display original content and linked extracted/manual claims.",
+        "No AI provider is required for capture.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Provide manual search and filters",
+      "description": "As a user, I want search and filters to work without AI so the app remains useful in `No AI` mode.",
+      "acceptanceCriteria": [
+        "Full-text token search covers entities, claims, notes, sources, aliases, tags, and descriptions.",
+        "Graph filters support entity type, claim predicate, date range, place, person, tag, confidence, and provenance where data exists.",
+        "Search respects Knowledge Base permissions.",
+        "If embeddings do not exist, vector search is omitted or shown as unavailable without breaking search.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Build basic graph views",
+      "description": "As a user, I want multiple views over the same graph so I can browse relationships, chronology, tables, details, and original sources.",
+      "acceptanceCriteria": [
+        "Network view displays entities and claim-derived relationships for a selected Knowledge Base/Module/filter.",
+        "Timeline/card view displays dated notes, claims, and events chronologically when dates exist.",
+        "Table view displays entities or claims with sortable/filterable columns.",
+        "Detail view displays a selected entity or claim with related claims, sources, citations, and editable metadata.",
+        "Source/note view displays original captured/imported material and linked claims.",
+        "Clicking entities, claims, tags, or citations navigates to relevant detail/source context.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Enforce audit and permissions in manual graph flows",
+      "description": "As a Knowledge Base owner/admin, I want graph mutations audited and permissioned so shared self-hosted use is trustworthy.",
+      "acceptanceCriteria": [
+        "Entity, claim, note, source, merge, delete, role, and setting changes create Audit Events with authenticated user IDs.",
+        "Viewers can browse/search but cannot mutate content, accept proposals, run imports, or manage settings.",
+        "Editors can create/edit/merge/soft-delete graph content within their Knowledge Base.",
+        "Admins/owners can inspect Knowledge Base audit summaries and job status.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Configure AI provider adapter layer",
+      "description": "As a developer, I need all AI integrations behind adapters so UI and graph repositories never call vendor SDKs directly.",
+      "acceptanceCriteria": [
+        "LLM and embedding providers share typed adapter interfaces.",
+        "Local inference supports Ollama-native HTTP APIs and OpenAI-compatible local HTTP endpoints and works in V1 without remote credentials.",
+        "Remote LLM support includes OpenAI and Anthropic behind adapters; V1 may ship these as configured-but-untested skeletons if policy/config validation is complete.",
+        "Provider config schemas use Zod and separate secrets from portable Knowledge Base exports.",
+        "Normal tests use deterministic mock LLM/embedding providers.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Implement layered AI privacy settings",
+      "description": "As a privacy-conscious user/admin, I want layered AI policy so private Knowledge Base data is not sent externally without explicit permission.",
+      "acceptanceCriteria": [
+        "Fresh installs default to `No AI`.",
+        "Server, Knowledge Base, and user AI policies are evaluated with strictest-policy-wins semantics.",
+        "Remote modes include `Remote per request` and `Remote always allowed`; always-allowed is per-user and per-Knowledge Base.",
+        "Remote embeddings require separate consent.",
+        "Remote call confirmations show provider, model, feature, and categories of content sent.",
+        "Remote AI call audit metadata excludes full prompts, full note content, API keys, and full model responses by default.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Capture text into AI proposal review queue",
+      "description": "As a user, I want captured text to generate reviewable graph proposals when AI is configured, without losing original material.",
+      "acceptanceCriteria": [
+        "Quick-capture stores original text as Note or Source before extraction.",
+        "With configured deterministic mock or local AI, extraction creates AI Proposals for candidate entities/claims.",
+        "Remote extraction adapters may be present as configured-but-untested skeletons and must be visibly documented as unverified until tested by an operator.",
+        "With no AI, capture stores the note/source and shows setup/unavailable state without blocking manual review/search.",
+        "Rejected proposals remain linked to the source note as rejected/dismissed extraction candidates.",
+        "Runtime mock output, if exposed, is behind dev/demo flag and labeled `Mock AI / deterministic demo output`.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Review and apply graph proposals",
+      "description": "As an editor, I want to review, edit, accept, or reject proposed graph changes before they modify my Knowledge Base.",
+      "acceptanceCriteria": [
+        "Proposals display structured create/update/delete/merge changes with affected entities, claims, predicates, arguments, confidence, and source citations.",
+        "Users can accept, reject, or edit proposals at item level and batch level.",
+        "Accepted AI-created claims preserve provenance, citation/source, timestamp, confidence, provider/model where available, and user-confirmation metadata.",
+        "Invalid proposal payloads cannot be executed.",
+        "Viewers cannot create, accept, reject, or edit proposals.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Add universal command/search interface",
+      "description": "As a user, I want one command/search box for natural-language queries, filters, and edit requests so I can quickly access graph information.",
+      "acceptanceCriteria": [
+        "Manual search works in the command box when AI is disabled.",
+        "AI command outputs are constrained to strict Zod schemas before presenting results or proposals.",
+        "Invalid schema outputs are discarded and do not execute.",
+        "One repair retry may be attempted for invalid structured output.",
+        "Low-confidence/invalid structured parsing falls back to full-text/vector search results.",
+        "Structured interpretations and fallback results are visually separated.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Provide provenance-aware AI answers",
+      "description": "As a user, I want AI answers to cite graph claims and source notes so I can verify why an answer was produced.",
+      "acceptanceCriteria": [
+        "Configured mock/local AI answers include citations to claims, Notes, Sources, or Source Excerpts used as evidence; remote adapters may remain unverified skeletons for V1.",
+        "No-AI mode shows setup/unavailable state and offers manual search results where applicable.",
+        "Each cited claim displays predicate, connected entities, confidence, and provenance metadata.",
+        "Users can click citations to open claim/source/note detail views.",
+        "Answers distinguish known facts, inferred facts, uncertain claims, and missing information.",
+        "Viewer answer generation is read-only and only allowed when policy permits it.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Index embeddings through jobs",
+      "description": "As a user, I want optional vector search/RAG indexing so AI answers can use relevant graph context when consent permits it.",
+      "acceptanceCriteria": [
+        "Embeddings are stored in PostgreSQL using `pgvector`.",
+        "Embedding jobs index entities, claims, notes, sources, aliases, tags, and recent activity as configured.",
+        "Remote embeddings require separate opt-in and remote scope controls.",
+        "Existing embeddings can power vector search even when generation providers are currently unavailable.",
+        "Job status is visible to users for their Knowledge Base indexing tasks.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Install built-in rule packs",
+      "description": "As a user, I want built-in rules for showcase Modules so reasoning is useful without writing rules from scratch.",
+      "acceptanceCriteria": [
+        "Personal relationship Module includes at least one social-group or event-participation inference rule pack.",
+        "Reading/character-map Module includes at least one family/relationship inference or timeline consistency rule pack.",
+        "Rule packs are installed as Module bundle content inside a Knowledge Base.",
+        "Built-in rules are versioned and auditable when enabled/disabled.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Support restricted text rule authoring",
+      "description": "As an advanced user, I want to author simple restricted Datalog-like rules through a Prolog-like text UI so I can define custom inference.",
+      "acceptanceCriteria": [
+        "Canonical text syntax supports explicit variables, e.g. `knows(?a, ?b) <- claim(?c, \"knows\"), arg(?c, \"subject\", ?a), arg(?c, \"object\", ?b).`",
+        "Low-level predicates include equivalents of `entity(id, type, name)`, `claim(id, predicate)`, and `arg(claimId, role, entityId)`.",
+        "Parser/compiler enforces Datalog Range-Restriction Safety: any head variable must appear in at least one positive, non-negated relational atom in the rule body.",
+        "Parser/compiler rejects existential tokens, skolem functions, blank nodes, and any rule head that would create a relation involving entities not already present in the database.",
+        "Rule validation runs before save/enable.",
+        "Invalid rules may be saved as drafts but cannot be enabled or executed.",
+        "Rules have no filesystem, network, process, arbitrary JavaScript, provider API, unbounded/arbitrary recursion, or unrestricted negation access.",
+        "Bounded recursion validates and enforces a configurable depth/iteration cap.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Run rules with traces",
+      "description": "As a user, I want rule runs to produce traceable inferred results so I can understand why an inference exists.",
+      "acceptanceCriteria": [
+        "Rule execution runs on the backend against stored Knowledge Base data.",
+        "Rule Runs enforce depth/iteration limits for bounded recursion and report limit-exceeded errors safely.",
+        "Datalog-to-SQL/AGE translation injects hidden `deleted_at IS NULL` predicates into every clause so soft-deleted records are excluded from rule execution.",
+        "Unless a rule explicitly references valid time, rule execution automatically applies current-time bounds: `valid_start <= NOW() AND (valid_end IS NULL OR valid_end >= NOW())`.",
+        "Rule Runs record status, start/end timestamps, errors, and triggering user/job.",
+        "Inferred Results show source rules and source claims/arguments used.",
+        "Rule errors are displayed without corrupting claims, schemas, or rules.",
+        "Inferred Results are labeled as inferred and are not stored as Claims by default.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Accept inferred results as claims",
+      "description": "As an editor, I want to accept an inferred result as a stored claim so important derived knowledge can become explicit while preserving provenance.",
+      "acceptanceCriteria": [
+        "Editors can convert an Inferred Result into an Accepted Inferred Claim after confirmation.",
+        "Accepted Inferred Claims preserve source rule, rule run, source claims, timestamp, and accepting user.",
+        "Accepted Inferred Claims are distinguishable from user-entered and AI-extracted claims.",
+        "Viewers cannot accept inferred results.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Add AGE-backed traversal where needed",
+      "description": "As a user, I want graph traversal features to use the derived graph projection where it adds value while preserving relational canonical truth.",
+      "acceptanceCriteria": [
+        "Projector writes entity/claim/argument graph structures to Apache AGE from `graph_outbox`.",
+        "Multi-argument claims are projected as claim nodes connected to entity nodes by role-labeled edges.",
+        "Projection rebuild/repair can recreate AGE state from relational tables.",
+        "Rebuild/repair updates `graph_projection_status` through `rebuilding`, `synchronized`, and `failed` states without locking the app.",
+        "While rebuilding, AGE-dependent network/traversal views are disabled with an `Indexing Graph...` UI state, and core search/table/detail pages use relational PostgreSQL fallback queries.",
+        "Traversal-dependent views/rules can query AGE through service abstractions.",
+        "Projection lag/failure is visible through job/status UI and does not corrupt canonical records.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Build custom schema minimum UI/API",
+      "description": "As an advanced user, I want to define custom entity types and claim predicates so JotMind can adapt to new domains.",
+      "acceptanceCriteria": [
+        "Users can create custom entity types with display name, description, and JSONB property schema validation.",
+        "Users can create custom claim predicates with allowed argument roles and compatible entity types.",
+        "Entities/claims validate against active schema versions before save.",
+        "Schema definitions are Knowledge Base scoped and included in portable JSON export.",
+        "Schema version references exist on stored graph records.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Support schema version evolution basics",
+      "description": "As an advanced user, I want schema changes to avoid silently corrupting existing data.",
+      "acceptanceCriteria": [
+        "Compatible changes may update labels/descriptions/view metadata or loosen validation without rewriting existing data.",
+        "Breaking changes create or activate a new schema version.",
+        "Existing data may remain valid under its referenced old schema version.",
+        "Cross-version search and reasoning retrieve records by conceptual string type (for example `type = \"Person\"`) rather than requiring matching `schema_version_id`.",
+        "Filters/rules evaluating JSONB fields treat properties absent from older schema versions as `null` and do not throw validation or runtime errors.",
+        "Validation warnings for old/mismatched data appear in schema/admin views and affected detail pages.",
+        "AI-assisted schema migrations, if present, create reviewable proposals and never auto-apply.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Polish personal relationship Module",
+      "description": "As a user managing relationships, I want a built-in Module for people, interactions, events, and places so I can remember social context over time.",
+      "acceptanceCriteria": [
+        "Module includes default schemas for Person, Event, Place, Note/Source views, and relationship claims.",
+        "Person profiles support names, aliases, birthday uncertainty, contact/social fields, notes, tags/groups, and relationship strength.",
+        "Users can record events where people were met, introduced, interacted, or mentioned.",
+        "Users can query location-aware recall, e.g. “Who do I know in Shanghai?” through search/command where data exists.",
+        "Remote sharing defaults to minimal, and Remote RAG context sharing requires additional prominent confirmation.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "Polish reading / character-map Module",
+      "description": "As a reader or writer, I want a built-in Module for character maps so I can track characters, plot events, and logical relationships.",
+      "acceptanceCriteria": [
+        "Module includes default schemas for Character/Person, Event, Place, Concept, Source views, and plot/relationship claims.",
+        "Users can record first appearance, attributes, event participation, and character relationships.",
+        "Network view displays a character relationship graph for a selected work or tag/filter.",
+        "Timeline/card view displays plot events by dates or sequence numbers.",
+        "Built-in rule pack demonstrates family/relationship inference or timeline consistency checks.",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "Import portable and structured data through reviewable flows",
+      "description": "As a user, I want to import existing notes and structured data without uncontrolled graph mutation.",
+      "acceptanceCriteria": [
+        "Users can import plain text or Markdown as Notes/Sources.",
+        "Users can import structured CSV/table data and map columns to entity or claim fields.",
+        "Imports generate reviewable proposed changes before mutating graph records.",
+        "Import jobs expose user-visible status and failure details.",
+        "Permission checks restrict import mutation proposals to editors/admins/owners.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "Export and backup appropriately",
+      "description": "As a Knowledge Base owner/admin, I want portable export and operator backup paths so I can avoid lock-in and maintain deployments.",
+      "acceptanceCriteria": [
+        "Owner/admin UI supports full-fidelity portable JSON export/import for a Knowledge Base.",
+        "JSON export includes entities, claims, claim arguments, notes, sources, citations, schemas, schema versions, rules, provenance, and audit metadata as appropriate.",
+        "Markdown export is clearly labeled human-readable and not guaranteed full-fidelity round trip.",
+        "CSV/table export is labeled structured subset.",
+        "Secrets such as API keys are excluded from portable graph exports.",
+        "PostgreSQL dump/restore is documented as server operator/admin maintenance, not normal per-user portable export.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "Harden deployment and operations",
+      "description": "As an operator, I want clear self-hosted deployment paths so JotMind can run locally, on LAN, or on a user-managed server safely.",
+      "acceptanceCriteria": [
+        "Reference Docker Compose includes stateless Node API container and PostgreSQL container with AGE and `pgvector`.",
+        "API can serve built frontend assets for simple single-origin deployment.",
+        "Frontend can also be deployed as static assets with configurable API base URL.",
+        "Backend binds to localhost by default; LAN binding requires explicit opt-in and authenticated access.",
+        "CORS uses configurable allowed origins and never allows all origins by default.",
+        "Docs distinguish local development, local/LAN production-style use, and VPS/cloud self-hosting.",
+        "Public internet exposure docs require HTTPS or trusted TLS reverse proxy, allowed origins, strong auth, and hardening warnings.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "Complete V1 verification and hardening",
+      "description": "As the product owner, I want V1 to have reliable verification so autonomous implementation can be trusted.",
+      "acceptanceCriteria": [
+        "`pnpm verify` runs `format:check`, `typecheck`, `lint`, `test`, `test:api`, and `test:e2e`.",
+        "`pnpm verify` runs with real AI adapter keys blocked and all AI/embedding assertions use deterministic local mock providers only.",
+        "Local inference/Ollama checks are excluded from `pnpm verify` and covered only by the manual `pnpm verify:local-ai` command.",
+        "Critical UI flows have Playwright e2e coverage: login/setup, Knowledge Base selection, manual entity/claim CRUD, search/views, AI proposal review with mock provider, reasoning run, JSON export/import.",
+        "API tests run against a test PostgreSQL container with migrations applied.",
+        "Interactive browser verification is attempted for UI stories if tooling is available; unavailable tooling is recorded as deferred manual checks in `fix_plan.md` and does not block V1 when Playwright is green.",
+        "Stubs remaining in V1 are documented, visible to users/admins when runtime-facing, and not on critical promised paths.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
