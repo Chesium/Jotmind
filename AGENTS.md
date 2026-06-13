@@ -300,6 +300,39 @@ origin (exactly one of note/source), entity not-self-merge, status enums.
   `entityImpactSchema`/`entityImpactClaimSchema`. The `entities.merged_into_id`
   column + `claims.provenance` JSONB already existed from US-005 (no migration).
 
+## Notes, Sources & Citations (capture, US-011)
+
+- Three new domains mirror the entity/claim store+router pattern exactly:
+  `apps/api/src/notes/`, `apps/api/src/sources/`, `apps/api/src/source-excerpts/`
+  (each: `store.ts` interface + `db<Domain>Store`, `index.ts` router, in-memory
+  fake unit test). Mounted at `/api/knowledge-bases/:kbId/{notes,sources,
+source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
+  added: `noteStore`, `sourceStore`, `sourceExcerptStore`. No DB migration —
+  the `notes`/`sources`/`source_excerpts` tables already existed from US-005.
+- **Notes & Sources are canonical graph records** (`note`/`source` are in
+  `GRAPH_TARGET_TYPES`): writes emit a `graph_outbox` event AND an `audit_events`
+  row in one tx (same dual pattern as entities/claims). No AI provider is needed
+  to capture — these are plain relational writes.
+- **Source Excerpts are NOT a graph projection target.** Their writes emit
+  `audit_events` ONLY (no outbox) — do not call `enqueueGraphOutbox` for them.
+  An excerpt references EXACTLY ONE origin (`noteId` XOR `sourceId`, enforced by
+  the `source_excerpts_origin_check` DB constraint + Zod `superRefine`) and
+  optionally cites a `claimId` it supports. The store validates that the origin
+  note/source AND any linked claim exist in the SAME KB, returning a
+  discriminated `SourceExcerptResult` (`{ok:false, reason}` → router maps to 404).
+- **Linked-claim display (AC4):** `dbSourceExcerptStore` returns
+  `SourceExcerptWithClaim` (excerpt row + `claim:{id,predicate}|null`); the list
+  endpoint accepts `?noteId=/?sourceId=/?claimId=` filters. The web composes
+  note/source "views" by filtering the excerpts list client-side per origin id —
+  no dedicated detail endpoint. Schemas: `sourceExcerptViewSchema` (extends
+  `sourceExcerptSchema` with `claim`), `noteSchema`/`sourceSchema` +
+  create/update in `@jotmind/schemas` `graph.ts`.
+- Web: `<Capture>` component in `App.tsx` (rendered after `<Claims>` for the
+  selected KB) holds Notes + Sources + per-item citation forms. Like `<Claims>`,
+  it fetches claims for the citation dropdown but only refetches on `kb.id`
+  change — claims created in `<Claims>` won't appear in the citation dropdown
+  until reload (same cross-component-sync gotcha).
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

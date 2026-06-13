@@ -191,8 +191,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Notes/Sources/Source-Excerpts capture. 3 store+router modules (apps/api/src/{notes,sources,source-excerpts}/) mirror the entity/claim pattern, mounted at /api/knowledge-bases/:kbId/{notes,sources,source-excerpts}; createApp seams noteStore/sourceStore/sourceExcerptStore. Notes & Sources are canonical graph records (outbox+audit in one tx); Source Excerpts are NOT a projection target (audit only), reference exactly one origin (note XOR source) + optional claim, validated same-KB. Excerpt list returns SourceExcerptWithClaim (claim:{id,predicate}) and filters by ?noteId/?sourceId/?claimId for note/source views (AC4). Shared Zod shapes in @jotmind/schemas graph.ts. Web <Capture> component (App.tsx) after <Claims>: note/source create forms + per-item citation forms linking to claims, shows original content + linked claims. No DB migration (tables existed from US-005). pnpm verify green (139 API tests incl. DB integration); browser-verified via temp Playwright spec + screenshot."
     },
     {
       "id": "US-012",

@@ -303,6 +303,219 @@ export const updateClaimSchema = z
 export type UpdateClaim = z.infer<typeof updateClaimSchema>;
 
 // ---------------------------------------------------------------------------
+// Note shapes (US-011)
+//
+// Notes are canonical records for freeform captured text. They are NOT entity
+// rows: they hold original material before/after extraction and can be cited by
+// Source Excerpts. No AI provider is required to capture a note. Editors can
+// create/edit/delete notes; viewers are read-only (enforced by KB role
+// middleware on the API).
+// ---------------------------------------------------------------------------
+
+/** Public shape of a note as returned by the API. */
+export const noteSchema = z.object({
+  id: z.string().uuid(),
+  knowledgeBaseId: z.string().uuid(),
+  title: z.string().nullable(),
+  content: z.string(),
+  properties: z.record(z.unknown()),
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type Note = z.infer<typeof noteSchema>;
+
+/** A list of notes (as returned by `GET .../notes`). */
+export const noteListSchema = z.array(noteSchema);
+
+/** Payload to create a note. `content` is required; `title` is optional. */
+export const createNoteSchema = z.object({
+  title: z.string().trim().max(500).optional(),
+  content: z.string().min(1, 'Content is required').max(200000),
+  properties: z.record(z.unknown()).optional(),
+});
+export type CreateNote = z.infer<typeof createNoteSchema>;
+
+/** Payload to edit a note. All fields optional; at least one is required. */
+export const updateNoteSchema = z
+  .object({
+    title: z.string().trim().max(500).nullable().optional(),
+    content: z.string().min(1, 'Content is required').max(200000).optional(),
+    properties: z.record(z.unknown()).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one field is required',
+  });
+export type UpdateNote = z.infer<typeof updateNoteSchema>;
+
+// ---------------------------------------------------------------------------
+// Source shapes (US-011)
+//
+// Sources are canonical records for imported/captured material or structured
+// material metadata (e.g. a book, web page, or document). `uri` is a basic
+// locator; richer details live in `metadata`. Like notes, sources are NOT
+// entity rows and can be cited by Source Excerpts. No AI provider is required.
+// ---------------------------------------------------------------------------
+
+/** Public shape of a source as returned by the API. */
+export const sourceSchema = z.object({
+  id: z.string().uuid(),
+  knowledgeBaseId: z.string().uuid(),
+  title: z.string().nullable(),
+  sourceType: z.string().nullable(),
+  uri: z.string().nullable(),
+  content: z.string().nullable(),
+  metadata: z.record(z.unknown()),
+  properties: z.record(z.unknown()),
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type Source = z.infer<typeof sourceSchema>;
+
+/** A list of sources (as returned by `GET .../sources`). */
+export const sourceListSchema = z.array(sourceSchema);
+
+/** Payload to create a source. `title` is required as a human-readable label. */
+export const createSourceSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(500),
+  sourceType: z.string().trim().max(200).optional(),
+  uri: z.string().trim().max(2000).optional(),
+  content: z.string().max(500000).optional(),
+  metadata: z.record(z.unknown()).optional(),
+  properties: z.record(z.unknown()).optional(),
+});
+export type CreateSource = z.infer<typeof createSourceSchema>;
+
+/** Payload to edit a source. All fields optional; at least one is required. */
+export const updateSourceSchema = z
+  .object({
+    title: z.string().trim().min(1).max(500).optional(),
+    sourceType: z.string().trim().max(200).nullable().optional(),
+    uri: z.string().trim().max(2000).nullable().optional(),
+    content: z.string().max(500000).nullable().optional(),
+    metadata: z.record(z.unknown()).optional(),
+    properties: z.record(z.unknown()).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one field is required',
+  });
+export type UpdateSource = z.infer<typeof updateSourceSchema>;
+
+// ---------------------------------------------------------------------------
+// Source Excerpt / Citation shapes (US-011)
+//
+// A Source Excerpt references a span or excerpt in EXACTLY ONE origin (a Note
+// or a Source) and optionally cites a `claim` it supports. This is how original
+// material stays citable from extracted/manual claims (US-011 AC3/AC4).
+// ---------------------------------------------------------------------------
+
+/** Public shape of a source excerpt as returned by the API. */
+export const sourceExcerptSchema = z.object({
+  id: z.string().uuid(),
+  knowledgeBaseId: z.string().uuid(),
+  sourceId: z.string().uuid().nullable(),
+  noteId: z.string().uuid().nullable(),
+  claimId: z.string().uuid().nullable(),
+  excerpt: z.string().nullable(),
+  spanStart: z.number().int().nonnegative().nullable(),
+  spanEnd: z.number().int().nonnegative().nullable(),
+  metadata: z.record(z.unknown()),
+  createdBy: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type SourceExcerpt = z.infer<typeof sourceExcerptSchema>;
+
+/**
+ * A source excerpt enriched with a summary of the claim it cites (if any). Used
+ * by note/source views to show linked extracted/manual claims (US-011 AC4).
+ */
+export const sourceExcerptViewSchema = sourceExcerptSchema.extend({
+  claim: z
+    .object({
+      id: z.string().uuid(),
+      predicate: z.string(),
+    })
+    .nullable(),
+});
+export type SourceExcerptView = z.infer<typeof sourceExcerptViewSchema>;
+
+/** A list of source excerpts (as returned by `GET .../source-excerpts`). */
+export const sourceExcerptListSchema = z.array(sourceExcerptViewSchema);
+
+function spanOrdered(data: { spanStart?: number | null; spanEnd?: number | null }): boolean {
+  if (data.spanStart === undefined || data.spanStart === null) return true;
+  if (data.spanEnd === undefined || data.spanEnd === null) return true;
+  return data.spanStart <= data.spanEnd;
+}
+
+/**
+ * Payload to create a source excerpt. Exactly one of `noteId`/`sourceId` is
+ * required (the origin); at least one of `excerpt` or a span must be present so
+ * the citation actually references something.
+ */
+export const createSourceExcerptSchema = z
+  .object({
+    sourceId: z.string().uuid().optional(),
+    noteId: z.string().uuid().optional(),
+    claimId: z.string().uuid().optional(),
+    excerpt: z.string().trim().max(50000).optional(),
+    spanStart: z.number().int().nonnegative().optional(),
+    spanEnd: z.number().int().nonnegative().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasNote = data.noteId !== undefined;
+    const hasSource = data.sourceId !== undefined;
+    if (hasNote === hasSource) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide exactly one origin: noteId or sourceId',
+        path: [hasNote ? 'sourceId' : 'noteId'],
+      });
+    }
+    const hasSpan = data.spanStart !== undefined && data.spanEnd !== undefined;
+    const hasExcerpt = data.excerpt !== undefined && data.excerpt.length > 0;
+    if (!hasSpan && !hasExcerpt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide an excerpt or a span (spanStart and spanEnd)',
+        path: ['excerpt'],
+      });
+    }
+    if (!spanOrdered(data)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'spanStart must be on or before spanEnd',
+        path: ['spanEnd'],
+      });
+    }
+  });
+export type CreateSourceExcerpt = z.infer<typeof createSourceExcerptSchema>;
+
+/**
+ * Payload to edit a source excerpt. The origin (note/source) cannot be changed;
+ * only the citation details and the linked claim. At least one field required.
+ */
+export const updateSourceExcerptSchema = z
+  .object({
+    claimId: z.string().uuid().nullable().optional(),
+    excerpt: z.string().trim().max(50000).nullable().optional(),
+    spanStart: z.number().int().nonnegative().nullable().optional(),
+    spanEnd: z.number().int().nonnegative().nullable().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one field is required',
+  })
+  .refine(spanOrdered, {
+    message: 'spanStart must be on or before spanEnd',
+    path: ['spanEnd'],
+  });
+export type UpdateSourceExcerpt = z.infer<typeof updateSourceExcerptSchema>;
+
+// ---------------------------------------------------------------------------
 // Custom-property validation hooks (US-005 AC3)
 //
 // Custom properties live in JSONB columns (`entities.properties`,

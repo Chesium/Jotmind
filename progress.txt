@@ -22,6 +22,7 @@ Started: Sat 13 Jun 2026 08:14:49 PM +08
 - Nested KB-scoped routes: a separate Router({mergeParams:true}) mounted at /api/knowledge-bases/:kbId/<thing> (AFTER the KB router, which has no matching nested route so it falls through). Reuse kbStore.getRole in a local requireKbRole(min): 404 for non-members (hide existence), 403 for too-low role. Reads need viewer; mutations need editor + requireCsrf.
 - Web interaction tests: @testing-library/user-event is NOT installed — use fireEvent from @testing-library/react. For real-browser verification, write a TEMP playwright config with two webServers (API w/ DATABASE_URL env + reuseExistingServer:true, web dev), truncate DB users first (so first-run setup shows), run, screenshot, then delete the temp files.
 - Background work = durable `jobs` table (US-007). Enqueue via dbJobStore.enqueue({type,...}); register handlers in apps/api/src/jobs/handlers.ts:defaultJobHandlers. Workers claim atomically via claimNext (FOR UPDATE SKIP LOCKED in a tx); runNextJob handles capped-exponential-backoff retry + dead-letter. Two run modes share runNextJob: `pnpm --filter @jotmind/api worker` (separate process) and startInProcessWorker (WORKER_INLINE=true in server.ts). Don't invent new background loops.
+- Only entity/claim/note/source are GRAPH_TARGET_TYPES (project to AGE via outbox). Records of those kinds emit graph_outbox + audit in one tx; NON-projected records (e.g. source_excerpts) emit audit ONLY (no enqueueGraphOutbox). Add a kind to GRAPH_TARGET_TYPES in @jotmind/schemas graph.ts before enqueuing outbox for it. New KB-scoped domain = mirror entity/claim: store interface + db<Domain>Store + in-memory fake test + Router({mergeParams:true}) mounted AFTER the KB router + createApp seam.
 
 ## Sat 13 Jun 2026 20:25 +08 - US-001
 Thread: https://ampcode.com/threads/T-019ec0ea-b9f7-74a4-8859-43f08d85d8f4
@@ -208,4 +209,20 @@ Thread: https://ampcode.com/threads/T-019ec14e-0078-70ac-b158-92be1097d0d0
   - Delete/merge confirmation impact (AC2) is served by GET /:entityId/impact (viewer) returning affected claims; the web confirm dialog uses it. The in-memory test fake returns empty impact (no claim tracking) — impact correctness is covered by the integration test.
   - dev-browser skill still unavailable: verify UI via a TEMP playwright config (two webServers: API w/ DATABASE_URL + reuseExistingServer:true, web dev) after truncating the DB so first-run setup shows; wait for auth-loading to be hidden before interacting; delete temp files + test-results after.
   - US-011 next: add Notes/Sources stores + routers; give them the same soft-delete (deleteNote/deleteSource) so US-010 AC ("note/source deletes are soft-deletes") is fully satisfied.
+---
+
+## Sat 13 Jun 2026 23:00 +08 - US-011
+Thread: https://ampcode.com/threads/T-019ec16d-7a6f-724d-8c20-195fb8fc8937
+- Implemented manual capture of Notes, Sources, and Source Excerpts/Citations (no AI required).
+- Shared schemas (packages/schemas/src/graph.ts): note/source/sourceExcerpt public shapes + create/update; sourceExcerptViewSchema extends the excerpt with claim:{id,predicate}|null; createSourceExcerptSchema superRefine enforces exactly-one-origin (noteId XOR sourceId) and excerpt-or-span.
+- API: 3 new modules mirroring entity/claim pattern — apps/api/src/notes/, sources/, source-excerpts/ (store interface + db<Domain>Store + index.ts router + in-memory-fake unit tests). Mounted at /api/knowledge-bases/:kbId/{notes,sources,source-excerpts} (mergeParams, after KB router). createApp seams: noteStore, sourceStore, sourceExcerptStore. Role gating mirrors entities (viewer read / editor mutate+CSRF / 404 for non-members).
+- Notes & Sources are canonical graph records: writes emit graph_outbox (note.*/source.*) + audit in one tx. Source Excerpts are NOT a graph target type -> audit ONLY, no outbox. Excerpt store validates origin note/source AND linked claim exist in same KB (discriminated SourceExcerptResult -> 404), and joins claim predicate for views; list filters by ?noteId/?sourceId/?claimId.
+- Web: api.ts clients (list/create/update/delete for notes & sources; list/create/delete for excerpts). New <Capture> component in App.tsx (after <Claims>): note + source create forms, per-item citation forms (excerpt text + optional claim dropdown), note/source views display original content + linked claims via excerpts.
+- No DB migration — notes/sources/source_excerpts tables already existed from US-005.
+- Files: packages/schemas/src/graph.ts; apps/api/src/{notes,sources,source-excerpts}/*; apps/api/src/app.ts; apps/web/src/{api.ts,App.tsx}; AGENTS.md.
+- Verified: pnpm verify fully green. With live compose DB: db:migrate + full apps/api test suite = 139 passed (incl. capture.integration.test.ts). Browser: temp Playwright spec (first-run setup -> KB -> claim (literal arg) -> note -> source w/ JSON metadata -> citation linked to claim); note view showed excerpt "first algorithm" -> claim "pioneered". Screenshot confirmed. Temp e2e/config removed.
+- **Learnings for future iterations:**
+  - See AGENTS.md "Notes, Sources & Citations (capture, US-011)" + Codebase Patterns. KEY: only entity/claim/note/source are GRAPH_TARGET_TYPES — source_excerpts/audit-only (no outbox). Add new graph-projected kinds to GRAPH_TARGET_TYPES in @jotmind/schemas graph.ts before enqueuing outbox for them.
+  - The <Capture> citation dropdown (like <Claims> entity dropdown) only refetches claims when kb.id changes; cross-component live sync isn't wired. For browser tests, avoid the entity-dropdown-in-claims refresh gotcha by using a literal claim argument.
+  - US-012 (next): manual search & filters over entities/claims/notes/sources.
 ---

@@ -9,20 +9,32 @@ import {
   type CreateClaimArgument,
   type Entity,
   type KnowledgeBase,
+  type Note,
+  type Source,
+  type SourceExcerptView,
 } from '@jotmind/schemas';
 import {
   createAccount,
   createClaim,
   createEntity,
   createKnowledgeBase,
+  createNote,
+  createSource,
+  createSourceExcerpt,
   deleteClaim,
   deleteEntity,
+  deleteNote,
+  deleteSource,
+  deleteSourceExcerpt,
   getEntityImpact,
   getMe,
   getSetupStatus,
   listClaims,
   listEntities,
   listKnowledgeBases,
+  listNotes,
+  listSourceExcerpts,
+  listSources,
   login,
   logout,
   mergeEntity,
@@ -295,6 +307,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       {error && <p data-testid="kb-error">{error}</p>}
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}
+      {selectedKb && <Capture kb={selectedKb} csrfToken={csrfToken} />}
     </section>
   );
 }
@@ -975,6 +988,394 @@ function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
         <p data-testid="claims-readonly">You have read-only access to this Knowledge Base.</p>
       )}
       {error && <p data-testid="claims-error">{error}</p>}
+    </section>
+  );
+}
+
+/**
+ * Notes & Sources capture (US-011). Lets editors store freeform notes and
+ * imported/captured sources, cite spans/excerpts of them, and link those
+ * citations to claims. Note/source views show the original content and the
+ * linked claims (via excerpts). No AI provider is required.
+ */
+function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
+  const canEdit = kbRoleSatisfies(kb.role, 'editor');
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [excerpts, setExcerpts] = useState<SourceExcerptView[]>([]);
+  const [noteForm, setNoteForm] = useState({ title: '', content: '' });
+  const [sourceForm, setSourceForm] = useState({
+    title: '',
+    sourceType: '',
+    uri: '',
+    content: '',
+    metadata: '',
+  });
+  // Per-item citation drafts keyed by note/source id.
+  const [citations, setCitations] = useState<Record<string, { excerpt: string; claimId: string }>>(
+    {},
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      const [n, s, c, e] = await Promise.all([
+        listNotes(kb.id),
+        listSources(kb.id),
+        listClaims(kb.id),
+        listSourceExcerpts(kb.id),
+      ]);
+      setNotes(n);
+      setSources(s);
+      setClaims(c);
+      setExcerpts(e);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load notes/sources');
+    }
+  }, [kb.id]);
+
+  useEffect(() => {
+    setNoteForm({ title: '', content: '' });
+    setSourceForm({ title: '', sourceType: '', uri: '', content: '', metadata: '' });
+    setCitations({});
+    void refresh();
+  }, [refresh]);
+
+  function claimLabel(id: string | null): string {
+    if (!id) return '';
+    const claim = claims.find((c) => c.id === id);
+    return claim ? claim.predicate : id;
+  }
+
+  function getCitation(id: string): { excerpt: string; claimId: string } {
+    return citations[id] ?? { excerpt: '', claimId: '' };
+  }
+
+  async function submitNote(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await createNote(
+        kb.id,
+        { title: noteForm.title.trim() || undefined, content: noteForm.content },
+        csrfToken,
+      );
+      setNoteForm({ title: '', content: '' });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save note');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitSource(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      let metadata: Record<string, unknown> | undefined;
+      const trimmed = sourceForm.metadata.trim();
+      if (trimmed.length > 0) {
+        const parsed: unknown = JSON.parse(trimmed);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error('Metadata must be a JSON object');
+        }
+        metadata = parsed as Record<string, unknown>;
+      }
+      await createSource(
+        kb.id,
+        {
+          title: sourceForm.title,
+          sourceType: sourceForm.sourceType.trim() || undefined,
+          uri: sourceForm.uri.trim() || undefined,
+          content: sourceForm.content.trim() || undefined,
+          metadata,
+        },
+        csrfToken,
+      );
+      setSourceForm({ title: '', sourceType: '', uri: '', content: '', metadata: '' });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save source');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addCitation(origin: 'note' | 'source', id: string) {
+    setError(null);
+    const draft = getCitation(id);
+    if (!draft.excerpt.trim()) {
+      setError('Enter excerpt text to cite.');
+      return;
+    }
+    try {
+      await createSourceExcerpt(
+        kb.id,
+        {
+          ...(origin === 'note' ? { noteId: id } : { sourceId: id }),
+          excerpt: draft.excerpt.trim(),
+          claimId: draft.claimId || undefined,
+        },
+        csrfToken,
+      );
+      setCitations((m) => ({ ...m, [id]: { excerpt: '', claimId: '' } }));
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add citation');
+    }
+  }
+
+  async function removeNote(note: Note) {
+    setError(null);
+    if (!window.confirm(`Delete this note? Its citations will be removed.`)) return;
+    try {
+      await deleteNote(kb.id, note.id, csrfToken);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete note');
+    }
+  }
+
+  async function removeSource(source: Source) {
+    setError(null);
+    if (!window.confirm(`Delete "${source.title ?? 'source'}"? Its citations will be removed.`)) {
+      return;
+    }
+    try {
+      await deleteSource(kb.id, source.id, csrfToken);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete source');
+    }
+  }
+
+  async function removeExcerpt(excerptId: string) {
+    setError(null);
+    try {
+      await deleteSourceExcerpt(kb.id, excerptId, csrfToken);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete citation');
+    }
+  }
+
+  function renderCitations(originExcerpts: SourceExcerptView[]) {
+    if (originExcerpts.length === 0) {
+      return <p data-testid="no-citations">No citations yet.</p>;
+    }
+    return (
+      <ul>
+        {originExcerpts.map((ex) => (
+          <li key={ex.id} data-testid={`excerpt-${ex.id}`}>
+            <em>“{ex.excerpt ?? `[span ${String(ex.spanStart)}–${String(ex.spanEnd)}]`}”</em>
+            {ex.claim ? (
+              <>
+                {' '}
+                → claim: <strong>{claimLabel(ex.claim.id) || ex.claim.predicate}</strong>
+              </>
+            ) : (
+              <> (no linked claim)</>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => void removeExcerpt(ex.id)}
+                data-testid={`excerpt-delete-${ex.id}`}
+              >
+                Remove
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  function renderCitationForm(origin: 'note' | 'source', id: string) {
+    if (!canEdit) return null;
+    const draft = getCitation(id);
+    return (
+      <div>
+        <input
+          type="text"
+          placeholder="Excerpt text to cite"
+          value={draft.excerpt}
+          onChange={(e) =>
+            setCitations((m) => ({ ...m, [id]: { ...draft, excerpt: e.target.value } }))
+          }
+          data-testid={`citation-excerpt-${id}`}
+        />
+        <select
+          value={draft.claimId}
+          onChange={(e) =>
+            setCitations((m) => ({ ...m, [id]: { ...draft, claimId: e.target.value } }))
+          }
+          data-testid={`citation-claim-${id}`}
+        >
+          <option value="">Link a claim (optional)…</option>
+          {claims.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.predicate}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => void addCitation(origin, id)}
+          data-testid={`citation-add-${id}`}
+        >
+          Add citation
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <section aria-label="capture" data-testid="capture">
+      <h3>Notes & Sources in {kb.name}</h3>
+
+      <h4>Notes</h4>
+      {notes.length === 0 ? (
+        <p data-testid="notes-empty">No notes yet.</p>
+      ) : (
+        <ul data-testid="notes-list">
+          {notes.map((note) => (
+            <li key={note.id} data-testid={`note-${note.id}`}>
+              {note.title && <strong>{note.title}: </strong>}
+              <span>{note.content}</span>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => void removeNote(note)}
+                  data-testid={`note-delete-${note.id}`}
+                >
+                  Delete
+                </button>
+              )}
+              <div data-testid={`note-citations-${note.id}`}>
+                {renderCitations(excerpts.filter((ex) => ex.noteId === note.id))}
+              </div>
+              {renderCitationForm('note', note.id)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit && (
+        <form onSubmit={submitNote} aria-label="create-note">
+          <label>
+            Title (optional)
+            <input
+              type="text"
+              value={noteForm.title}
+              onChange={(e) => setNoteForm({ ...noteForm, title: e.target.value })}
+              data-testid="note-title"
+            />
+          </label>
+          <label>
+            Content
+            <textarea
+              value={noteForm.content}
+              onChange={(e) => setNoteForm({ ...noteForm, content: e.target.value })}
+              required
+              data-testid="note-content"
+            />
+          </label>
+          <button type="submit" disabled={busy} data-testid="note-submit">
+            Add note
+          </button>
+        </form>
+      )}
+
+      <h4>Sources</h4>
+      {sources.length === 0 ? (
+        <p data-testid="sources-empty">No sources yet.</p>
+      ) : (
+        <ul data-testid="sources-list">
+          {sources.map((source) => (
+            <li key={source.id} data-testid={`source-${source.id}`}>
+              <strong>{source.title}</strong>
+              {source.sourceType && <> ({source.sourceType})</>}
+              {source.uri && <> — {source.uri}</>}
+              {source.content && <p>{source.content}</p>}
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => void removeSource(source)}
+                  data-testid={`source-delete-${source.id}`}
+                >
+                  Delete
+                </button>
+              )}
+              <div data-testid={`source-citations-${source.id}`}>
+                {renderCitations(excerpts.filter((ex) => ex.sourceId === source.id))}
+              </div>
+              {renderCitationForm('source', source.id)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit && (
+        <form onSubmit={submitSource} aria-label="create-source">
+          <label>
+            Title
+            <input
+              type="text"
+              value={sourceForm.title}
+              onChange={(e) => setSourceForm({ ...sourceForm, title: e.target.value })}
+              required
+              data-testid="source-title"
+            />
+          </label>
+          <label>
+            Type
+            <input
+              type="text"
+              value={sourceForm.sourceType}
+              onChange={(e) => setSourceForm({ ...sourceForm, sourceType: e.target.value })}
+              data-testid="source-type"
+            />
+          </label>
+          <label>
+            URI/locator
+            <input
+              type="text"
+              value={sourceForm.uri}
+              onChange={(e) => setSourceForm({ ...sourceForm, uri: e.target.value })}
+              data-testid="source-uri"
+            />
+          </label>
+          <label>
+            Captured content (optional)
+            <textarea
+              value={sourceForm.content}
+              onChange={(e) => setSourceForm({ ...sourceForm, content: e.target.value })}
+              data-testid="source-content"
+            />
+          </label>
+          <label>
+            Structured metadata (JSON, optional)
+            <textarea
+              value={sourceForm.metadata}
+              onChange={(e) => setSourceForm({ ...sourceForm, metadata: e.target.value })}
+              data-testid="source-metadata"
+            />
+          </label>
+          <button type="submit" disabled={busy} data-testid="source-submit">
+            Add source
+          </button>
+        </form>
+      )}
+
+      {!canEdit && (
+        <p data-testid="capture-readonly">You have read-only access to this Knowledge Base.</p>
+      )}
+      {error && <p data-testid="capture-error">{error}</p>}
     </section>
   );
 }

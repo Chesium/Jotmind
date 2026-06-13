@@ -7,20 +7,34 @@ import {
   entitySchema,
   knowledgeBaseListSchema,
   knowledgeBaseSchema,
+  noteListSchema,
+  noteSchema,
   publicUserSchema,
   setupStatusSchema,
+  sourceExcerptListSchema,
+  sourceExcerptViewSchema,
+  sourceListSchema,
+  sourceSchema,
   type AccountRole,
   type AuthState,
   type Claim,
   type CreateClaim,
   type CreateEntity,
+  type CreateNote,
+  type CreateSource,
+  type CreateSourceExcerpt,
   type Entity,
   type EntityImpact,
   type KnowledgeBase,
+  type Note,
   type PublicUser,
   type SetupStatus,
+  type Source,
+  type SourceExcerptView,
   type UpdateClaim,
   type UpdateEntity,
+  type UpdateNote,
+  type UpdateSource,
 } from '@jotmind/schemas';
 
 async function errorMessage(res: Response): Promise<string> {
@@ -253,4 +267,170 @@ export async function updateClaim(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return claimSchema.parse(await res.json());
+}
+
+// --- Notes (US-011) -------------------------------------------------------
+
+/** List notes in a Knowledge Base. */
+export async function listNotes(knowledgeBaseId: string): Promise<Note[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return noteListSchema.parse(await res.json());
+}
+
+/** Create a note from freeform text (editor+). No AI provider required. */
+export async function createNote(
+  knowledgeBaseId: string,
+  input: CreateNote,
+  csrfToken: string,
+): Promise<Note> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return noteSchema.parse(await res.json());
+}
+
+/** Edit a note (editor+). */
+export async function updateNote(
+  knowledgeBaseId: string,
+  noteId: string,
+  input: UpdateNote,
+  csrfToken: string,
+): Promise<Note> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes/${noteId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return noteSchema.parse(await res.json());
+}
+
+/** Soft-delete a note (editor+). */
+export async function deleteNote(
+  knowledgeBaseId: string,
+  noteId: string,
+  csrfToken: string,
+): Promise<void> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes/${noteId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'x-csrf-token': csrfToken },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+}
+
+// --- Sources (US-011) -----------------------------------------------------
+
+/** List sources in a Knowledge Base. */
+export async function listSources(knowledgeBaseId: string): Promise<Source[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return sourceListSchema.parse(await res.json());
+}
+
+/** Create a source for captured/imported material (editor+). */
+export async function createSource(
+  knowledgeBaseId: string,
+  input: CreateSource,
+  csrfToken: string,
+): Promise<Source> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return sourceSchema.parse(await res.json());
+}
+
+/** Edit a source (editor+). */
+export async function updateSource(
+  knowledgeBaseId: string,
+  sourceId: string,
+  input: UpdateSource,
+  csrfToken: string,
+): Promise<Source> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources/${sourceId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return sourceSchema.parse(await res.json());
+}
+
+/** Soft-delete a source (editor+). */
+export async function deleteSource(
+  knowledgeBaseId: string,
+  sourceId: string,
+  csrfToken: string,
+): Promise<void> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources/${sourceId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'x-csrf-token': csrfToken },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+}
+
+// --- Source excerpts / citations (US-011) ---------------------------------
+
+/** List source excerpts, optionally filtered by note/source/claim. */
+export async function listSourceExcerpts(
+  knowledgeBaseId: string,
+  filter: { noteId?: string; sourceId?: string; claimId?: string } = {},
+): Promise<SourceExcerptView[]> {
+  const params = new URLSearchParams();
+  if (filter.noteId) params.set('noteId', filter.noteId);
+  if (filter.sourceId) params.set('sourceId', filter.sourceId);
+  if (filter.claimId) params.set('claimId', filter.claimId);
+  const qs = params.toString();
+  const res = await fetch(
+    `/api/knowledge-bases/${knowledgeBaseId}/source-excerpts${qs ? `?${qs}` : ''}`,
+    { credentials: 'include' },
+  );
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return sourceExcerptListSchema.parse(await res.json());
+}
+
+/** Create a source excerpt / citation referencing a note or source (editor+). */
+export async function createSourceExcerpt(
+  knowledgeBaseId: string,
+  input: CreateSourceExcerpt,
+  csrfToken: string,
+): Promise<SourceExcerptView> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/source-excerpts`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return sourceExcerptViewSchema.parse(await res.json());
+}
+
+/** Soft-delete a source excerpt (editor+). */
+export async function deleteSourceExcerpt(
+  knowledgeBaseId: string,
+  excerptId: string,
+  csrfToken: string,
+): Promise<void> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/source-excerpts/${excerptId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'x-csrf-token': csrfToken },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
 }

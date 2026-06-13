@@ -12,6 +12,9 @@ import { dbAuthStore, type AuthStore } from './auth/store.js';
 import { createKnowledgeBaseRouter, type KnowledgeBaseStore } from './kb/index.js';
 import { createEntityRouter, type EntityStore } from './entities/index.js';
 import { createClaimRouter, type ClaimStore } from './claims/index.js';
+import { createNoteRouter, type NoteStore } from './notes/index.js';
+import { createSourceRouter, type SourceStore } from './sources/index.js';
+import { createSourceExcerptRouter, type SourceExcerptStore } from './source-excerpts/index.js';
 import {
   createGraphRouter,
   stubProjector,
@@ -54,6 +57,21 @@ export interface AppOptions {
    */
   claimStore?: ClaimStore;
   /**
+   * Note store (US-011). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  noteStore?: NoteStore;
+  /**
+   * Source store (US-011). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  sourceStore?: SourceStore;
+  /**
+   * Source excerpt / citation store (US-011). Injectable for unit tests.
+   * Defaults to the PostgreSQL-backed store.
+   */
+  sourceExcerptStore?: SourceExcerptStore;
+  /**
    * Graph projection store. Injectable for unit tests. Defaults to the
    * PostgreSQL-backed store.
    */
@@ -95,6 +113,22 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(
     '/api/knowledge-bases/:kbId/claims',
     createClaimRouter({ store: options.claimStore, kbStore: options.kbStore, authStore }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/notes',
+    createNoteRouter({ store: options.noteStore, kbStore: options.kbStore, authStore }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/sources',
+    createSourceRouter({ store: options.sourceStore, kbStore: options.kbStore, authStore }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/source-excerpts',
+    createSourceExcerptRouter({
+      store: options.sourceExcerptStore,
+      kbStore: options.kbStore,
+      authStore,
+    }),
   );
   app.use(
     '/api/graph',
