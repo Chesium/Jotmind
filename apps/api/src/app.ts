@@ -16,6 +16,7 @@ import {
   type Projector,
   type ProjectionStore,
 } from './graph/index.js';
+import { createJobsRouter, type JobStore } from './jobs/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -50,6 +51,11 @@ export interface AppOptions {
    * does not yet write to Apache AGE.
    */
   projector?: Projector;
+  /**
+   * Durable job store (US-007). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  jobStore?: JobStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -74,6 +80,7 @@ export function createApp(options: AppOptions = {}): Express {
     '/api/graph',
     createGraphRouter({ authStore, projectionStore: options.projectionStore, projector }),
   );
+  app.use('/api/jobs', createJobsRouter({ authStore, store: options.jobStore }));
 
   app.get('/api/health', (_req, res, next) => {
     void (async () => {

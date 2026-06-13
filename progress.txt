@@ -18,6 +18,7 @@ Started: Sat 13 Jun 2026 08:14:49 PM +08
 - @node-rs/argon2 `Algorithm` is an ambient const enum -> cannot value-import under verbatimModuleSyntax. Use numeric literal: `const X: Algorithm = 2 as Algorithm` (Argon2id===2). Same caution for any ambient const enum dependency.
 - Auth: Argon2id passwords, PG-backed sessions (sessions table), HTTP-only `jm_session` cookie, CSRF synchronizer token (`jm_csrf` readable cookie + `x-csrf-token` header) on cookie-auth mutations. System account role (admin|member) is separate from KB-scoped roles (US-004+). Web mutations need credentials:include + x-csrf-token.
 - dev-browser skill is NOT available in this env. For required browser verification of UI stories, use Playwright + Chromium (installed) against the running API (write a temp e2e spec, run, screenshot, then delete it).
+- Background work = durable `jobs` table (US-007). Enqueue via dbJobStore.enqueue({type,...}); register handlers in apps/api/src/jobs/handlers.ts:defaultJobHandlers. Workers claim atomically via claimNext (FOR UPDATE SKIP LOCKED in a tx); runNextJob handles capped-exponential-backoff retry + dead-letter. Two run modes share runNextJob: `pnpm --filter @jotmind/api worker` (separate process) and startInProcessWorker (WORKER_INLINE=true in server.ts). Don't invent new background loops.
 
 ## Sat 13 Jun 2026 20:25 +08 - US-001
 Thread: https://ampcode.com/threads/T-019ec0ea-b9f7-74a4-8859-43f08d85d8f4
@@ -131,4 +132,23 @@ Thread: https://ampcode.com/threads/T-019ec123-5e2b-719a-99eb-e5eb2a0cb7d4
   - The projector is STUBBED (stubProjector, stubbed:true). The real Apache AGE projector replaces it later: implement Projector.project to write AGE, set stubbed:false, and swap the default in createApp. processOutbox/rebuildProjection already handle batching/marking/repair — only project() changes.
   - DbExecutor type in outbox.ts = Database | tx param; lets helpers run under getDb() OR a tx. Reuse for other in-transaction helpers.
   - US-007 (next) adds the PostgreSQL-backed jobs foundation (jobs table already exists from US-005: status/attempts/max_attempts/run_after/failure_reason/owner_user_id). Follow the same injectable-store + claim-with-SKIP-LOCKED pattern used here for processOutbox.
+---
+
+## Sat 13 Jun 2026 21:40 +08 - US-007
+Thread: https://ampcode.com/threads/T-019ec12c-75da-75f7-8b39-8f2262dd9cb9
+- Implemented the durable PostgreSQL-backed jobs foundation (table already existed from US-005).
+- apps/api/src/jobs/store.ts: JobStore interface + dbJobStore. claimNext() does FOR UPDATE SKIP LOCKED select inside a tx then sets status=running + attempts++ (atomic, multi-worker safe). enqueue/markSucceeded/markForRetry/markFailed/getById/list(filter)/countByStatus.
+- apps/api/src/jobs/worker.ts: computeBackoffMs (capped exponential, base 1s/cap 5min). runNextJob (claim->run handler for job.type; success->markSucceeded; throw-> retry with runAfter=now+backoff until attempts>=maxAttempts then dead-letter via markFailed; missing handler-> immediate dead-letter). processAvailableJobs (drain). runWorkerLoop + startInProcessWorker (two run modes share runNextJob). Clock injectable via now:()=>Date for deterministic backoff tests.
+- apps/api/src/jobs/handlers.ts: defaultJobHandlers registry (incl noop). worker-process.ts: separate-process entry (graceful SIGINT/SIGTERM, WORKER_POLL_INTERVAL_MS, closeDb on stop).
+- apps/api/src/jobs/index.ts: createJobsRouter at /api/jobs -> GET / (list, ?status/?knowledgeBaseId/?limit), GET /stats, GET /:id (404). All system-admin only, read-only (no CSRF needed). toPublicJob serializer.
+- Wiring: app.ts adds jobStore seam + mounts /api/jobs; server.ts starts in-process worker when WORKER_INLINE=true; package.json adds `worker` script. packages/schemas/src/jobs.ts (publicJob/jobListQuery/jobStats, reuses jobStatusSchema from graph.ts) + index export.
+- Tests: jobs.test.ts (backoff, runNextJob success/no-handler/retry->deadletter w/ injected clock, processAvailableJobs, admin API 401/403/list+filter/400/stats/get+404) + jobs.integration.test.ts (skipIf no DATABASE_URL, TRUNCATE jobs/knowledge_bases/users).
+- Files changed: apps/api/src/jobs/{store,worker,handlers,worker-process,index,jobs.test,jobs.integration.test}.ts, apps/api/src/{app,server}.ts, apps/api/package.json, packages/schemas/src/{jobs.ts,index.ts}, AGENTS.md.
+- Verified: pnpm verify fully green; live compose DB (DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind) db:migrate + all 69 tests pass incl integration; separate-process worker smoke-tested end-to-end (inserted noop job -> `pnpm --filter @jotmind/api worker` claimed+ran it -> status=succeeded with result populated).
+- **Learnings for future iterations:**
+  - The jobs DB queue pattern (claimNext via FOR UPDATE SKIP LOCKED + tx) is the canonical way to add background work. Register new job types in apps/api/src/jobs/handlers.ts:defaultJobHandlers and enqueue via dbJobStore.enqueue(). US-018 (AI proposals), US-021 (embeddings), imports/exports, and the real AGE projector worker should all plug in here rather than inventing new loops.
+  - GOTCHA when testing backoff: claimNext filters runnable jobs by `runAfter <= now`. If you enqueue with default runAfter (real now) but call runNextJob with an injected past `now`, the job is NOT runnable and you get undefined. Either enqueue with runAfter matching your injected base, or advance the injected clock forward across retries (see jobs.test.ts / jobs.integration.test.ts).
+  - `claimNext` increments attempts, so inside a handler / in runNextJob, `job.attempts` already counts the current attempt. Dead-letter check is `attempts >= maxAttempts` (maxAttempts default 5 => 5 total attempts).
+  - createApp injection seams are now {checkDatabase, authStore, kbStore, projectionStore, projector, jobStore}. Mirror the injectable-store pattern for any new DB-backed domain.
+  - This was a backend-only story; US-007 ACs do not require browser verification (no UI). dev-browser still unavailable in this env.
 ---

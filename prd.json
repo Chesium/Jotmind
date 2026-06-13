@@ -117,8 +117,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Durable PostgreSQL-backed jobs foundation. jobs table already existed (US-005); added apps/api/src/jobs/: store.ts (JobStore interface + dbJobStore; claimNext = FOR UPDATE SKIP LOCKED inside tx then status=running + attempts++ so multiple workers never double-claim; enqueue/markSucceeded/markForRetry/markFailed/getById/list/countByStatus), worker.ts (computeBackoffMs capped exponential base 1s cap 5min; runNextJob runs handler for job.type, success->markSucceeded, throw->markForRetry with runAfter=now+backoff until attempts>=maxAttempts then markFailed dead-letter, missing handler->immediate dead-letter; processAvailableJobs drain; runWorkerLoop + startInProcessWorker for the two run modes), handlers.ts (defaultJobHandlers registry incl noop), worker-process.ts (separate-process entry, graceful SIGINT/SIGTERM, WORKER_POLL_INTERVAL_MS). index.ts createJobsRouter at /api/jobs: GET / (list, ?status/?knowledgeBaseId/?limit), GET /stats (per-status counts), GET /:id (404) -- all system admin only (read-only). Run modes: pnpm --filter @jotmind/api worker (separate process) + WORKER_INLINE=true starts startInProcessWorker in server.ts. Shared schemas packages/schemas/src/jobs.ts (publicJob, jobListQuery, jobStats; reuses jobStatusSchema from graph.ts). createApp seam now includes jobStore. Tests: jobs.test.ts (backoff math, runNextJob success/no-handler/retry-then-deadletter with injected clock, processAvailableJobs summary, admin API auth/403/list+filter/400/stats/get+404) + jobs.integration.test.ts (skipIf no DATABASE_URL, TRUNCATEs jobs/knowledge_bases/users). Verified: pnpm verify fully green; live compose DB db:migrate + 69 tests pass (incl integration); separate-process worker smoke-tested end-to-end (claimed+ran noop job -> succeeded with result)."
     },
     {
       "id": "US-008",

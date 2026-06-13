@@ -170,6 +170,38 @@ origin (exactly one of note/source), entity not-self-merge, status enums.
   is now exported from `auth/index.ts` for reuse. `createApp` seams are now
   `{ checkDatabase, authStore, kbStore, projectionStore, projector }`.
 
+## Durable jobs & worker (US-007)
+
+- The `jobs` table (`apps/api/src/db/schema.ts`) is the durable queue; jobs are
+  operational state (no soft-delete). Access goes through `apps/api/src/jobs/`:
+  `store.ts` (`JobStore` interface + `dbJobStore`), `worker.ts` (run/retry/loop
+  logic), `index.ts` (`createJobsRouter` + re-exports), `handlers.ts`
+  (`defaultJobHandlers` registry), `worker-process.ts` (separate-process entry).
+- **Atomic claim:** `dbJobStore.claimNext()` selects the oldest runnable
+  (`status='queued'`, `runAfter <= now`) row with `FOR UPDATE SKIP LOCKED` inside
+  a transaction, then sets `status='running'` and increments `attempts`. This
+  lets multiple workers (in-process + separate-process) run safely without
+  double-claiming. `claimNext` increments attempts, so `job.attempts` inside a
+  handler/`runNextJob` already counts the current attempt.
+- **Retry/backoff:** `runNextJob` runs the registered handler for `job.type`; on
+  throw it dead-letters (`markFailed`, terminal `status='failed'`) when
+  `attempts >= maxAttempts`, else re-queues via `markForRetry` with
+  `runAfter = now + computeBackoffMs(attempts)` (capped exponential, base 1s,
+  cap 5min). Missing handler → immediate dead-letter (`no-handler`). Register new
+  job types in `defaultJobHandlers`.
+- **Run modes:** separate-process via `pnpm --filter @jotmind/api worker`
+  (`runWorkerLoop`, polls `WORKER_POLL_INTERVAL_MS`, graceful SIGINT/SIGTERM);
+  in-process via `startInProcessWorker` (server.ts starts it when
+  `WORKER_INLINE=true`). All modes share `runNextJob`.
+- **API:** `GET /api/jobs` (list, `?status`/`?knowledgeBaseId`/`?limit`),
+  `GET /api/jobs/stats` (per-status counts), `GET /api/jobs/:id` — all system
+  **admin** only (read-only, no CSRF). `createApp` seams are now
+  `{ checkDatabase, authStore, kbStore, projectionStore, projector, jobStore }`.
+- Job API/worker logic is unit-tested with an in-memory `JobStore` fake (inject a
+  fixed `now: () => Date` for deterministic backoff assertions); the
+  `*.integration.test.ts` uses `skipIf(!DATABASE_URL)` and TRUNCATEs
+  `jobs, knowledge_bases, users`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).
