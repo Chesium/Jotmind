@@ -261,8 +261,8 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "AI provider adapter layer. Shared Zod config + message shapes in packages/schemas/src/ai.ts: AI_PROVIDER_KINDS (ollama, openai-compatible, openai, anthropic, mock); chatMessage/llmCompletionRequest+Result/embeddingRequest+Result; provider config as a discriminatedUnion(kind) with a *portable* schema + a *full* schema extending secret fields (AI_PROVIDER_SECRET_FIELDS=[apiKey]). toPortableProviderConfig() strips secrets AND re-parses portable schema (drops unknown keys so secrets cannot round-trip into KB exports, AC4). Adapter layer apps/api/src/ai/: types.ts (LlmProvider/EmbeddingProvider/AiProvider interfaces + AiProviderError), mock.ts (deterministic MockLlmProvider echo + MockEmbeddingProvider FNV-1a fixed-dim vectors, AC5), ollama.ts (OllamaProvider /api/chat + /api/embeddings, no creds, AC2), openai-compatible.ts (OpenAiCompatibleProvider /chat/completions + /embeddings, optional Bearer key; reused for both local endpoints and remote openai, AC2/AC3), anthropic.ts (AnthropicProvider /v1/messages, LLM-only skeleton, AC3), http.ts (postJson via global fetch -> AiProviderError), factory.ts (createLlmProvider/createEmbeddingProvider switch on kind; anthropic embedding throws; parseProviderConfig validates). No DB/migration/router/UI (foundation only; consumed by US-016/017/018/021). Tests: 9 schema unit (config validation, required-key for openai/anthropic, secret separation) + 8 api unit (mock determinism, factory per-kind, fetch-mocked ollama/openai-compatible incl Bearer header + error mapping). Verified: pnpm verify fully green (typecheck/lint/format/test/test:api/e2e)."
     },
     {
       "id": "US-016",

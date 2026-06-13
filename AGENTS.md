@@ -417,6 +417,38 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   gated by `kbRoleSatisfies(kb.role, 'admin')` (returns null for non-admins).
   API client helpers `listKbAudit`/`listKbJobs` are in `apps/web/src/api.ts`.
 
+## AI provider adapter layer (US-015)
+
+- ALL AI integrations sit behind typed adapters in `apps/api/src/ai/`; UI and
+  graph repositories must never import a vendor SDK directly. Interfaces:
+  `LlmProvider` (`complete(req)`) and `EmbeddingProvider` (`embed(req)` +
+  `dimensions`), both extending `AiProvider` (`name`/`kind`/`capabilities`) in
+  `ai/types.ts`. Build adapters via the factory (`ai/factory.ts`):
+  `createLlmProvider(config)` / `createEmbeddingProvider(config)` switch on
+  `config.kind`. `parseProviderConfig(input)` validates raw input first.
+- Provider kinds (`@jotmind/schemas` `ai.ts` `AI_PROVIDER_KINDS`): `ollama`
+  (local, no creds), `openai-compatible` (local servers OR remote OpenAI-shaped
+  endpoints, `apiKey` optional), `openai` (remote, `apiKey` REQUIRED by config
+  validation), `anthropic` (remote, LLM-only — `createEmbeddingProvider` THROWS),
+  `mock` (deterministic, used by normal tests). `openai` reuses
+  `OpenAiCompatibleProvider` (same REST shape). HTTP adapters use global `fetch`
+  via `ai/http.ts` `postJson`; failures throw `AiProviderError`.
+- **Secrets are separated from portable config (AC4).** Config schemas are a Zod
+  `discriminatedUnion('kind', ...)`. Two variants per kind: a *portable* schema
+  (safe to export) and a *full* schema that `.extend`s secret fields. The secret
+  field list is `AI_PROVIDER_SECRET_FIELDS` (currently `['apiKey']`).
+  `toPortableProviderConfig(config)` strips secrets AND re-parses against
+  `portableAiProviderConfigSchema` (parse drops unknown keys, so a leaked secret
+  cannot round-trip). When adding a new secret-bearing field, add it to
+  `AI_PROVIDER_SECRET_FIELDS` so it is stripped from KB exports.
+- **Normal tests use the mock providers, never the network** (AC5):
+  `MockLlmProvider` echoes a stable `mock-response: <last user msg>`;
+  `MockEmbeddingProvider` hashes (FNV-1a) inputs to fixed-dimension vectors —
+  same input ⇒ same vector. HTTP adapters are unit-tested by
+  `vi.spyOn(globalThis, 'fetch')` returning a `Response`; no live endpoint. No
+  DB, no migration, no router for this story — later stories (US-016 privacy
+  settings, US-021 embeddings, US-017/018 proposals) consume this layer.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).
