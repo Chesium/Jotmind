@@ -22,6 +22,7 @@ import {
   type ProjectionStore,
 } from './graph/index.js';
 import { createJobsRouter, type JobStore } from './jobs/index.js';
+import { createSearchRouter, type SearchStore } from './search/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -86,6 +87,11 @@ export interface AppOptions {
    * PostgreSQL-backed store.
    */
   jobStore?: JobStore;
+  /**
+   * Manual search store (US-012). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  searchStore?: SearchStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -129,6 +135,10 @@ export function createApp(options: AppOptions = {}): Express {
       kbStore: options.kbStore,
       authStore,
     }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/search',
+    createSearchRouter({ store: options.searchStore, kbStore: options.kbStore, authStore }),
   );
   app.use(
     '/api/graph',

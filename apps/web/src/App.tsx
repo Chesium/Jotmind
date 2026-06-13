@@ -10,6 +10,7 @@ import {
   type Entity,
   type KnowledgeBase,
   type Note,
+  type SearchResponse,
   type Source,
   type SourceExcerptView,
 } from '@jotmind/schemas';
@@ -38,6 +39,7 @@ import {
   login,
   logout,
   mergeEntity,
+  search,
   setupAdmin,
   updateClaim,
   updateEntity,
@@ -305,9 +307,201 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
         </button>
       </form>
       {error && <p data-testid="kb-error">{error}</p>}
+      {selectedKb && <Search kb={selectedKb} />}
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Capture kb={selectedKb} csrfToken={csrfToken} />}
+    </section>
+  );
+}
+
+const SEARCH_KINDS = ['entity', 'claim', 'note', 'source'] as const;
+
+/**
+ * Manual search & filters (US-012). Works without any AI provider. Surfaces a
+ * notice when vector/semantic search is unavailable (no embeddings) so token
+ * search stays usable.
+ */
+function Search({ kb }: { kb: KnowledgeBase }) {
+  const [q, setQ] = useState('');
+  const [kinds, setKinds] = useState<Record<string, boolean>>({});
+  const [type, setType] = useState('');
+  const [predicate, setPredicate] = useState('');
+  const [tag, setTag] = useState('');
+  const [confidenceMin, setConfidenceMin] = useState('');
+  const [confidenceMax, setConfidenceMax] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [hasProvenance, setHasProvenance] = useState(false);
+  const [response, setResponse] = useState<SearchResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function toIso(date: string): string | undefined {
+    if (!date) return undefined;
+    const parsed = new Date(date);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+
+  async function runSearch(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const selectedKinds = SEARCH_KINDS.filter((k) => kinds[k]);
+      const result = await search(kb.id, {
+        q: q.trim() || undefined,
+        kinds: selectedKinds.length > 0 ? selectedKinds.join(',') : undefined,
+        type: type.trim() || undefined,
+        predicate: predicate.trim() || undefined,
+        tag: tag.trim() || undefined,
+        confidenceMin: confidenceMin ? Number(confidenceMin) : undefined,
+        confidenceMax: confidenceMax ? Number(confidenceMax) : undefined,
+        dateFrom: toIso(dateFrom),
+        dateTo: toIso(dateTo),
+        hasProvenance: hasProvenance ? true : undefined,
+      });
+      setResponse(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Search failed');
+      setResponse(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section data-testid="search">
+      <h3>Search &amp; filters</h3>
+      <form onSubmit={runSearch}>
+        <label>
+          Query
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Token search (entities, claims, notes, sources)"
+            data-testid="search-query"
+          />
+        </label>
+        <fieldset data-testid="search-kinds">
+          <legend>Kinds</legend>
+          {SEARCH_KINDS.map((k) => (
+            <label key={k}>
+              <input
+                type="checkbox"
+                checked={kinds[k] ?? false}
+                onChange={(e) => setKinds((prev) => ({ ...prev, [k]: e.target.checked }))}
+                data-testid={`search-kind-${k}`}
+              />
+              {k}
+            </label>
+          ))}
+        </fieldset>
+        <label>
+          Entity type
+          <input
+            type="text"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            placeholder="e.g. Person, Place"
+            data-testid="search-type"
+          />
+        </label>
+        <label>
+          Claim predicate
+          <input
+            type="text"
+            value={predicate}
+            onChange={(e) => setPredicate(e.target.value)}
+            data-testid="search-predicate"
+          />
+        </label>
+        <label>
+          Tag
+          <input
+            type="text"
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            data-testid="search-tag"
+          />
+        </label>
+        <label>
+          Confidence min
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.1"
+            value={confidenceMin}
+            onChange={(e) => setConfidenceMin(e.target.value)}
+            data-testid="search-confidence-min"
+          />
+        </label>
+        <label>
+          Confidence max
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.1"
+            value={confidenceMax}
+            onChange={(e) => setConfidenceMax(e.target.value)}
+            data-testid="search-confidence-max"
+          />
+        </label>
+        <label>
+          Created from
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            data-testid="search-date-from"
+          />
+        </label>
+        <label>
+          Created to
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            data-testid="search-date-to"
+          />
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={hasProvenance}
+            onChange={(e) => setHasProvenance(e.target.checked)}
+            data-testid="search-has-provenance"
+          />
+          Only claims with provenance
+        </label>
+        <button type="submit" disabled={busy} data-testid="search-submit">
+          Search
+        </button>
+      </form>
+      {error && <p data-testid="search-error">{error}</p>}
+      {response && (
+        <div data-testid="search-results">
+          {!response.vectorSearch.available && (
+            <p data-testid="search-vector-unavailable">
+              Semantic (vector) search unavailable: {response.vectorSearch.reason}
+            </p>
+          )}
+          <p data-testid="search-count">{response.results.length} result(s)</p>
+          <ul>
+            {response.results.map((r) => (
+              <li key={`${r.kind}:${r.id}`} data-testid={`search-result-${r.kind}`}>
+                <strong>[{r.kind}]</strong> {r.title}
+                {r.type && ` — ${r.type}`}
+                {r.confidence !== null && ` (confidence ${String(r.confidence)})`}
+                {r.snippet && <div>{r.snippet}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }

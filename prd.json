@@ -208,8 +208,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Manual token search + structured filters, no AI required. apps/api/src/search/: store.ts (SearchStore interface + dbSearchStore) + index.ts (createSearchRouter). Mounted at /api/knowledge-bases/:kbId/search (mergeParams, AFTER KB router); createApp seam searchStore. GET / requires viewer (respects KB perms, 404 for non-members). Token search unions per-kind queries over entities/claims/notes/sources (filtering deleted_at IS NULL + kb), AND-matching whitespace tokens via ILIKE across name/aliases/description/tags/type/properties (entities), predicate/description/properties/provenance (claims), title/content/properties (notes), title/sourceType/uri/content/metadata/properties (sources); JSONB cast ::text so array/object contents match. Filters: type/tag (entities only; tag via jsonb @> containment), predicate/confidenceMin/confidenceMax/hasProvenance (claims only), dateFrom/dateTo (createdAt all kinds), kinds CSV. Results merged, sorted createdAt desc, capped limit (default 50). Vector search availability (AC4): getVectorSearchAvailability() checks information_schema for embeddings table; none exists so returns available:false + reason, token search unaffected. Shared schemas packages/schemas/src/search.ts: searchQuerySchema (coerces numeric/boolean params, hasProvenance transform, confidence-range refine), searchResult/searchResponse schemas. Web: api.ts search() + <Search> component in App.tsx (rendered first per selected KB; filter form + unified results + vector-unavailable notice). Tests: 7 search API unit (in-memory store) + 6 search integration (skipIf no DATABASE_URL, verifies cross-kind token search, alias/tag match, KB-scoping, soft-delete exclusion, type/tag/predicate/confidence/provenance filters, vector unavailable) + 6 schema unit. Verified: pnpm verify fully green; live DB integration tests pass; Playwright+Chromium browser flow (setup->create KB->create entity->search ada->result + vector-unavailable notice) + screenshot confirmed."
     },
     {
       "id": "US-013",

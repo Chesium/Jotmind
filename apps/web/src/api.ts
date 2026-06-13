@@ -11,6 +11,7 @@ import {
   noteSchema,
   publicUserSchema,
   setupStatusSchema,
+  searchResponseSchema,
   sourceExcerptListSchema,
   sourceExcerptViewSchema,
   sourceListSchema,
@@ -28,6 +29,8 @@ import {
   type KnowledgeBase,
   type Note,
   type PublicUser,
+  type SearchQuery,
+  type SearchResponse,
   type SetupStatus,
   type Source,
   type SourceExcerptView,
@@ -433,4 +436,28 @@ export async function deleteSourceExcerpt(
     headers: { 'x-csrf-token': csrfToken },
   });
   if (!res.ok) throw new Error(await errorMessage(res));
+}
+
+// --- Manual search & filters (US-012) -------------------------------------
+
+/**
+ * Token + filter search across entities, claims, notes, and sources, scoped to
+ * one Knowledge Base. Works without any AI provider; `vectorSearch.available`
+ * reports whether semantic search is possible.
+ */
+export async function search(
+  knowledgeBaseId: string,
+  query: SearchQuery = {},
+): Promise<SearchResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+  const qs = params.toString();
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/search${qs ? `?${qs}` : ''}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return searchResponseSchema.parse(await res.json());
 }

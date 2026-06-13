@@ -333,6 +333,40 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   change — claims created in `<Claims>` won't appear in the citation dropdown
   until reload (same cross-component-sync gotcha).
 
+## Manual search & filters (US-012)
+
+- Search lives in `apps/api/src/search/`: `store.ts` (`SearchStore` interface +
+  `dbSearchStore`) and `index.ts` (`createSearchRouter`). Mounted at
+  **`/api/knowledge-bases/:kbId/search`** (`Router({ mergeParams: true })`,
+  AFTER the KB router). `createApp` seam is `searchStore`. Single endpoint
+  `GET /` requires **viewer** (search is a read; respects KB permissions, AC3);
+  non-members get 404 to hide existence. NO AI provider needed — pure
+  relational token search.
+- **Token search** unions four per-kind queries (entities, claims, notes,
+  sources), each filtering `deleted_at IS NULL` + `knowledge_base_id`. Tokens
+  are whitespace-split and **AND-matched**; each token must ILIKE at least one
+  searchable column. JSONB columns (`aliases`/`tags`/`properties`/`provenance`/
+  `metadata`) are searched by casting `::text` (so array/object contents match).
+  Results are merged, sorted by `createdAt` desc, capped at `limit` (default 50).
+- **Filters narrow which kinds can match** (`resolveKinds`): `type`/`tag` →
+  entities only; `predicate`/`confidenceMin`/`confidenceMax`/`hasProvenance` →
+  claims only; an impossible combo yields no results. `dateFrom`/`dateTo` filter
+  `createdAt` on every kind. `tag` uses JSONB containment
+  (`tags @> '["x"]'::jsonb`, exact match). `hasProvenance` = `provenance <> '{}'`.
+- **Vector search availability (AC4):** `getVectorSearchAvailability()` checks
+  `information_schema.tables` for an `embeddings` table. It does not exist yet,
+  so the endpoint returns `vectorSearch.available:false` with a reason and token
+  search still works. When a later story adds embeddings, this flips to true.
+- Shared shapes in `@jotmind/schemas` `search.ts`: `searchQuerySchema` (coerces
+  numeric/boolean query-string params; `hasProvenance` accepts `'true'`/`'false'`
+  and transforms to boolean; refines `confidenceMin <= confidenceMax`),
+  `searchResultSchema`/`searchResponseSchema`. The router parses `kinds` as a CSV
+  via `parseKinds` (drops unknown kinds).
+- Web: `apps/web/src/api.ts` (`search()`) + the `<Search>` component in
+  `App.tsx` (rendered first when a KB is selected). It builds a `URLSearchParams`
+  from the filter form and renders the unified result list plus the
+  vector-unavailable notice.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).
