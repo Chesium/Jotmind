@@ -16,8 +16,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "pnpm workspace monorepo: apps/web (React+Vite 5), apps/api (Express), packages/schemas (shared Zod). All scripts present; pnpm verify green (format:check, typecheck, lint, test, test:api, test:e2e). Pinned to Node 18-compatible tooling."
     },
     {
       "id": "US-002",

@@ -1,3 +1,27 @@
 # Ralph Progress Log
 Started: Sat 13 Jun 2026 08:14:49 PM +08
 ---
+
+## Codebase Patterns
+- Environment has ONLY Node 18. Pin tooling to Node-18-compatible versions: Vite 5, Vitest 2, ESLint 9, TypeScript 5.x, pnpm 9. Latest pnpm needs Node 22+.
+- pnpm is installed globally at ~/.npm-global/bin (npm prefix set to ~/.npm-global). Prepend `~/.npm-global/bin` to PATH in every shell: `export PATH="$HOME/.npm-global/bin:$PATH"`.
+- Monorepo = pnpm workspace (`apps/*`, `packages/*`). Shared package `@jotmind/schemas` exports TS source (`./src/index.ts`), NOT built dist, so tsc (moduleResolution: Bundler) + Vite resolve directly with no build step.
+- Do NOT add TS project `references` from apps to packages/schemas — composite refs make tsc resolve unbuilt dist/*.d.ts and fail with TS6305. Rely on package `exports` -> source.
+- tsconfig.base.json is strict with `verbatimModuleSyntax` -> import types with `import { type X }`. Relative imports use `.js` extensions even in .ts/.tsx (ESM).
+- Validation: `pnpm verify:quick` (format:check+typecheck+lint+test) for fast loop, `pnpm verify` for full (adds test:api, test:e2e). `pnpm test` excludes @jotmind/api (run via `pnpm test:api`).
+- Playwright browsers must be installed once: `pnpm --filter @jotmind/web exec playwright install chromium`.
+- Prettier ignores Ralph scaffolding (prd.json, progress.txt, prompt.md, .agents, etc.) via .prettierignore. Add new non-source top-level files there if they break format:check.
+
+## Sat 13 Jun 2026 20:25 +08 - US-001
+Thread: https://ampcode.com/threads/T-019ec0ea-b9f7-74a4-8859-43f08d85d8f4
+- Created the typed pnpm monorepo foundation.
+- apps/api: Express app with `/api/health` returning a schema-validated HealthStatus; src/app.ts (testable factory) + src/server.ts (binds 127.0.0.1:3001 by default).
+- apps/web: React 18 + Vite 5 app rendering API health; proxies /api to :3001. Vitest (jsdom + testing-library) unit test + Playwright e2e smoke test.
+- packages/schemas: shared Zod healthStatusSchema + parseOrThrow util, imported by both apps.
+- Root tooling: package.json scripts (format, format:check, typecheck, lint, test, test:api, test:e2e, verify:quick, verify), eslint.config.js (flat), .prettierrc.json, .prettierignore, tsconfig.base.json, pnpm-workspace.yaml, .gitignore, README.md, AGENTS.md.
+- Verified: `pnpm verify` fully green; API boots & curl /api/health returns valid JSON; web `vite build` succeeds; Playwright smoke test passes.
+- **Learnings for future iterations:**
+  - See Codebase Patterns above (Node 18 pinning, PATH for pnpm, schemas-resolve-from-source, no TS project references, .js import extensions).
+  - The web e2e smoke test runs web-only; /api proxy errors in logs are expected/benign because the API isn't started during `pnpm test:e2e`. Future stories that need real API in e2e should start it (or run via root).
+  - US-002 next: PostgreSQL + Apache AGE + pgvector via Docker Compose, Drizzle migrations, and a real DB-backed health check (extend /api/health).
+---

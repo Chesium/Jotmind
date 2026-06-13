@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+coverage
+pnpm-lock.yaml
+.venv
+flowchart
+ideas
+prompts
+tasks
+.agents
+playwright-report
+test-results
+prd.json
+progress.txt
+prompt.md
+ralph.sh
