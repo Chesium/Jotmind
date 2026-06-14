@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   BUILTIN_ENTITY_TYPES,
   kbRoleSatisfies,
@@ -61,6 +61,7 @@ import {
   useInvalidationEffect,
   RESULT_STALE_DOMAINS,
   RESULT_STALE_MESSAGE,
+  AI_POLICY_STALE_MESSAGE,
 } from './invalidation.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
@@ -222,6 +223,10 @@ function LoginForm({ onDone }: { onDone: (state: AuthState) => void }) {
 
 function AuthedHome({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) {
   const [error, setError] = useState<string | null>(null);
+  // Bumped whenever the (app-level) server/user AI policy changes so the
+  // per-selected-KB invalidation bus can be told to invalidate `aiPolicy`
+  // across the provider boundary (US-045 AC1/AC2). See <AiPolicyInvalidator>.
+  const [aiPolicyVersion, setAiPolicyVersion] = useState(0);
 
   async function doLogout() {
     setError(null);
@@ -260,9 +265,13 @@ function AuthedHome({ auth, onLogout }: { auth: AuthState; onLogout: () => void 
         </nav>
       </aside>
       <div className="app-content">
-        <KnowledgeBases csrfToken={auth.csrfToken} />
+        <KnowledgeBases csrfToken={auth.csrfToken} aiPolicyVersion={aiPolicyVersion} />
         <section id="ai-policy" className="workspace-panel">
-          <AiPolicySettings isAdmin={auth.user.role === 'admin'} csrfToken={auth.csrfToken} />
+          <AiPolicySettings
+            isAdmin={auth.user.role === 'admin'}
+            csrfToken={auth.csrfToken}
+            onServerOrUserPolicyChanged={() => setAiPolicyVersion((v) => v + 1)}
+          />
         </section>
         {auth.user.role === 'admin' && (
           <section id="account-admin" className="workspace-panel">
@@ -274,7 +283,30 @@ function AuthedHome({ auth, onLogout }: { auth: AuthState; onLogout: () => void 
   );
 }
 
-function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
+/**
+ * In-bus bridge that publishes the `aiPolicy` invalidation domain whenever the
+ * app-level server/user policy changes (US-045 AC1/AC2). It must render inside
+ * <InvalidationProvider> (so useInvalidate() targets the selected-KB bus) and
+ * skips the initial mount so it never invalidates on first render.
+ */
+function AiPolicyInvalidator({ version }: { version: number }) {
+  const invalidate = useInvalidate();
+  const seen = useRef(version);
+  useEffect(() => {
+    if (seen.current === version) return;
+    seen.current = version;
+    invalidate(['aiPolicy']);
+  }, [version, invalidate]);
+  return null;
+}
+
+function KnowledgeBases({
+  csrfToken,
+  aiPolicyVersion,
+}: {
+  csrfToken: string;
+  aiPolicyVersion: number;
+}) {
   const [items, setItems] = useState<KnowledgeBase[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -409,6 +441,14 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
                 listeners reset on KB switch (US-035).
               */}
               <InvalidationProvider key={selectedKb.id}>
+                {/*
+                  US-045 AC1/AC2: server/user AI policy is edited in
+                  <AiPolicySettings>, which lives OUTSIDE this per-KB bus. This
+                  in-bus bridge publishes `aiPolicy` whenever the parent bumps
+                  aiPolicyVersion, so the selected-KB effective policy and the
+                  AI-availability surfaces refresh without a page reload.
+                */}
+                <AiPolicyInvalidator version={aiPolicyVersion} />
                 <div className="workflow-grid">
                   <div className="workflow-column primary-flow">
                     <CommandBox kb={selectedKb} />
@@ -476,6 +516,7 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState(false);
+  const [policyStale, setPolicyStale] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -485,6 +526,7 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
     try {
       setResponse(await runCommand(kb.id, q.trim()));
       setStale(false);
+      setPolicyStale(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Command failed');
       setResponse(null);
@@ -497,6 +539,10 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
   // We mark-stale (rather than auto-rerun) so we never loop on the network and
   // never disturb the user's query draft (AC2/AC3); re-running clears it (AC4).
   useInvalidationEffect(RESULT_STALE_DOMAINS, () => setStale(true));
+
+  // Mark the AI-availability indicator stale when any AI policy layer changes
+  // (US-045 AC4) — rerun (which the user initiates) reflects the new policy.
+  useInvalidationEffect(['aiPolicy'], () => setPolicyStale(true));
 
   const interp = response?.interpretation ?? null;
 
@@ -520,6 +566,9 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
       </form>
       {error && <p data-testid="command-error">{error}</p>}
       {response && stale && <p data-testid="command-stale">{RESULT_STALE_MESSAGE}</p>}
+      {response && policyStale && (
+        <p data-testid="command-ai-policy-stale">{AI_POLICY_STALE_MESSAGE}</p>
+      )}
       {response && (
         <div data-testid="command-results">
           <p data-testid="command-ai-status">

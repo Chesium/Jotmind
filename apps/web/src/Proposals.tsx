@@ -14,7 +14,7 @@ import {
   quickCapture,
   rejectProposal,
 } from './api.js';
-import { useInvalidate, useInvalidationEffect } from './invalidation.js';
+import { useInvalidate, useInvalidationEffect, AI_POLICY_STALE_MESSAGE } from './invalidation.js';
 
 /**
  * Quick-capture + AI proposal review queue (US-017/US-018). Captured text is
@@ -32,6 +32,7 @@ export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: str
   const [lastResult, setLastResult] = useState<CaptureResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [policyStale, setPolicyStale] = useState(false);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -45,12 +46,17 @@ export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: str
   useEffect(() => {
     setForm({ kind: 'note', title: '', content: '' });
     setLastResult(null);
+    setPolicyStale(false);
     void refresh();
   }, [refresh]);
 
   // Refresh the pending queue when proposals change elsewhere — e.g. an import
   // job completes and produces a pending proposal in another panel (US-040 AC3).
   useInvalidationEffect(['proposals'], () => void refresh());
+
+  // Mark the last capture's AI-availability outcome stale when any AI policy
+  // layer changes (US-045 AC4) — the next capture reflects the new policy.
+  useInvalidationEffect(['aiPolicy'], () => setPolicyStale(true));
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -71,6 +77,7 @@ export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: str
         csrfToken,
       );
       setLastResult(result);
+      setPolicyStale(false);
       setForm({ kind: form.kind, title: '', content: '' });
       await refresh();
     } catch (err) {
@@ -135,6 +142,9 @@ export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: str
       )}
 
       {lastResult && <CaptureOutcome result={lastResult} />}
+      {lastResult && policyStale && (
+        <p data-testid="capture-ai-policy-stale">{AI_POLICY_STALE_MESSAGE}</p>
+      )}
 
       <h4>Pending proposals</h4>
       {proposals.length === 0 ? (

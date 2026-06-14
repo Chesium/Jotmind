@@ -1585,4 +1585,182 @@ describe('App', () => {
       expect(screen.getByTestId(`kb-select-${importedKbId}`)).toBeInTheDocument();
     });
   });
+
+  // US-045: AI policy changes must refresh every visible effective-policy and
+  // AI-availability surface without a page reload.
+  function stubAiPolicyApp(kbId: string) {
+    const now = new Date().toISOString();
+    const off = { mode: 'off', remoteEmbeddings: false };
+    const localOnly = { mode: 'local_only', remoteEmbeddings: false };
+    const resolved = (mode: string) => ({
+      mode,
+      remoteAllowed: false,
+      remoteEmbeddingsAllowed: false,
+      requiresPerRequestConfirmation: false,
+    });
+    // Flips once a policy layer is saved so the next effective GET reflects it.
+    const state = { serverSaved: false, kbSaved: false };
+
+    const commandResponse = {
+      query: 'ada',
+      ai: {
+        attempted: false,
+        available: false,
+        reason: 'AI is disabled by policy',
+        repaired: false,
+        lowConfidence: false,
+        provider: null,
+        model: null,
+        demo: false,
+        label: null,
+      },
+      interpretation: null,
+      interpretedResults: null,
+      fallback: { results: [], vectorSearch: { available: false, reason: null } },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = init?.method ?? 'GET';
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'admin@example.com',
+              role: 'admin',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        // Server/user effective (non-KB) policy overview.
+        if (url.endsWith('/api/ai/policy')) {
+          return respond(200, {
+            server: state.serverSaved ? localOnly : off,
+            user: off,
+            effective: resolved(state.serverSaved ? 'local_only' : 'off'),
+          });
+        }
+        if (url.includes('/api/ai/policy/server') && method === 'PUT') {
+          state.serverSaved = true;
+          return respond(200, localOnly);
+        }
+        if (url.includes('/api/ai/policy/me') && method === 'PUT') {
+          return respond(200, off);
+        }
+        // KB-scoped AI policy (GET + PUT).
+        if (url.includes(`/api/knowledge-bases/${kbId}/ai/policy`)) {
+          if (method === 'PUT') {
+            state.kbSaved = true;
+            return respond(200, {
+              policy: localOnly,
+              server: off,
+              user: off,
+              effective: resolved('local_only'),
+            });
+          }
+          const mode = state.kbSaved || state.serverSaved ? 'local_only' : 'off';
+          return respond(200, {
+            policy: state.kbSaved ? localOnly : off,
+            server: state.serverSaved ? localOnly : off,
+            user: off,
+            effective: resolved(mode),
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/command`)) {
+          return respond(200, commandResponse);
+        }
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Policy KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'admin',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+  }
+
+  it('marks AI-availability surfaces stale after a KB AI policy change (US-045 AC3/AC4)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000170';
+    stubAiPolicyApp(kbId);
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    // Run a command to surface the AI-availability indicator.
+    await waitFor(() => expect(screen.getByTestId('command-submit')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('command-query'), { target: { value: 'ada' } });
+    fireEvent.click(screen.getByTestId('command-submit'));
+    await waitFor(() => expect(screen.getByTestId('command-ai-status')).toBeInTheDocument());
+    expect(screen.queryByTestId('command-ai-policy-stale')).not.toBeInTheDocument();
+
+    // The KB effective policy shows the initial mode.
+    await waitFor(() => expect(screen.getByTestId('kb-ai-policy-effective')).toBeInTheDocument());
+    expect(screen.getByTestId('kb-ai-policy-effective')).toHaveTextContent('No AI');
+
+    // Change + save the KB AI policy layer (AC3).
+    fireEvent.change(screen.getByTestId('kb-ai-policy-mode'), { target: { value: 'local_only' } });
+    fireEvent.click(screen.getByTestId('kb-ai-policy-save'));
+
+    // The AI-availability surface goes stale without reload (AC4)...
+    await waitFor(() => expect(screen.getByTestId('command-ai-policy-stale')).toBeInTheDocument());
+    // ...and the selected-KB effective policy refreshes to the new mode.
+    await waitFor(() =>
+      expect(screen.getByTestId('kb-ai-policy-effective')).toHaveTextContent('Local only'),
+    );
+
+    // Re-running the command clears the stale banner.
+    fireEvent.click(screen.getByTestId('command-submit'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('command-ai-policy-stale')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('refreshes selected-KB surfaces after a server AI policy change across the provider boundary (US-045 AC1/AC4)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000171';
+    stubAiPolicyApp(kbId);
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    await waitFor(() => expect(screen.getByTestId('command-submit')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('command-query'), { target: { value: 'ada' } });
+    fireEvent.click(screen.getByTestId('command-submit'));
+    await waitFor(() => expect(screen.getByTestId('command-ai-status')).toBeInTheDocument());
+    expect(screen.queryByTestId('command-ai-policy-stale')).not.toBeInTheDocument();
+
+    // Save the (app-level) server AI policy, which lives OUTSIDE the per-KB bus.
+    fireEvent.change(screen.getByTestId('ai-policy-server-mode'), {
+      target: { value: 'local_only' },
+    });
+    fireEvent.click(screen.getByTestId('ai-policy-server-save'));
+
+    // The cross-boundary escape hatch invalidates the selected-KB aiPolicy
+    // domain, so the AI-availability surface goes stale (AC1/AC4)...
+    await waitFor(() => expect(screen.getByTestId('command-ai-policy-stale')).toBeInTheDocument());
+    // ...and the selected-KB effective policy refreshes to fold in the new
+    // server layer without a page reload.
+    await waitFor(() =>
+      expect(screen.getByTestId('kb-ai-policy-effective')).toHaveTextContent('Local only'),
+    );
+  });
 });

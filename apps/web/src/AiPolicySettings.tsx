@@ -7,6 +7,7 @@ import {
   type KnowledgeBase,
   type ResolvedAiPolicy,
 } from '@jotmind/schemas';
+import { useInvalidate, useInvalidationEffect } from './invalidation.js';
 import {
   getAiPolicyOverview,
   getKbAiPolicy,
@@ -134,7 +135,22 @@ function PolicyEditor({
  * system admins, read-only otherwise. Shows the effective (strictest) non-KB
  * policy so users understand what is actually permitted.
  */
-export function AiPolicySettings({ isAdmin, csrfToken }: { isAdmin: boolean; csrfToken: string }) {
+export function AiPolicySettings({
+  isAdmin,
+  csrfToken,
+  onServerOrUserPolicyChanged,
+}: {
+  isAdmin: boolean;
+  csrfToken: string;
+  /**
+   * Cross-boundary escape hatch (US-045 AC1/AC2): this panel renders OUTSIDE the
+   * per-selected-KB <InvalidationProvider>, so it cannot publish onto that bus
+   * directly. After a server/user policy save we call this so the parent can
+   * invalidate the selected-KB `aiPolicy` domain — refreshing the selected-KB
+   * effective policy and AI-availability surfaces without a page reload.
+   */
+  onServerOrUserPolicyChanged?: () => void;
+}) {
   const [overview, setOverview] = useState<AiPolicyOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -172,6 +188,7 @@ export function AiPolicySettings({ isAdmin, csrfToken }: { isAdmin: boolean; csr
             onSave={async (changes) => {
               await updateServerAiPolicy(changes, csrfToken);
               reload();
+              onServerOrUserPolicyChanged?.();
             }}
           />
 
@@ -183,6 +200,7 @@ export function AiPolicySettings({ isAdmin, csrfToken }: { isAdmin: boolean; csr
             onSave={async (changes) => {
               await updateMyAiPolicy(changes, csrfToken);
               reload();
+              onServerOrUserPolicyChanged?.();
             }}
           />
         </>
@@ -200,6 +218,7 @@ export function KbAiPolicy({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
   const [view, setView] = useState<KbAiPolicyView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const invalidate = useInvalidate();
 
   const canAdmin = kbRoleSatisfies(kb.role, 'admin');
 
@@ -215,6 +234,12 @@ export function KbAiPolicy({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
   }
 
   useEffect(reload, [kb.id]);
+
+  // Refresh the selected-KB effective policy when ANY policy layer changes —
+  // a sibling KB save (below) or a server/user save folded in via the parent's
+  // cross-boundary escape hatch (US-045 AC1/AC2/AC3). The effective policy
+  // strictest-wins-folds server + user + KB, so all three must refresh it here.
+  useInvalidationEffect(['aiPolicy'], reload);
 
   return (
     <section aria-label="kb-ai-policy" data-testid="kb-ai-policy">
@@ -234,7 +259,11 @@ export function KbAiPolicy({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
             disabled={!canAdmin}
             onSave={async (changes) => {
               await updateKbAiPolicy(kb.id, changes, csrfToken);
-              reload();
+              // Publish onto the selected-KB bus so this panel's own effective
+              // policy (via the subscription above) AND the sibling AI-availability
+              // surfaces (CommandBox/Answers/quick capture) reflect the change
+              // without a page reload (US-045 AC3/AC4).
+              invalidate(['aiPolicy']);
             }}
           />
         </>

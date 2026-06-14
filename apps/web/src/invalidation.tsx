@@ -92,6 +92,15 @@ export const RESULT_STALE_DOMAINS: InvalidationDomain[] = [
 /** User-facing message shown when result panels go stale (US-043 AC4). */
 export const RESULT_STALE_MESSAGE = 'Graph data changed. Rerun this search for current results.';
 
+/**
+ * User-facing message shown on AI-availability surfaces (CommandBox, Answers,
+ * quick capture) when an AI policy layer changes (server/user/KB) so a
+ * previously shown AI-availability indicator can no longer be trusted (US-045).
+ * We mark-stale rather than auto-rerun so we never make an unexpected AI call
+ * (which would defeat per-request consent) and never disturb the user's draft.
+ */
+export const AI_POLICY_STALE_MESSAGE = 'AI policy changed. Rerun for current AI availability.';
+
 type Listener = () => void;
 
 export interface InvalidationBus {

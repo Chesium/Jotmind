@@ -10,6 +10,7 @@ import {
   useInvalidationEffect,
   RESULT_STALE_DOMAINS,
   RESULT_STALE_MESSAGE,
+  AI_POLICY_STALE_MESSAGE,
 } from './invalidation.js';
 
 /**
@@ -36,9 +37,14 @@ export function Answers({ kb }: { kb: KnowledgeBase }) {
   const [busy, setBusy] = useState(false);
   const [openCitation, setOpenCitation] = useState<number | null>(null);
   const [stale, setStale] = useState(false);
+  const [policyStale, setPolicyStale] = useState(false);
 
   // Mark an existing answer stale when underlying graph data changes (US-043).
   useInvalidationEffect(RESULT_STALE_DOMAINS, () => setStale(true));
+
+  // Mark the AI-availability indicator stale when any AI policy layer changes
+  // (US-045 AC4); the user-initiated rerun reflects the new effective policy.
+  useInvalidationEffect(['aiPolicy'], () => setPolicyStale(true));
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -49,6 +55,7 @@ export function Answers({ kb }: { kb: KnowledgeBase }) {
     try {
       setResponse(await answerQuestion(kb.id, q.trim()));
       setStale(false);
+      setPolicyStale(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Answer failed');
       setResponse(null);
@@ -79,6 +86,9 @@ export function Answers({ kb }: { kb: KnowledgeBase }) {
       </form>
       {error && <p data-testid="answers-error">{error}</p>}
       {response && stale && <p data-testid="answers-stale">{RESULT_STALE_MESSAGE}</p>}
+      {response && policyStale && (
+        <p data-testid="answers-ai-policy-stale">{AI_POLICY_STALE_MESSAGE}</p>
+      )}
 
       {response && (
         <div data-testid="answers-results">
