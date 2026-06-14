@@ -552,4 +552,98 @@ describe('App', () => {
     });
     expect(screen.queryByTestId('entity-submit')).not.toBeInTheDocument();
   });
+
+  it('shows a newly created entity in the claim argument dropdown without reload (US-036)', async () => {
+    const kbId = '00000000-0000-0000-0000-0000000000dd';
+    const now = new Date().toISOString();
+    const created = {
+      id: '00000000-0000-0000-0000-0000000000e3',
+      knowledgeBaseId: kbId,
+      type: 'Person',
+      name: 'Ada Lovelace',
+      aliases: [],
+      description: null,
+      tags: [],
+      properties: {},
+      schemaVersionId: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+    let entityCreated = false;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = init?.method ?? 'GET';
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) {
+          if (method === 'POST') {
+            entityCreated = true;
+            return respond(201, created);
+          }
+          return respond(200, entityCreated ? [created] : []);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) return respond(200, []);
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Sync KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    // The Claims panel renders with an entity argument dropdown that initially
+    // has no entity options to choose from.
+    await waitFor(() => {
+      expect(screen.getByTestId('claim-arg-entity-0')).toBeInTheDocument();
+    });
+    expect(
+      within(screen.getByTestId('claim-arg-entity-0')).queryByText(/Ada Lovelace/),
+    ).not.toBeInTheDocument();
+
+    // Create an entity in the Entities panel.
+    fireEvent.change(screen.getByTestId('entity-name'), { target: { value: 'Ada Lovelace' } });
+    fireEvent.click(screen.getByTestId('entity-submit'));
+
+    // Without a page reload or KB reselect, the claim argument dropdown shows it.
+    await waitFor(() => {
+      expect(
+        within(screen.getByTestId('claim-arg-entity-0')).getByText(/Ada Lovelace/),
+      ).toBeInTheDocument();
+    });
+  });
 });

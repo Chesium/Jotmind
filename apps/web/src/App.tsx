@@ -55,7 +55,7 @@ import { Imports } from './Imports.js';
 import { Modules } from './Modules.js';
 import { Rules } from './Rules.js';
 import { SchemaDefinitions } from './SchemaDefinitions.js';
-import { InvalidationProvider } from './invalidation.js';
+import { InvalidationProvider, useInvalidate, useInvalidationEffect } from './invalidation.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -795,6 +795,7 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   const [mergeTargets, setMergeTargets] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const invalidate = useInvalidate();
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -851,8 +852,12 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
           { ...payload, description: payload.description ?? null },
           csrfToken,
         );
+        // Editing an entity changes how it appears in claim argument controls.
+        invalidate(['entities', 'claims']);
       } else {
         await createEntity(kb.id, payload, csrfToken);
+        // New entities must become selectable in claim argument dropdowns (AC1/AC3).
+        invalidate(['entities']);
       }
       setForm(EMPTY_ENTITY_FORM);
       setEditingId(null);
@@ -887,6 +892,8 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
           : 'No claims reference it.';
       if (!window.confirm(`Delete "${entity.name}"? ${detail}`)) return;
       await deleteEntity(kb.id, entity.id, csrfToken);
+      // Deleting an entity affects claim arguments that referenced it (AC2).
+      invalidate(['entities', 'claims']);
       if (editingId === entity.id) cancelEdit();
       await refresh();
     } catch (err) {
@@ -917,6 +924,8 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
         return;
       }
       await mergeEntity(kb.id, source.id, targetId, csrfToken);
+      // Merges retarget claim arguments server-side, so claims must refresh too (AC2).
+      invalidate(['entities', 'claims']);
       if (editingId === source.id) cancelEdit();
       setMergeTargets((m) => {
         const next = { ...m };
@@ -1153,6 +1162,13 @@ function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     setEditingId(null);
     void refresh();
   }, [refresh]);
+
+  // Refresh claims + the entity argument dropdown when an entity (or claim) is
+  // mutated in a sibling panel, so newly created entities are immediately
+  // selectable without a page reload or KB reselect (US-036).
+  useInvalidationEffect(['entities', 'claims'], () => {
+    void refresh();
+  });
 
   function setArgument(index: number, patch: Partial<ClaimArgumentForm>) {
     setForm((f) => ({

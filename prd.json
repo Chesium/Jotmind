@@ -651,8 +651,8 @@
         "Typecheck passes"
       ],
       "priority": 36,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Wired the US-035 invalidation bus into the Entities (publisher) + Claims (subscriber) panels in apps/web/src/App.tsx. Entities now calls useInvalidate(): createEntity -> invalidate(['entities']) (AC1/AC3); updateEntity/deleteEntity/mergeEntity -> invalidate(['entities','claims']) because edits change how an entity reads in claim arg controls and deletes/merges retarget claim arguments server-side (AC2). Claims subscribes via useInvalidationEffect(['entities','claims'], () => void refresh()); its existing refresh() already reloads BOTH listClaims + listEntities, so a single subscription refreshes the claim list AND the entity argument <select> options without a page reload or KB reselect (AC3). No API/schema/migration changes — pure web wiring of the existing bus. Both panels live inside <InvalidationProvider key={selectedKb.id}> (US-035) so the bus is shared per selected KB. AC4 regression: new App.test.tsx test 'shows a newly created entity in the claim argument dropdown without reload (US-036)' — selects a KB, asserts claim-arg-entity-0 has no 'Ada Lovelace' option, POSTs an entity via the Entities form (state-based fetch mock flips entities GET from [] to [created]), then waits for the option to appear in the dropdown via within(getByTestId('claim-arg-entity-0')). Verified: pnpm verify FULLY GREEN (format/typecheck/lint/test web19/test:api 429pass+76skip/test:e2e smoke). Browser-verified via Playwright+Chromium against the live compose DB + running tsx-watch API on :3001 (truncate users -> first-run setup -> create+select KB -> claim-arg-entity-0 has 0 'Frodo Baggins' options -> create Frodo Baggins entity -> dropdown option count becomes 1, no reload) + screenshot. dev-browser skill unavailable -> Playwright per prior convention; temp spec/screenshot removed."
     },
     {
       "id": "US-037",
