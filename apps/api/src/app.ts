@@ -28,6 +28,12 @@ import {
   createAiPolicyRouter,
   type AiPolicyStore,
 } from './ai-policy/index.js';
+import {
+  createCaptureRouter,
+  createProposalRouter,
+  type ProposalStore,
+} from './proposals/index.js';
+import { resolveExtractorFromEnv, type GraphExtractor } from './extraction/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -102,6 +108,16 @@ export interface AppOptions {
    * Defaults to the PostgreSQL-backed store.
    */
   aiPolicyStore?: AiPolicyStore;
+  /**
+   * AI proposal store (US-017). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store.
+   */
+  proposalStore?: ProposalStore;
+  /**
+   * Graph extractor for quick-capture (US-017). Injectable for unit tests.
+   * Defaults to the env-configured extractor, or `null` for a No-AI install.
+   */
+  extractor?: GraphExtractor | null;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -159,6 +175,23 @@ export function createApp(options: AppOptions = {}): Express {
       store: options.aiPolicyStore,
       kbStore: options.kbStore,
       authStore,
+    }),
+  );
+  const extractor = options.extractor !== undefined ? options.extractor : resolveExtractorFromEnv();
+  app.use(
+    '/api/knowledge-bases/:kbId/proposals',
+    createProposalRouter({ store: options.proposalStore, kbStore: options.kbStore, authStore }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/capture',
+    createCaptureRouter({
+      proposalStore: options.proposalStore,
+      noteStore: options.noteStore,
+      sourceStore: options.sourceStore,
+      aiPolicyStore: options.aiPolicyStore,
+      kbStore: options.kbStore,
+      authStore,
+      extractor,
     }),
   );
   app.use('/api/ai', createAiPolicyRouter({ store: options.aiPolicyStore, authStore }));

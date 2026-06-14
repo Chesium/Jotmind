@@ -4,5 +4,6 @@ export * from './graph.js';
 export * from './health.js';
 export * from './jobs.js';
 export * from './knowledge-base.js';
+export * from './proposals.js';
 export * from './search.js';
 export * from './utils.js';

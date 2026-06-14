@@ -8,10 +8,12 @@ import {
   entityImpactSchema,
   entityListSchema,
   entitySchema,
+  captureResponseSchema,
   knowledgeBaseListSchema,
   knowledgeBaseSchema,
   noteListSchema,
   noteSchema,
+  proposalListSchema,
   publicJobSchema,
   publicUserSchema,
   setupStatusSchema,
@@ -22,6 +24,9 @@ import {
   sourceSchema,
   type AccountRole,
   type AiPolicy,
+  type CaptureRequest,
+  type CaptureResponse,
+  type Proposal,
   type ResolvedAiPolicy,
   type UpdateAiPolicy,
   type AuditEvent,
@@ -583,4 +588,35 @@ export async function updateKbAiPolicy(
     user: aiPolicySchema.parse(body.user),
     effective: resolvedAiPolicySchema.parse(body.effective),
   };
+}
+
+/**
+ * Quick-capture text into a Note/Source and (if AI is available) the AI proposal
+ * review queue (US-017). The original text is always stored first; extraction
+ * runs only when AI is configured and permitted by policy, otherwise the
+ * response reports an `unavailable` extraction state.
+ */
+export async function quickCapture(
+  knowledgeBaseId: string,
+  input: CaptureRequest,
+  csrfToken: string,
+): Promise<CaptureResponse> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/capture`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return captureResponseSchema.parse(await res.json());
+}
+
+/** List AI/import proposals awaiting review in a Knowledge Base (viewer+). */
+export async function listProposals(knowledgeBaseId: string, status?: string): Promise<Proposal[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/proposals${query}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return proposalListSchema.parse(await res.json());
 }

@@ -492,6 +492,52 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `getAiPolicyOverview`/`updateServerAiPolicy`/`updateMyAiPolicy`/`getKbAiPolicy`/
   `updateKbAiPolicy`.
 
+## Quick-capture & AI proposal queue (US-017)
+
+- **Proposals never mutate canonical records** — they sit in a review queue
+  (`proposals` table, from US-005) until accepted (US-018). Creating one records
+  an `audit_events` (`proposal.created`) row but **no** `graph_outbox` event
+  (proposals are NOT a graph projection target). `apps/api/src/proposals/`:
+  `store.ts` (`ProposalStore` + `dbProposalStore`, reads filter
+  `deleted_at IS NULL`), `index.ts` (two routers + `toProposal` mapper).
+- Two routers, both `mergeParams:true`, mounted AFTER the KB router:
+  `createProposalRouter` at `/api/knowledge-bases/:kbId/proposals` (`GET /`,
+  viewer+, `?status`/`?sourceNoteId`/`?sourceSourceId` filters) and
+  `createCaptureRouter` at `/api/knowledge-bases/:kbId/capture` (`POST /`,
+  editor+CSRF). `createApp` seams: `proposalStore`, `extractor`.
+- **Capture order matters (AC1):** `POST /capture` stores the text as a Note or
+  Source FIRST (so original material is never lost), THEN resolves AI
+  availability and runs extraction. The response (`captureResponseSchema`)
+  always includes the stored `note`/`source` plus an `extraction` result with
+  `status` ∈ `created|empty|unavailable|error` so a No-AI or failed extraction
+  never blocks capture (AC4).
+- **Extraction sits behind the `GraphExtractor` interface** (`extraction/index.ts`,
+  mirrors the US-015 AI adapter layer — never call a vendor SDK directly).
+  `MockGraphExtractor` is deterministic demo output (`demo:true`,
+  `verified:true`); `LlmGraphExtractor` wraps an `LlmProvider`, prompts for
+  strict JSON validated by `proposalChangesSchema` (invalid output → `[]`, no
+  repair retry until US-019). Remote providers (`openai`/`anthropic`, via
+  `isRemoteProviderKind`) are configured-but-untested skeletons (`verified:false`,
+  AC3). `resolveExtractorFromEnv` builds the extractor from `AI_PROVIDER_CONFIG`
+  (JSON), returning `null` when unset (No-AI). The mock is only enabled when
+  `AI_DEMO_EXTRACTION=true` or `NODE_ENV!=='production'` (dev/demo flag, AC6).
+- **Availability = configured extractor AND policy permits it.**
+  `computeExtractionAvailability(extractor, resolved)` reads the resolved AI
+  policy (`resolveAiPolicy` over server+user+KB layers, strictest-wins from
+  US-016): unavailable when no extractor, `mode==='off'`, or a remote extractor
+  without `remoteAllowed`. Demo output carries `MOCK_EXTRACTION_LABEL`
+  (`'Mock AI / deterministic demo output'`) which the UI must show (AC6).
+- Shared shapes in `@jotmind/schemas` `proposals.ts`: `proposalChangesSchema`
+  (`{items:[create_entity|create_claim]}` discriminated union; claim args
+  reference candidate entities by a temporary local `ref` key or an existing
+  entity id), `proposalSchema`/`proposalListSchema`, `captureRequestSchema`,
+  `captureResponseSchema`, `extractionAvailabilitySchema`. Exported from
+  `index.ts`.
+- Web: `apps/web/src/Proposals.tsx` (`<Proposals>`, rendered after `<Capture>`
+  for the selected KB) — quick-capture form + read-only pending-proposal list
+  showing each candidate change and the demo label. API client helpers in
+  `api.ts`: `quickCapture`/`listProposals`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

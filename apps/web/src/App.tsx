@@ -47,6 +47,7 @@ import {
 import { GraphViews } from './GraphViews.js';
 import { KbAdmin } from './KbAdmin.js';
 import { AiPolicySettings, KbAiPolicy } from './AiPolicySettings.js';
+import { Proposals } from './Proposals.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -316,6 +317,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Capture kb={selectedKb} csrfToken={csrfToken} />}
+      {selectedKb && <Proposals kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <KbAdmin kb={selectedKb} />}
     </section>
