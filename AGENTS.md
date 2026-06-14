@@ -998,6 +998,53 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
   `schema-warning-<recordId>`. `api.ts`: `updateSchemaDefinition`,
   `getSchemaValidation`.
 
+## Built-in domain Modules (US-029)
+
+- A **Module** is an installable bundle of default *content* for a Knowledge
+  Base: custom entity-type + claim-predicate schemas (US-027) and references to
+  built-in rule packs (US-022). The catalog is **static shared content** in
+  `@jotmind/schemas` `modules.ts`: `BUILTIN_MODULES` + `findBuiltinModule(id)`.
+  Each module declares `entityTypes` (name/displayName/description/propertySchema),
+  `claimPredicates` (name/displayName/description/spec), and `rulePacks`
+  (`{moduleId, packId}` refs into `BUILTIN_RULE_MODULES`). The
+  `personal-relationship` module ships Person/Event/Place entity types + the
+  relationship predicates (attended/met/introduced/interacted_with/mentioned/
+  knows/lives_in) + the event-participation rule pack.
+- **Install happens IN THE ROUTER, not a dedicated store** (mirrors the
+  proposal-accept pattern, US-018). `apps/api/src/modules/index.ts`
+  `createModuleRouter` reuses the injected `schemaStore.createDefinition` +
+  `ruleStore.installRulePack` so created content goes through the canonical write
+  paths (audit + idempotency). There is NO module store and NO migration.
+  Mounted at `/api/knowledge-bases/:kbId/modules` (`mergeParams`, AFTER the KB
+  router); wired in `createApp` reusing the already-resolved `schemaStore` +
+  `ruleStore`/`kbStore`/`authStore` seams. Routes: `GET /` (viewer) returns the
+  catalog with per-KB installed status (`installedEntityTypes`/
+  `installedClaimPredicates`/`fullyInstalled`); `POST /install` (editor + CSRF,
+  body `{moduleId}`) is **idempotent** — schema defs already present (by name) ⇒
+  `createDefinition` returns `duplicate_name` ⇒ item `skipped`; rule packs reuse
+  the US-022 idempotent installer. Non-members 404, viewers 403 on install.
+- **No new property field types:** `propertySchema` only supports
+  `string`/`number`/`boolean`/`date` (US-005). Person "birthday uncertainty" is
+  modeled as a `birthday` string + a `birthdayPrecision` string; names/aliases/
+  tags(groups)/notes are first-class **entity** fields, NOT custom properties, so
+  the Person `propertySchema` only declares the extra contact/social/strength
+  fields and requires none (a name-only Person stays valid).
+- Web: `apps/web/src/Modules.tsx` (`<Modules>`, rendered after `<Search>` for the
+  selected KB) lists modules with an Install button (editor) + `✓ installed`
+  badge. API helpers `listModules`/`installModule` in `api.ts`. Testids:
+  `modules`, `modules-list`, `modules-module-<id>`, `modules-install-<id>`,
+  `modules-installed-<id>`, `modules-readonly-<id>`. GOTCHA (cross-component
+  sync): installing a Module creates schema defs but the sibling
+  `<SchemaDefinitions>` only fetches once per `kb.id` — reload + reselect the KB
+  to see them (browser tests must do this).
+- **AC5 (Remote RAG confirmation):** remote sharing stays minimal by default
+  (US-016 `DEFAULT_AI_POLICY` off). Enabling the "Allow remote embeddings
+  (Remote RAG context sharing)" consent in `AiPolicySettings.tsx`'s
+  `PolicyEditor` now triggers a prominent `window.confirm` before checking;
+  turning it OFF needs no confirmation. Browser tests must register a
+  `page.once('dialog')` handler and use `.click()` (not `.check()`, which asserts
+  the box ends up checked) when exercising it.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

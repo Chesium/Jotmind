@@ -60,6 +60,24 @@ function PolicyEditor({
 
   const remoteSelected = mode === 'remote_per_request' || mode === 'remote_always';
 
+  // US-029 AC5: Remote RAG context sharing (remote embeddings) requires an
+  // additional prominent confirmation before it can be turned on. Remote
+  // sharing stays minimal by default — turning it OFF needs no confirmation.
+  function onToggleRemoteEmbeddings(checked: boolean) {
+    if (checked) {
+      const confirmed =
+        typeof window === 'undefined' ||
+        window.confirm(
+          'Enable Remote RAG context sharing?\n\n' +
+            'This sends your Knowledge Base content (entities, claims, notes) to a ' +
+            'REMOTE embedding provider for indexing. Only enable this if you trust ' +
+            'that provider with this data. You can disable it again at any time.',
+        );
+      if (!confirmed) return;
+    }
+    setRemoteEmbeddings(checked);
+  }
+
   async function save() {
     setBusy(true);
     try {
@@ -92,9 +110,9 @@ function PolicyEditor({
           checked={remoteSelected && remoteEmbeddings}
           disabled={disabled || busy || !remoteSelected}
           data-testid={`${testidPrefix}-remote-embeddings`}
-          onChange={(e) => setRemoteEmbeddings(e.target.checked)}
+          onChange={(e) => onToggleRemoteEmbeddings(e.target.checked)}
         />{' '}
-        Allow remote embeddings
+        Allow remote embeddings (Remote RAG context sharing)
       </label>{' '}
       {!disabled && (
         <button

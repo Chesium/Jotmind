@@ -20,6 +20,8 @@ import {
   proposalListSchema,
   proposalSchema,
   builtinRuleModuleListSchema,
+  installModuleResultSchema,
+  moduleStatusListSchema,
   acceptInferredResultResultSchema,
   installRulePackResultSchema,
   ruleDefinitionListSchema,
@@ -50,6 +52,8 @@ import {
   type ProposalChanges,
   type BuiltinRuleModule,
   type CreateRuleRequest,
+  type InstallModuleResult,
+  type ModuleStatus,
   type InstallRulePackResult,
   type RuleDefinition,
   type RuleRun,
@@ -757,6 +761,31 @@ export async function editProposal(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return proposalSchema.parse(await res.json());
+}
+
+/** List built-in domain Modules with per-KB installed status (US-029, viewer+). */
+export async function listModules(knowledgeBaseId: string): Promise<ModuleStatus[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/modules`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return moduleStatusListSchema.parse(await res.json());
+}
+
+/** Install a built-in Module's default schemas + rule packs (US-029, editor+). */
+export async function installModule(
+  knowledgeBaseId: string,
+  moduleId: string,
+  csrfToken: string,
+): Promise<InstallModuleResult> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/modules/install`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ moduleId }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return installModuleResultSchema.parse(await res.json());
 }
 
 /** List the catalog of built-in Module rule packs (US-022, viewer+). */

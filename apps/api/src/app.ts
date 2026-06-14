@@ -27,6 +27,7 @@ import { createJobsRouter, type JobStore } from './jobs/index.js';
 import { createSearchRouter, type SearchStore } from './search/index.js';
 import { createRuleRouter, type RuleRunStore, type RuleStore } from './rules/index.js';
 import { createSchemaRouter, dbSchemaStore, type SchemaStore } from './schema-defs/index.js';
+import { createModuleRouter } from './modules/index.js';
 import { createEmbeddingsRouter, type EmbeddingStore } from './embeddings/index.js';
 import {
   createAiPolicyKbRouter,
@@ -268,6 +269,15 @@ export function createApp(options: AppOptions = {}): Express {
       store: options.ruleStore,
       runStore: options.ruleRunStore,
       claimStore: options.claimStore,
+      kbStore: options.kbStore,
+      authStore,
+    }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/modules',
+    createModuleRouter({
+      schemaStore,
+      ruleStore: options.ruleStore,
       kbStore: options.kbStore,
       authStore,
     }),
