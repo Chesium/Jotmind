@@ -526,3 +526,53 @@ Thread: https://ampcode.com/threads/T-019ec529-a1c1-703d-a11e-769ea5d358c2
   - AC5 confirm dialog: browser tests need page.once('dialog') + .click() (not .check()).
   - US-030 next: reading/character-map Module — reading-character-map already has a family-relationship rule pack (US-022); add its default schemas (Character/Person, Event, Place, Concept) + plot/relationship claims to BUILTIN_MODULES (mirror US-029), and the network/timeline views already exist (US-013).
 ---
+
+## Sun 14 Jun 2026 16:30 +08 - US-030
+Thread: https://ampcode.com/threads/T-019ec536-77e1-735a-840d-790a12771c29
+- Implemented the reading / character-map built-in Module (US-030). This was
+  almost entirely CATALOG content + two small GraphViews enhancements — NO new
+  API route, store, schema table, or migration (the install router + Modules UI
+  are generic; just append to BUILTIN_MODULES).
+- packages/schemas/src/modules.ts: added `reading-character-map` to
+  BUILTIN_MODULES. Entity types Character/Event(Plot Event)/Place/Concept (AC1).
+  Character propertySchema = firstAppearance (AC2) + attributes
+  role/species/gender/affiliation/status (none required; names/aliases/tags are
+  first-class). Plot Event = date + numeric `sequence` (AC4) + location/chapter.
+  Claim predicates (AC2): parent_of(parent,child) — roles MATCH the
+  family-relationship rule pack atoms (AC5) — plus appears_in, first_appears_in,
+  knows, married_to, allied_with, enemy_of, located_at. rulePacks references the
+  existing reading-character-map/family-relationship pack from US-022 (AC5).
+- apps/web/src/GraphViews.tsx: NetworkView gained a tag/work filter
+  (`network-tag-filter`) so the relationship graph scopes to one work/tag (AC3);
+  TimelineView gained an order toggle (`timeline-order`: date|sequence) and reads
+  an optional numeric `sequence` JSONB prop off plot Events (shown as #N) for
+  date-or-sequence ordering (AC4).
+- packages/schemas/src/modules.test.ts: +5 unit tests (AC1/AC2/AC4/AC5).
+- Files changed: packages/schemas/src/modules.ts, modules.test.ts,
+  apps/web/src/GraphViews.tsx, AGENTS.md (US-030 section), prd.json, progress.txt.
+- Verified: pnpm verify FULLY GREEN (format/typecheck/lint/test schemas170+web10/
+  test:api 369pass+76skip/test:e2e). Browser-verified via Playwright+Chromium
+  against the live compose DB + running tsx-watch API on :3001: setup -> KB ->
+  Modules shows reading-character-map (Character/Concept) -> Install -> ✓ badge
+  -> reload+reselect -> Custom Schemas shows Character + parent_of; created
+  tagged Characters + 2 Plot Events with {sequence} -> Network tag-filter=holmes
+  shows only the holmes node (AC3) -> Timeline order=sequence shows #1 before #2
+  (AC4). Screenshots confirmed, temp spec/screenshots removed.
+- **Learnings for future iterations:**
+  - Adding a domain Module (US-029/US-030) is catalog-only: append a
+    `BuiltinModule` to BUILTIN_MODULES in @jotmind/schemas modules.ts. The
+    install router (modules/index.ts) and `<Modules>` UI iterate the catalog, so
+    no API/web/migration changes are needed. The existing modules API tests use
+    `arrayContaining`/`toContain`, so adding a 2nd module doesn't break them.
+  - A Module's `parent_of` predicate roles (parent/child) MUST match the
+    referenced rule pack's atom variable names, or inference won't join.
+  - All built-in entity types (Person/Event/Concept/Place/Character) are in
+    BUILTIN_ENTITY_TYPES (graph.ts) and the entity-create `<select>` reads that
+    list — custom-type entity creation works without further wiring.
+  - GraphViews testids: `network-tag-filter`/`network-filter-empty`,
+    `timeline-order`/`timeline-container`. When asserting a network node in
+    Playwright, scope to `getByTestId('network-view')` — entity names also appear
+    in merge-target dropdowns + the Entities list (strict-mode multi-match).
+  - GOTCHA still applies: GraphViews fetches once per kb.id, so reload+reselect
+    after creating entities before checking Network/Timeline.
+---
