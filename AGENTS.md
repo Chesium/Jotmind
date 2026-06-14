@@ -765,6 +765,48 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   Testids: `rules-author-form`/`-name`/`-text`/`-cap`/`-validate`/`-submit`/
   `-validation`/`-valid`/`-invalid`, `rules-rule-valid-<id>`/`rules-rule-errors-<id>`.
 
+## Run rules with traces (US-024)
+
+- Rule execution is a **pure, in-memory evaluator** in `apps/api/src/rules/engine.ts`
+  (`executeRule(CompiledRule, RuleFacts)`). It walks the US-023 AST bottom-up
+  (semi-naïve, positive atoms joined first then stratified negation) over facts
+  the caller supplies — it NEVER touches the DB, network, filesystem, or `eval`.
+  Each derived head tuple accumulates a **trace** (source `claimIds`/`entityIds`/
+  `argumentIds`, AC6). Iteration is bounded by `rule.recursionCap`; if new tuples
+  are still derived when the cap is hit, `limitExceeded` is set (AC2). NOTE:
+  single-rule direct recursion can't bootstrap a base case (no disjunction in the
+  dialect), so recursive rules are effectively inert — the cap is a safety guard.
+- **`dbRuleRunStore.loadFacts` is where the hidden safety predicates are injected**
+  (`rules/run-store.ts`): `deleted_at IS NULL` on entities/claims/claim_arguments
+  (AC3) and current valid-time bounds on claims (AC4). **GOTCHA:** each OR fragment
+  must be wrapped in its own parens in the `sql` template
+  (`sql\`(${claims.validStart} IS NULL OR ${claims.validStart} <= now())\``) —
+  without parens, SQL's AND-binds-tighter-than-OR precedence silently lets
+  expired/not-yet-valid rows through. The pure engine never sees filtered rows.
+- Two tables (migration `drizzle/0006`): `rule_runs` (status running/completed/
+  failed, started/finished_at, error, result_count, iterations, limit_exceeded,
+  `triggered_by` user + `job_id` — AC5) and `inferred_results` (predicate,
+  `arguments` jsonb `[{name,value,entityName}]`, `trace` jsonb). Both are
+  **operational/derived — no soft-delete**. Inferred results are **labelled
+  `'inferred'` and are NOT written to `claims`** (AC8) and are NOT graph
+  projection targets.
+- Router (`rules/index.ts`): `POST /:ruleId/run` (**editor + CSRF** — a run is a
+  write that creates run/result rows; only `status='enabled'` AND re-parsed-valid
+  rules execute, else 409/422), `GET /runs` + `GET /runs/:runId` (viewer,
+  read-only). The run handler wraps execution in try/catch so any failure records
+  a **failed** run with 0 results and never mutates canonical data (AC7);
+  `limitExceeded` → `status='failed'` + error. `createApp` seam: `ruleRunStore`.
+  An `audit_events` `rule.run` row is written in the same tx as the run.
+- Shared schemas in `@jotmind/schemas` `rules.ts`: `ruleRunStatusSchema`,
+  `inferredResult{Argument,Trace,}Schema`, `ruleRunSchema`, `ruleRunResultSchema`,
+  and the `ruleReferencesValidTime()` seam (always `false` — the dialect has no
+  valid-time predicate, so current-time bounds always apply).
+- Web: `Rules.tsx` per-enabled-rule **Run** button (disabled unless enabled +
+  valid) + a "Last Rule Run" panel. API helpers in `api.ts`: `runRule`/
+  `listRuleRuns`/`getRuleRun`. Testids: `rules-run-<id>`, `rules-run-result`,
+  `rules-run-status`, `rules-run-results`, `rules-run-result-<id>`,
+  `rules-run-label-<id>`, `rules-run-trace-<id>`, `rules-run-empty`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

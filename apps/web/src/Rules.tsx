@@ -4,6 +4,7 @@ import {
   type BuiltinRuleModule,
   type KnowledgeBase,
   type RuleDefinition,
+  type RuleRunResult,
   type RuleValidationResult,
 } from '@jotmind/schemas';
 import {
@@ -11,6 +12,7 @@ import {
   installRulePack,
   listBuiltinRulePacks,
   listRules,
+  runRule,
   setRuleStatus,
   validateRule,
 } from './api.js';
@@ -37,6 +39,9 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
   const [ruleText, setRuleText] = useState(EXAMPLE_RULE);
   const [recursionCap, setRecursionCap] = useState('');
   const [validation, setValidation] = useState<RuleValidationResult | null>(null);
+
+  // US-024 rule execution: the most recent run's results, keyed by rule id.
+  const [lastRun, setLastRun] = useState<RuleRunResult | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -79,6 +84,19 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not change rule status');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function run(rule: RuleDefinition) {
+    setBusy(true);
+    setError(null);
+    setLastRun(null);
+    try {
+      setLastRun(await runRule(kb.id, rule.id, csrfToken));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not run rule');
     } finally {
       setBusy(false);
     }
@@ -257,18 +275,58 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
                 </ul>
               )}
               {canEdit && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void toggle(rule)}
-                  data-testid={`rules-toggle-${rule.id}`}
-                >
-                  {rule.status === 'enabled' ? 'Disable' : 'Enable'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void toggle(rule)}
+                    data-testid={`rules-toggle-${rule.id}`}
+                  >
+                    {rule.status === 'enabled' ? 'Disable' : 'Enable'}
+                  </button>{' '}
+                  <button
+                    type="button"
+                    disabled={busy || rule.status !== 'enabled' || !rule.valid}
+                    onClick={() => void run(rule)}
+                    data-testid={`rules-run-${rule.id}`}
+                  >
+                    Run
+                  </button>
+                </>
               )}
             </li>
           ))}
         </ul>
+      )}
+
+      {lastRun && (
+        <div data-testid="rules-run-result">
+          <h4>Last Rule Run — {lastRun.run.ruleName}</h4>
+          <p data-testid="rules-run-status">
+            Status: <strong>{lastRun.run.status}</strong> · {lastRun.run.resultCount} inferred
+            result(s) · {lastRun.run.iterations} iteration(s)
+            {lastRun.run.limitExceeded && ' · iteration cap reached'}
+          </p>
+          {lastRun.run.error && <p data-testid="rules-run-error">Error: {lastRun.run.error}</p>}
+          {lastRun.results.length === 0 ? (
+            <p data-testid="rules-run-empty">No inferred results.</p>
+          ) : (
+            <ul data-testid="rules-run-results">
+              {lastRun.results.map((result) => (
+                <li key={result.id} data-testid={`rules-run-result-${result.id}`}>
+                  <span data-testid={`rules-run-label-${result.id}`}>[{result.label}]</span>{' '}
+                  <strong>{result.predicate}</strong>(
+                  {result.arguments.map((arg) => arg.entityName ?? arg.value).join(', ')})
+                  <small data-testid={`rules-run-trace-${result.id}`}>
+                    {' '}
+                    — derived from {result.trace.claimIds.length} claim(s),{' '}
+                    {result.trace.argumentIds.length} argument(s)
+                  </small>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {!canEdit && <p>You have read-only access to rules in this Knowledge Base.</p>}

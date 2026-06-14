@@ -654,6 +654,86 @@ export type RuleDefinitionRow = typeof ruleDefinitions.$inferSelect;
 export type NewRuleDefinitionRow = typeof ruleDefinitions.$inferInsert;
 
 /**
+ * A recorded execution of a rule against stored Knowledge Base data (US-024).
+ * Records status, start/end timestamps, errors, and the triggering user/job
+ * (AC5). Rule runs are operational records (no soft-delete). The rule reference
+ * is `set null` so a run's history survives the rule being deleted.
+ */
+export const ruleRuns = pgTable(
+  'rule_runs',
+  {
+    id: uuid('id').primaryKey().default(uuidv7),
+    knowledgeBaseId: uuid('knowledge_base_id')
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: 'cascade' }),
+    ruleId: uuid('rule_id').references(() => ruleDefinitions.id, { onDelete: 'set null' }),
+    ruleName: text('rule_name').notNull(),
+    status: text('status').notNull().default('running'),
+    error: text('error'),
+    resultCount: integer('result_count').notNull().default(0),
+    iterations: integer('iterations').notNull().default(0),
+    limitExceeded: boolean('limit_exceeded').notNull().default(false),
+    triggeredBy: uuid('triggered_by').references(() => users.id, { onDelete: 'set null' }),
+    jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+    startedAt: timestamp('started_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => ({
+    statusCheck: check(
+      'rule_runs_status_check',
+      sql`${table.status} IN ('running', 'completed', 'failed')`,
+    ),
+    byKb: index('rule_runs_kb_idx').on(table.knowledgeBaseId, table.createdAt),
+    byRule: index('rule_runs_rule_idx').on(table.ruleId),
+  }),
+);
+
+export type RuleRunRow = typeof ruleRuns.$inferSelect;
+export type NewRuleRunRow = typeof ruleRuns.$inferInsert;
+
+/**
+ * An inferred result produced by a rule run (US-024). Labelled `inferred` and
+ * NOT stored as a Claim by default (AC8). `arguments` holds the resolved head
+ * tuple; `trace` records the source claims/arguments/entities used to derive it
+ * (AC6). Derived records, so no soft-delete; removed when their run is deleted.
+ */
+export const inferredResults = pgTable(
+  'inferred_results',
+  {
+    id: uuid('id').primaryKey().default(uuidv7),
+    knowledgeBaseId: uuid('knowledge_base_id')
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: 'cascade' }),
+    ruleRunId: uuid('rule_run_id')
+      .notNull()
+      .references(() => ruleRuns.id, { onDelete: 'cascade' }),
+    ruleId: uuid('rule_id').references(() => ruleDefinitions.id, { onDelete: 'set null' }),
+    predicate: text('predicate').notNull(),
+    arguments: jsonb('arguments')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    trace: jsonb('trace')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => ({
+    byRun: index('inferred_results_run_idx').on(table.ruleRunId),
+    byKb: index('inferred_results_kb_idx').on(table.knowledgeBaseId),
+  }),
+);
+
+export type InferredResultRow = typeof inferredResults.$inferSelect;
+export type NewInferredResultRow = typeof inferredResults.$inferInsert;
+
+/**
  * An AI/import-generated proposal awaiting review (US-017/US-018/US-031).
  * `changes` is the structured create/update/delete/merge payload; nothing
  * mutates canonical records until a proposal is accepted. Links back to the

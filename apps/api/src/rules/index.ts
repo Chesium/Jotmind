@@ -4,26 +4,37 @@ import {
   builtinRuleModuleListSchema,
   createRuleSchema,
   findBuiltinRulePack,
+  inferredResultListSchema,
+  inferredResultSchema,
   installRulePackResultSchema,
   installRulePackSchema,
   kbRoleSatisfies,
   parseRule,
   ruleDefinitionSchema,
+  ruleRunListSchema,
+  ruleRunResultSchema,
+  ruleRunSchema,
   ruleValidationResultSchema,
   updateRuleSchema,
   updateRuleStatusSchema,
   validateRuleSchema,
+  type InferredResult,
   type KbRole,
   type RuleDefinition,
+  type RuleRun,
 } from '@jotmind/schemas';
-import type { RuleDefinitionRow } from '../db/schema.js';
+import type { InferredResultRow, RuleDefinitionRow, RuleRunRow } from '../db/schema.js';
 import { asyncHandler, requireAuth, requireCsrf, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
 import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
 import { dbRuleStore, readAuthoredCap, readBuiltinMeta, type RuleStore } from './store.js';
+import { executeRule } from './engine.js';
+import { dbRuleRunStore, type PersistableInferredResult, type RuleRunStore } from './run-store.js';
 
 export type { RuleStore } from './store.js';
 export { dbRuleStore } from './store.js';
+export type { RuleRunStore } from './run-store.js';
+export { dbRuleRunStore } from './run-store.js';
 
 function toRule(row: RuleDefinitionRow): RuleDefinition {
   const meta = readBuiltinMeta(row.compiled);
@@ -53,8 +64,43 @@ function toRule(row: RuleDefinitionRow): RuleDefinition {
   });
 }
 
+function toRuleRun(row: RuleRunRow): RuleRun {
+  return ruleRunSchema.parse({
+    id: row.id,
+    knowledgeBaseId: row.knowledgeBaseId,
+    ruleId: row.ruleId,
+    ruleName: row.ruleName,
+    status: row.status,
+    startedAt: row.startedAt.toISOString(),
+    finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
+    error: row.error,
+    resultCount: row.resultCount,
+    iterations: row.iterations,
+    limitExceeded: row.limitExceeded,
+    triggeredBy: row.triggeredBy,
+    jobId: row.jobId,
+    createdAt: row.createdAt.toISOString(),
+  });
+}
+
+function toInferredResult(row: InferredResultRow, ruleName: string): InferredResult {
+  return inferredResultSchema.parse({
+    id: row.id,
+    knowledgeBaseId: row.knowledgeBaseId,
+    ruleRunId: row.ruleRunId,
+    ruleId: row.ruleId,
+    ruleName,
+    predicate: row.predicate,
+    label: 'inferred',
+    arguments: row.arguments,
+    trace: row.trace,
+    createdAt: row.createdAt.toISOString(),
+  });
+}
+
 export interface RuleRouterOptions {
   store?: RuleStore;
+  runStore?: RuleRunStore;
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
 }
@@ -67,6 +113,7 @@ export interface RuleRouterOptions {
  */
 export function createRuleRouter(options: RuleRouterOptions = {}): Router {
   const store = options.store ?? dbRuleStore;
+  const runStore = options.runStore ?? dbRuleRunStore;
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
   const router = Router({ mergeParams: true });
@@ -283,6 +330,142 @@ export function createRuleRouter(options: RuleRouterOptions = {}): Router {
         return;
       }
       res.json(toRule(rule));
+    }),
+  );
+
+  // List recorded rule runs for the Knowledge Base (viewer+, read-only).
+  router.get(
+    '/runs',
+    authed,
+    requireKbRole('viewer'),
+    asyncHandler(async (req, res) => {
+      const runs = await runStore.listRuns(req.params.kbId as string);
+      res.json(ruleRunListSchema.parse(runs.map(toRuleRun)));
+    }),
+  );
+
+  // Get a single rule run plus its inferred results (viewer+, read-only).
+  router.get(
+    '/runs/:runId',
+    authed,
+    requireKbRole('viewer'),
+    asyncHandler(async (req, res) => {
+      const kbId = req.params.kbId as string;
+      const run = await runStore.getRun(kbId, req.params.runId as string);
+      if (!run) {
+        res.status(404).json({ error: 'Rule run not found' });
+        return;
+      }
+      const results = await runStore.listResults(kbId, run.id);
+      res.json(
+        ruleRunResultSchema.parse({
+          run: toRuleRun(run),
+          results: inferredResultListSchema.parse(
+            results.map((r) => toInferredResult(r, run.ruleName)),
+          ),
+        }),
+      );
+    }),
+  );
+
+  // Execute a rule against stored Knowledge Base data, recording the run +
+  // inferred results with traces (US-024). Editor+ (a run is a write that
+  // creates run/result records) + CSRF. Only enabled, valid rules can execute
+  // (US-023 AC6: invalid rules cannot run).
+  router.post(
+    '/:ruleId/run',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const ctx = req.auth as AuthContext;
+      const kbId = req.params.kbId as string;
+      const existing = await store.getRule(kbId, req.params.ruleId as string);
+      if (!existing) {
+        res.status(404).json({ error: 'Rule not found' });
+        return;
+      }
+      if (existing.status !== 'enabled') {
+        res.status(409).json({ error: 'Only enabled rules can be run' });
+        return;
+      }
+      const storedCap = readAuthoredCap(existing.compiled);
+      const analysis = parseRule(
+        existing.ruleText,
+        storedCap === null ? undefined : { recursionCap: storedCap },
+      );
+      if (!analysis.valid || !analysis.rule) {
+        res.status(422).json({
+          error: 'Cannot run an invalid rule',
+          validationErrors: analysis.errors,
+        });
+        return;
+      }
+      const compiled = analysis.rule;
+
+      const startedAt = new Date();
+      // AC7: rule errors must not corrupt claims/schemas/rules. Execution is a
+      // pure in-memory evaluation over loaded facts; any failure is recorded as
+      // a failed run with no inferred results and never mutates canonical data.
+      let status: 'completed' | 'failed' = 'completed';
+      let error: string | null = null;
+      let iterations = 0;
+      let limitExceeded = false;
+      let results: PersistableInferredResult[] = [];
+      try {
+        const facts = await runStore.loadFacts(kbId);
+        const entityNames = new Map(facts.entities.map((e) => [e.id, e.name]));
+        const execution = executeRule(compiled, facts);
+        iterations = execution.iterations;
+        limitExceeded = execution.limitExceeded;
+        results = execution.results.map((tuple) => ({
+          arguments: compiled.head.args.map((term, i) => {
+            const value = tuple.values[i] as string;
+            return {
+              name: term.kind === 'var' ? term.name : null,
+              value,
+              entityName: entityNames.get(value) ?? null,
+            };
+          }),
+          claimIds: tuple.claimIds,
+          entityIds: tuple.entityIds,
+          argumentIds: tuple.argumentIds,
+        }));
+        if (limitExceeded) {
+          status = 'failed';
+          error = `Recursion/iteration cap (${compiled.recursionCap}) exceeded before reaching a fixpoint`;
+        }
+      } catch (err) {
+        status = 'failed';
+        error = err instanceof Error ? err.message : 'Rule execution failed';
+        results = [];
+        limitExceeded = false;
+      }
+
+      const saved = await runStore.saveRun({
+        knowledgeBaseId: kbId,
+        ruleId: existing.id,
+        ruleName: existing.name,
+        status,
+        error,
+        iterations,
+        limitExceeded,
+        startedAt,
+        finishedAt: new Date(),
+        triggeredBy: ctx.user.id,
+        jobId: null,
+        predicate: compiled.head.predicate,
+        results,
+      });
+
+      res.status(201).json(
+        ruleRunResultSchema.parse({
+          run: toRuleRun(saved.run),
+          results: inferredResultListSchema.parse(
+            saved.results.map((r) => toInferredResult(r, saved.run.ruleName)),
+          ),
+        }),
+      );
     }),
   );
 

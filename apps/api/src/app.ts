@@ -23,7 +23,7 @@ import {
 } from './graph/index.js';
 import { createJobsRouter, type JobStore } from './jobs/index.js';
 import { createSearchRouter, type SearchStore } from './search/index.js';
-import { createRuleRouter, type RuleStore } from './rules/index.js';
+import { createRuleRouter, type RuleRunStore, type RuleStore } from './rules/index.js';
 import { createEmbeddingsRouter, type EmbeddingStore } from './embeddings/index.js';
 import {
   createAiPolicyKbRouter,
@@ -158,6 +158,12 @@ export interface AppOptions {
    * the PostgreSQL-backed store.
    */
   ruleStore?: RuleStore;
+  /**
+   * Rule execution store (US-024). Injectable for unit tests. Defaults to the
+   * PostgreSQL-backed store that loads facts (with hidden soft-delete +
+   * valid-time predicates) and records rule runs + inferred results.
+   */
+  ruleRunStore?: RuleRunStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -221,7 +227,12 @@ export function createApp(options: AppOptions = {}): Express {
   );
   app.use(
     '/api/knowledge-bases/:kbId/rules',
-    createRuleRouter({ store: options.ruleStore, kbStore: options.kbStore, authStore }),
+    createRuleRouter({
+      store: options.ruleStore,
+      runStore: options.ruleRunStore,
+      kbStore: options.kbStore,
+      authStore,
+    }),
   );
   const commandInterpreter =
     options.commandInterpreter !== undefined

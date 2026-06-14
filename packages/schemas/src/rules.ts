@@ -642,3 +642,108 @@ export const ruleValidationResultSchema = z.object({
   recursionCap: z.number().int().positive(),
 });
 export type RuleValidationResult = z.infer<typeof ruleValidationResultSchema>;
+
+// ---------------------------------------------------------------------------
+// US-024: run rules with traces — Rule Runs + Inferred Results
+// ---------------------------------------------------------------------------
+//
+// Rule execution runs on the backend against stored Knowledge Base data. A
+// `Rule Run` records status, start/end timestamps, errors, and the triggering
+// user/job (AC5). It produces `Inferred Results` that are LABELLED inferred and
+// are NOT stored as Claims by default (AC8); each result carries the source rule
+// and the source claims/arguments used to derive it (AC6).
+//
+// Execution enforces bounded-recursion depth/iteration limits and reports
+// limit-exceeded errors safely (AC2). Because the rule text dialect (US-023) has
+// no valid-time predicate, execution always injects current-time bounds
+// (`valid_start <= NOW() AND (valid_end IS NULL OR valid_end >= NOW())`) plus a
+// hidden `deleted_at IS NULL` on every clause (AC3/AC4) when loading facts.
+
+/** Status of a rule run (AC5). */
+export const ruleRunStatusSchema = z.enum(['running', 'completed', 'failed']);
+export type RuleRunStatus = z.infer<typeof ruleRunStatusSchema>;
+
+/** A single resolved head argument of an inferred result. */
+export const inferredResultArgumentSchema = z.object({
+  /** The head variable name (`null` for a literal head term). */
+  name: z.string().nullable(),
+  /** The resolved value (entity id, claim id, or literal string). */
+  value: z.string(),
+  /** Display name when the value resolves to a known entity. */
+  entityName: z.string().nullable(),
+});
+export type InferredResultArgument = z.infer<typeof inferredResultArgumentSchema>;
+
+/** The trace of source records used to derive an inferred result (AC6). */
+export const inferredResultTraceSchema = z.object({
+  claimIds: z.array(z.string().uuid()),
+  entityIds: z.array(z.string().uuid()),
+  argumentIds: z.array(z.string().uuid()),
+});
+export type InferredResultTrace = z.infer<typeof inferredResultTraceSchema>;
+
+/**
+ * An inferred result produced by a rule run. Always labelled `inferred` and not
+ * stored as a Claim by default (AC8); shows its source rule + source claims and
+ * arguments used (AC6).
+ */
+export const inferredResultSchema = z.object({
+  id: z.string().uuid(),
+  knowledgeBaseId: z.string().uuid(),
+  ruleRunId: z.string().uuid(),
+  ruleId: z.string().uuid().nullable(),
+  ruleName: z.string(),
+  predicate: z.string(),
+  /** Constant label distinguishing these from stored claims (AC8). */
+  label: z.literal('inferred'),
+  arguments: z.array(inferredResultArgumentSchema),
+  trace: inferredResultTraceSchema,
+  createdAt: z.string().datetime(),
+});
+export type InferredResult = z.infer<typeof inferredResultSchema>;
+
+export const inferredResultListSchema = z.array(inferredResultSchema);
+
+/** A recorded rule run (AC5). */
+export const ruleRunSchema = z.object({
+  id: z.string().uuid(),
+  knowledgeBaseId: z.string().uuid(),
+  ruleId: z.string().uuid().nullable(),
+  ruleName: z.string(),
+  status: ruleRunStatusSchema,
+  startedAt: z.string().datetime(),
+  finishedAt: z.string().datetime().nullable(),
+  error: z.string().nullable(),
+  resultCount: z.number().int().nonnegative(),
+  /** Iterations executed (bounded by the rule's recursion cap, AC2). */
+  iterations: z.number().int().nonnegative(),
+  /** True when the recursion/iteration cap was reached with results pending (AC2). */
+  limitExceeded: z.boolean(),
+  /** Triggering user (AC5). */
+  triggeredBy: z.string().uuid().nullable(),
+  /** Triggering job, when run from a background job instead of a user (AC5). */
+  jobId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type RuleRun = z.infer<typeof ruleRunSchema>;
+
+export const ruleRunListSchema = z.array(ruleRunSchema);
+
+/** Response from running a rule: the run record plus its inferred results. */
+export const ruleRunResultSchema = z.object({
+  run: ruleRunSchema,
+  results: inferredResultListSchema,
+});
+export type RuleRunResult = z.infer<typeof ruleRunResultSchema>;
+
+/**
+ * Does a compiled rule explicitly reference valid time? The restricted Datalog
+ * dialect (US-023) has no valid-time predicate, so this is always `false` and
+ * execution always applies current-time bounds (AC4). Provided as a seam so a
+ * future dialect that adds a valid-time predicate can opt out of the automatic
+ * bounds.
+ */
+export function ruleReferencesValidTime(rule: CompiledRule): boolean {
+  void rule;
+  return false;
+}

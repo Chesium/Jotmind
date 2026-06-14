@@ -43,6 +43,13 @@
       "when": 1781409718999,
       "tag": "0005_material_hellcat",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781412447335,
+      "tag": "0006_colossal_groot",
+      "breakpoints": true
     }
   ]
 }

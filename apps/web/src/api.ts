@@ -22,6 +22,8 @@ import {
   installRulePackResultSchema,
   ruleDefinitionListSchema,
   ruleDefinitionSchema,
+  ruleRunListSchema,
+  ruleRunResultSchema,
   ruleValidationResultSchema,
   publicJobSchema,
   publicUserSchema,
@@ -44,6 +46,8 @@ import {
   type CreateRuleRequest,
   type InstallRulePackResult,
   type RuleDefinition,
+  type RuleRun,
+  type RuleRunResult,
   type RuleValidationResult,
   type UpdateRuleRequest,
   type ResolvedAiPolicy,
@@ -829,4 +833,38 @@ export async function updateRule(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return ruleDefinitionSchema.parse(await res.json());
+}
+
+/** Run an enabled rule against stored data, returning the run + results (US-024, editor+). */
+export async function runRule(
+  knowledgeBaseId: string,
+  ruleId: string,
+  csrfToken: string,
+): Promise<RuleRunResult> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}/run`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleRunResultSchema.parse(await res.json());
+}
+
+/** List recorded rule runs for a Knowledge Base (US-024, viewer+). */
+export async function listRuleRuns(knowledgeBaseId: string): Promise<RuleRun[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/runs`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleRunListSchema.parse(await res.json());
+}
+
+/** Get a single rule run plus its inferred results (US-024, viewer+). */
+export async function getRuleRun(knowledgeBaseId: string, runId: string): Promise<RuleRunResult> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/runs/${runId}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleRunResultSchema.parse(await res.json());
 }
