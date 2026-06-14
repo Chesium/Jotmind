@@ -141,6 +141,12 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
 
       {error && <p data-testid="graph-views-error">{error}</p>}
 
+      {projection?.projector.stubbed && (
+        <p data-testid="graph-projector-stubbed" role="status">
+          Graph projection is running in stub mode — relational search/table/detail views work, but
+          AGE-backed traversal is disabled for this runtime.
+        </p>
+      )}
       {projection?.state === 'failed' && (
         <p data-testid="graph-projection-failed" role="alert">
           ⚠ Graph index failed: {projection.lastError ?? 'Unknown error'}. Core search/table/detail

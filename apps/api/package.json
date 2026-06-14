@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "test": "vitest run"
+    "db:reset:test": "tsx src/test/reset-db.ts",
+    "test": "vitest run",
+    "verify:local-ai": "vitest run --config vitest.local-ai.config.ts"
   },
   "dependencies": {
     "@jotmind/schemas": "workspace:*",

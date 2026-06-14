@@ -1146,3 +1146,30 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
   `pnpm --filter @jotmind/web exec playwright install chromium`.
 - Prettier ignores Ralph/agent scaffolding (`prd.json`, `progress.txt`, `prompt.md`, `.agents`, etc.)
   via `.prettierignore`. Add new non-source top-level files there if they trip `format:check`.
+
+## Verification gates (US-034)
+
+- **`pnpm verify` is the authoritative NO-INFRA gate** — it must stay green without a DB, API
+  server, or Ollama. `test:api` runs with `JOTMIND_VERIFY=true`, loading the Vitest setup file
+  `apps/api/src/test/verify-env.ts` which strips real AI provider key env vars and rejects any
+  non-`mock` `AI_PROVIDER_CONFIG` (AC2). When adding env-driven AI, keep mock the only verify-time
+  provider. Default `test:e2e` runs ONLY `e2e/smoke.spec.ts`.
+- **DB/API-backed acceptance = `pnpm verify:db`** (`test:api:db` + `test:e2e:real`), requires
+  `docker compose up -d --build db`. `test:api:db` migrates then runs the full API suite (incl. the
+  18 `*.integration.test.ts`) against the test PostgreSQL (AC5). `test:e2e:real` (`E2E_REAL_API=1`,
+  Playwright `real-chromium` project) boots the real API + Vite and runs `e2e/v1-flows.real.spec.ts`
+  (AC4); `e2e/global-setup.ts` runs `db:migrate` + `db:reset:test` first, and the mock AI provider
+  is injected via the Playwright webServer `env` block (NOT inline shell — JSON braces/commas break
+  shell env assignment). `db:reset:test` is double-guarded (`DATABASE_URL` + `JOTMIND_ALLOW_DB_RESET`).
+- **Real e2e gotcha:** per-KB sibling components fetch once per `kb.id` and don't live-sync, so a
+  real-flow spec must `page.reload()` + reselect the KB after creating records in one section before
+  another section (e.g. Claims) reads them.
+- **Local Ollama = manual `pnpm verify:local-ai` only** (AC3): `*.local-ai.test.ts` is EXCLUDED from
+  the default Vitest run via `vitest.config.ts` `exclude` and runs only through
+  `vitest.local-ai.config.ts` (the config `exclude` blocks even an explicit file path, hence the
+  separate config). Skips unless `OLLAMA_BASE_URL` is set.
+- **Runtime-facing stubs (AC7)** are documented in `fix_plan.md`; the `stubProjector`
+  (`GRAPH_PROJECTOR=stub`, non-default) is surfaced in the GraphViews UI via the
+  `graph-projector-stubbed` banner in addition to the projection-status API.
+- The `dev-browser` skill is unavailable here; deferred interactive manual checks live in
+  `fix_plan.md` (AC6).

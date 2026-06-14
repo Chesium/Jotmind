@@ -16,10 +16,14 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "test": "pnpm -r --filter=!@jotmind/api test",
-    "test:api": "pnpm --filter @jotmind/api test",
+    "test:api": "JOTMIND_VERIFY=true pnpm --filter @jotmind/api test",
     "test:e2e": "pnpm --filter @jotmind/web test:e2e",
     "verify:quick": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test",
-    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm test:api && pnpm test:e2e"
+    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm test:api && pnpm test:e2e",
+    "test:api:db": "DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind JOTMIND_VERIFY=true pnpm --filter @jotmind/api db:migrate && DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind JOTMIND_VERIFY=true pnpm --filter @jotmind/api test",
+    "test:e2e:real": "DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jotmind JOTMIND_ALLOW_DB_RESET=true pnpm --filter @jotmind/web test:e2e:real",
+    "verify:db": "pnpm test:api:db && pnpm test:e2e:real",
+    "verify:local-ai": "pnpm --filter @jotmind/api verify:local-ai"
   },
   "devDependencies": {
     "@eslint/js": "^9.10.0",
