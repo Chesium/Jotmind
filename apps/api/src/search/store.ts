@@ -264,16 +264,15 @@ export const dbSearchStore: SearchStore = {
   },
 
   async getVectorSearchAvailability() {
-    // Vector search requires both the pgvector extension AND a generated
-    // embeddings store. Embeddings are introduced in a later story, so detect
-    // an `embeddings` table; until it exists, semantic search is unavailable
-    // but token search keeps working (AC4).
+    // Vector search requires both the pgvector extension AND generated
+    // embeddings (US-021). The `embeddings` table now always exists, so detect
+    // whether any embedding ROWS have been generated. Availability reflects
+    // stored embeddings independent of the generation provider's current
+    // availability (US-021 AC4); token search keeps working regardless
+    // (US-012 AC4).
     const db = getDb();
     const rows = await db.execute<{ has_embeddings: boolean }>(sql`
-      SELECT EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'embeddings'
-      ) AS has_embeddings
+      SELECT EXISTS (SELECT 1 FROM embeddings) AS has_embeddings
     `);
     const hasEmbeddings = rows[0]?.has_embeddings === true;
     if (!hasEmbeddings) {

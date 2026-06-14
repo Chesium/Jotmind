@@ -647,6 +647,50 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   inline detail panel (AC4); keep that single (don't also render a duplicate
   detail block — duplicate testids break `getByTestId`).
 
+## Vector embeddings & indexing jobs (US-021)
+
+- Embeddings are stored in PostgreSQL via **pgvector** in the `embeddings` table
+  (`apps/api/src/db/schema.ts`, migration `drizzle/0005`). The `embedding`
+  column uses a custom Drizzle type `vector` (also in `schema.ts`) declared
+  **without a fixed dimension** so one table holds vectors of whatever size the
+  configured provider produces (mock = 8). It marshals `number[]` ⇄ pgvector's
+  text format (`[1,2,3]`). Unique index `(target_type, target_id, model)` makes
+  re-indexing an upsert; the table is **not** soft-deleted (it's a derived
+  index — delete the row when a canonical record is removed).
+- `apps/api/src/embeddings/`: `store.ts` (`EmbeddingStore` + `dbEmbeddingStore`:
+  `upsert` via `onConflictDoUpdate`, `deleteByTarget`, `getStats`,
+  `hasEmbeddings`, `vectorSearch` = raw `embedding <=> $vec::vector` cosine),
+  `content.ts` (per-kind content builders — **entity content folds in aliases +
+  tags**, AC2 — plus `hashContent`), `targets.ts` (`EmbeddingTargetSource` reads
+  entity/claim/note/source `WHERE deleted_at IS NULL`), `provider.ts`
+  (`resolveEmbeddingProviderFromEnv` mirrors `resolveExtractorFromEnv`; reads
+  `AI_PROVIDER_CONFIG`; anthropic → null, no embedding endpoint), `indexer.ts`
+  (`runEmbeddingIndex` — the policy-gated indexing logic), `index.ts`
+  (`createEmbeddingsRouter`). `createApp` seam: `embeddingStore`.
+- **Policy gating (US-016 reuse):** `runEmbeddingIndex` resolves
+  `resolveAiPolicy` over server + KB + requesting-user layers (strictest-wins),
+  skips when `mode==='off'`, and **requires the separate
+  `remoteEmbeddingsAllowed` consent before using a remote provider** (AC3 —
+  remote embeddings are gated independently of remote LLM use).
+- **Indexing runs as a durable job (US-007):** `POST
+/api/knowledge-bases/:kbId/embeddings/reindex` (editor + CSRF) enqueues an
+  `EMBEDDING_INDEX_JOB_TYPE` (`'embeddings.index'`) job; its status is visible
+  via the existing KB jobs endpoint (`GET /api/knowledge-bases/:id/jobs`, AC5).
+  The handler is registered in `jobs/handlers.ts` and is **self-contained**
+  (resolves its own DB stores + env provider) so it works identically in the
+  in-process and separate-process workers.
+- **Availability is decoupled from the provider (AC4):** `GET
+/api/knowledge-bases/:kbId/embeddings` returns `vectorSearchAvailable` =
+  *embeddings exist* (independent of whether a generation provider is currently
+  configured/permitted) and `generationAvailable` = *new embeddings can be made
+  now* (provider + policy). The search store's `getVectorSearchAvailability`
+  likewise now checks `EXISTS(SELECT 1 FROM embeddings)` rows. NOTE: query-time
+  vector search (embedding the query at search time) is deferred — it needs a
+  live provider; only the stored-embedding availability/data is implemented.
+- Shared shapes in `@jotmind/schemas` `embeddings.ts`. US-021 has **no UI** and
+  its AC list omits browser verification (only "Tests pass" / "Typecheck
+  passes").
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

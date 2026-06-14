@@ -23,6 +23,7 @@ import {
 } from './graph/index.js';
 import { createJobsRouter, type JobStore } from './jobs/index.js';
 import { createSearchRouter, type SearchStore } from './search/index.js';
+import { createEmbeddingsRouter, type EmbeddingStore } from './embeddings/index.js';
 import {
   createAiPolicyKbRouter,
   createAiPolicyRouter,
@@ -146,6 +147,11 @@ export interface AppOptions {
    * Defaults to the store composing search/claim/entity stores.
    */
   answerEvidenceStore?: AnswerEvidenceStore;
+  /**
+   * Vector embedding store (US-021). Injectable for unit tests. Defaults to the
+   * PostgreSQL + pgvector store.
+   */
+  embeddingStore?: EmbeddingStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -196,6 +202,16 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(
     '/api/knowledge-bases/:kbId/search',
     createSearchRouter({ store: options.searchStore, kbStore: options.kbStore, authStore }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/embeddings',
+    createEmbeddingsRouter({
+      store: options.embeddingStore,
+      kbStore: options.kbStore,
+      authStore,
+      aiPolicyStore: options.aiPolicyStore,
+      jobStore: options.jobStore,
+    }),
   );
   const commandInterpreter =
     options.commandInterpreter !== undefined

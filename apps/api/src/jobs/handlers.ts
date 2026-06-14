@@ -1,11 +1,42 @@
+import { EMBEDDING_INDEX_JOB_TYPE, embeddingIndexJobPayloadSchema } from '@jotmind/schemas';
+import { dbAiPolicyStore } from '../ai-policy/store.js';
+import { dbEmbeddingStore } from '../embeddings/store.js';
+import { dbEmbeddingTargetSource } from '../embeddings/targets.js';
+import { resolveEmbeddingProviderFromEnv } from '../embeddings/provider.js';
+import { runEmbeddingIndex } from '../embeddings/indexer.js';
 import type { JobHandlerRegistry } from './worker.js';
 
 /**
  * Registry of job handlers keyed by job `type`. Later stories register their
- * handlers here (US-018 AI proposals, US-021 embeddings, imports/exports, and
- * the AGE projection worker). The built-in `noop` handler exists so the worker
- * can be smoke-tested end-to-end before those land.
+ * handlers here (US-018 AI proposals, imports/exports, and the AGE projection
+ * worker). The built-in `noop` handler exists so the worker can be smoke-tested
+ * end-to-end.
+ *
+ * Handlers are self-contained: they resolve their dependencies from the default
+ * DB-backed stores + env config, so they work identically in the in-process
+ * worker and the separate-process worker (`worker-process.ts`).
  */
 export const defaultJobHandlers: JobHandlerRegistry = {
   noop: (job) => Promise.resolve({ ok: true, jobId: job.id }),
+
+  // Vector embedding indexing (US-021). Generates and stores pgvector
+  // embeddings for a Knowledge Base's canonical records, enforcing the layered
+  // AI policy (incl. the separate remote-embeddings consent).
+  [EMBEDDING_INDEX_JOB_TYPE]: async (job) => {
+    const payload = embeddingIndexJobPayloadSchema.parse(job.payload ?? {});
+    const result = await runEmbeddingIndex(
+      {
+        embeddingStore: dbEmbeddingStore,
+        targetSource: dbEmbeddingTargetSource,
+        aiPolicyStore: dbAiPolicyStore,
+        resolveProvider: resolveEmbeddingProviderFromEnv,
+      },
+      {
+        knowledgeBaseId: payload.knowledgeBaseId,
+        ...(payload.targetTypes ? { targetTypes: payload.targetTypes } : {}),
+        requestedBy: payload.requestedBy ?? null,
+      },
+    );
+    return { ...result };
+  },
 };
