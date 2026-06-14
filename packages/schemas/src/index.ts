@@ -5,6 +5,7 @@ export * from './command.js';
 export * from './embeddings.js';
 export * from './graph.js';
 export * from './health.js';
+export * from './imports.js';
 export * from './jobs.js';
 export * from './knowledge-base.js';
 export * from './modules.js';

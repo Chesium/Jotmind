@@ -29,6 +29,7 @@ import { createRuleRouter, type RuleRunStore, type RuleStore } from './rules/ind
 import { createSchemaRouter, dbSchemaStore, type SchemaStore } from './schema-defs/index.js';
 import { createModuleRouter } from './modules/index.js';
 import { createEmbeddingsRouter, type EmbeddingStore } from './embeddings/index.js';
+import { createImportRouter } from './imports/index.js';
 import {
   createAiPolicyKbRouter,
   createAiPolicyRouter,
@@ -328,6 +329,16 @@ export function createApp(options: AppOptions = {}): Express {
       authStore,
       entityStore: options.entityStore,
       claimStore: options.claimStore,
+      noteStore: options.noteStore,
+      sourceStore: options.sourceStore,
+    }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/imports',
+    createImportRouter({
+      kbStore: options.kbStore,
+      authStore,
+      jobStore: options.jobStore,
     }),
   );
   app.use(

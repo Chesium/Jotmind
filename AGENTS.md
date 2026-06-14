@@ -1067,6 +1067,37 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
   property read by `readSequence()` and shown as `#N`. Sequence mode sorts
   sequenced items ascending, unsequenced fall back to newest-date-first.
 
+## Reviewable data import (US-031)
+
+- Imports NEVER mutate the graph directly. `POST /api/knowledge-bases/:kbId/imports`
+  (`apps/api/src/imports/index.ts`, editor+CSRF, AC5) enqueues a durable
+  `import.process` job (`IMPORT_JOB_TYPE`); the handler
+  (`jobs/handlers.ts`) calls the self-contained `runImport` (`imports/runner.ts`)
+  which parses the payload into candidate `ProposalChange`s and stores them as a
+  single pending **Proposal** of kind `import` (AC3). The candidates then flow
+  through the existing US-018 review/accept path. `GET /imports` lists this KB's
+  import jobs (viewer+) so status/failure is **user-visible** (AC4) — distinct
+  from the system-admin `/api/jobs` endpoint.
+- Parsing is PURE + shared in `@jotmind/schemas` `imports.ts`: `parseCsv` (RFC-4180-ish,
+  quoted fields/newlines), and `buildImportChanges(request)` →
+  `{changes, rowCount}`. Text/Markdown → a `create_note` or `create_source`
+  change (AC1); CSV → one `create_entity` per row (name/type/properties/tags
+  mapping) or one `create_claim` per row (role→column mapping, AC2). Mapping
+  problems throw `ImportParseError`, which `runImport` returns as an `error`
+  result (the job still succeeds but its `result.status='error'` + `error`
+  message is shown); a genuinely thrown error dead-letters the job with a
+  `failureReason` (both surfaced in the imports list, AC4).
+- The **proposal change union was extended** with `create_note` / `create_source`
+  (`proposals.ts`); `applyProposalChanges` (`proposals/index.ts`) now also calls
+  `noteStore.createNote` / `sourceStore.createSource` (injected seams) on accept,
+  and `acceptProposalResultSchema` gained `createdNoteIds`/`createdSourceIds`.
+  Any code switching on a `ProposalChange.op` must handle all four ops (the web
+  `describeChange` does).
+- No new table/migration: imports reuse `jobs` (US-007) + `proposals` (US-017).
+  Web: `apps/web/src/Imports.tsx` (`<Imports>`, after `<Capture>`) has a
+  text/Markdown form + a CSV→entities form + a recent-imports status list;
+  `api.ts` `createImport`/`listImports`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

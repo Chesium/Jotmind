@@ -639,6 +639,45 @@ describe('proposals + capture API', () => {
     expect(h.claimStore.created).toHaveLength(0);
   });
 
+  it('accepts an import proposal, creating notes and sources (US-031)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await h.proposalStore.createProposal({
+      knowledgeBaseId: KB_ID,
+      kind: 'import',
+      changes: {
+        items: [
+          { op: 'create_note', title: 'Imported note', content: 'note body' },
+          { op: 'create_source', title: 'Imported source', sourceType: 'article', content: 'src' },
+        ],
+      },
+      sourceNoteId: null,
+      sourceSourceId: null,
+      provider: null,
+      model: null,
+      metadata: { source: 'import' },
+      actorUserId: userId,
+    });
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({});
+
+    expect(res.status).toBe(201);
+    expect(res.body.proposal.status).toBe('accepted');
+    expect(res.body.createdNoteIds).toHaveLength(1);
+    expect(res.body.createdSourceIds).toHaveLength(1);
+    expect(res.body.createdEntityIds).toHaveLength(0);
+    const notes = await h.noteStore.listNotes(KB_ID);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.content).toBe('note body');
+    const sources = await h.sourceStore.listSources(KB_ID);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.title).toBe('Imported source');
+  });
+
   it('rejects out-of-range item indexes', async () => {
     const app = makeApp(h, fakeExtractor());
     const { agent, csrfToken, userId } = await setupAdminAgent(app);

@@ -1,10 +1,14 @@
 import {
   EMBEDDING_INDEX_JOB_TYPE,
   GRAPH_REBUILD_JOB_TYPE,
+  IMPORT_JOB_TYPE,
   embeddingIndexJobPayloadSchema,
   graphRebuildJobPayloadSchema,
+  importJobPayloadSchema,
 } from '@jotmind/schemas';
 import { dbAiPolicyStore } from '../ai-policy/store.js';
+import { dbProposalStore } from '../proposals/store.js';
+import { runImport } from '../imports/runner.js';
 import { dbEmbeddingStore } from '../embeddings/store.js';
 import { dbEmbeddingTargetSource } from '../embeddings/targets.js';
 import { resolveEmbeddingProviderFromEnv } from '../embeddings/provider.js';
@@ -48,6 +52,16 @@ export const defaultJobHandlers: JobHandlerRegistry = {
         requestedBy: payload.requestedBy ?? null,
       },
     );
+    return { ...result };
+  },
+
+  // Reviewable data import (US-031). Parses imported text/Markdown/CSV into
+  // candidate graph changes and stores them as a single pending proposal — it
+  // never mutates canonical records directly. Self-contained so it runs
+  // identically in the in-process and separate-process workers.
+  [IMPORT_JOB_TYPE]: async (job) => {
+    const payload = importJobPayloadSchema.parse(job.payload ?? {});
+    const result = await runImport({ proposalStore: dbProposalStore }, payload);
     return { ...result };
   },
 

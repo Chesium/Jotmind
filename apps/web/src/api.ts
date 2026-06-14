@@ -13,6 +13,7 @@ import {
   graphProjectionStatusSchema,
   acceptProposalResultSchema,
   captureResponseSchema,
+  importEnqueueResponseSchema,
   knowledgeBaseListSchema,
   knowledgeBaseSchema,
   noteListSchema,
@@ -74,6 +75,8 @@ import {
   type Entity,
   type EntityImpact,
   type GraphProjectionStatus,
+  type ImportEnqueueResponse,
+  type ImportRequest,
   type KnowledgeBase,
   type Note,
   type PublicJob,
@@ -761,6 +764,35 @@ export async function editProposal(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return proposalSchema.parse(await res.json());
+}
+
+/**
+ * Enqueue a reviewable data import (US-031, editor+). Returns the durable job
+ * id; the import is parsed into a pending proposal in the review queue (AC3).
+ */
+export async function createImport(
+  knowledgeBaseId: string,
+  request: ImportRequest,
+  csrfToken: string,
+): Promise<ImportEnqueueResponse> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/imports`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return importEnqueueResponseSchema.parse(await res.json());
+}
+
+/** List this Knowledge Base's import jobs + their status/failures (US-031, viewer+). */
+export async function listImports(knowledgeBaseId: string): Promise<PublicJob[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/imports`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as { jobs: unknown[] };
+  return body.jobs.map((j) => publicJobSchema.parse(j));
 }
 
 /** List built-in domain Modules with per-KB installed status (US-029, viewer+). */

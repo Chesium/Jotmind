@@ -364,6 +364,12 @@ function describeChange(change: ProposalChange): string {
   if (change.op === 'create_entity') {
     return `New ${change.type}: ${change.name}`;
   }
+  if (change.op === 'create_note') {
+    return `New note: ${change.title ?? change.content.slice(0, 60)}`;
+  }
+  if (change.op === 'create_source') {
+    return `New source: ${change.title}`;
+  }
   const args = change.arguments
     .map((a) => `${a.role}=${a.kind === 'entity' ? (a.ref ?? '?') : JSON.stringify(a.value)}`)
     .join(', ');

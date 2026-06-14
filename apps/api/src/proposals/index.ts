@@ -123,11 +123,19 @@ export interface ProposalRouterOptions {
   authStore?: AuthStore;
   entityStore?: EntityStore;
   claimStore?: ClaimStore;
+  noteStore?: NoteStore;
+  sourceStore?: SourceStore;
 }
 
-/** Outcome of applying a proposal's selected changes (US-018). */
+/** Outcome of applying a proposal's selected changes (US-018/US-031). */
 type ApplyResult =
-  | { ok: true; createdEntityIds: string[]; createdClaimIds: string[] }
+  | {
+      ok: true;
+      createdEntityIds: string[];
+      createdClaimIds: string[];
+      createdNoteIds: string[];
+      createdSourceIds: string[];
+    }
   | { ok: false; reason: string };
 
 /**
@@ -145,13 +153,27 @@ async function applyProposalChanges(args: {
   items: ProposalChange[];
   entityStore: EntityStore;
   claimStore: ClaimStore;
+  noteStore: NoteStore;
+  sourceStore: SourceStore;
   actorUserId: string;
   confirmationNote?: string;
 }): Promise<ApplyResult> {
-  const { kbId, proposal, items, entityStore, claimStore, actorUserId, confirmationNote } = args;
+  const {
+    kbId,
+    proposal,
+    items,
+    entityStore,
+    claimStore,
+    noteStore,
+    sourceStore,
+    actorUserId,
+    confirmationNote,
+  } = args;
 
   const entityItems = items.filter((i) => i.op === 'create_entity');
   const claimItems = items.filter((i) => i.op === 'create_claim');
+  const noteItems = items.filter((i) => i.op === 'create_note');
+  const sourceItems = items.filter((i) => i.op === 'create_source');
 
   // Pre-validate every claim entity-arg ref resolves before mutating anything.
   const newRefs = new Set(entityItems.map((e) => e.ref));
@@ -225,7 +247,35 @@ async function applyProposalChanges(args: {
     createdClaimIds.push(created.id);
   }
 
-  return { ok: true, createdEntityIds, createdClaimIds };
+  // Create notes/sources imported as content (US-031). These have no refs and
+  // no dependencies, so order relative to entities/claims does not matter.
+  const createdNoteIds: string[] = [];
+  for (const item of noteItems) {
+    const note = await noteStore.createNote({
+      knowledgeBaseId: kbId,
+      title: item.title,
+      content: item.content,
+      properties: item.properties ?? {},
+      actorUserId,
+    });
+    createdNoteIds.push(note.id);
+  }
+
+  const createdSourceIds: string[] = [];
+  for (const item of sourceItems) {
+    const source = await sourceStore.createSource({
+      knowledgeBaseId: kbId,
+      title: item.title,
+      sourceType: item.sourceType,
+      uri: item.uri,
+      content: item.content,
+      properties: item.properties ?? {},
+      actorUserId,
+    });
+    createdSourceIds.push(source.id);
+  }
+
+  return { ok: true, createdEntityIds, createdClaimIds, createdNoteIds, createdSourceIds };
 }
 
 /**
@@ -240,6 +290,8 @@ export function createProposalRouter(options: ProposalRouterOptions = {}): Route
   const authStore = options.authStore ?? dbAuthStore;
   const entityStore = options.entityStore ?? dbEntityStore;
   const claimStore = options.claimStore ?? dbClaimStore;
+  const noteStore = options.noteStore ?? dbNoteStore;
+  const sourceStore = options.sourceStore ?? dbSourceStore;
   const router = Router({ mergeParams: true });
   const authed = requireAuth(authStore);
   const requireKbRole = makeRequireKbRole({ kbStore });
@@ -341,6 +393,8 @@ export function createProposalRouter(options: ProposalRouterOptions = {}): Route
         items,
         entityStore,
         claimStore,
+        noteStore,
+        sourceStore,
         actorUserId: ctx.user.id,
         confirmationNote: parsedBody.data.note,
       });
@@ -357,6 +411,8 @@ export function createProposalRouter(options: ProposalRouterOptions = {}): Route
           appliedItemCount: items.length,
           createdEntityIds: applied.createdEntityIds,
           createdClaimIds: applied.createdClaimIds,
+          createdNoteIds: applied.createdNoteIds,
+          createdSourceIds: applied.createdSourceIds,
         },
         actorUserId: ctx.user.id,
       });
@@ -369,6 +425,8 @@ export function createProposalRouter(options: ProposalRouterOptions = {}): Route
         proposal: toProposal(reviewed),
         createdEntityIds: applied.createdEntityIds,
         createdClaimIds: applied.createdClaimIds,
+        createdNoteIds: applied.createdNoteIds,
+        createdSourceIds: applied.createdSourceIds,
       };
       res.status(201).json(result);
     }),

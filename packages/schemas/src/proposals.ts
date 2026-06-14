@@ -88,10 +88,38 @@ export const proposalClaimChangeSchema = z.object({
 });
 export type ProposalClaimChange = z.infer<typeof proposalClaimChangeSchema>;
 
+/**
+ * A candidate new Note (US-031). Importing plain text/Markdown produces these so
+ * the imported content is stored as a canonical Note only after review (AC1/AC3).
+ */
+export const proposalNoteChangeSchema = z.object({
+  op: z.literal('create_note'),
+  title: z.string().max(500).optional(),
+  content: z.string().min(1).max(100000),
+  properties: z.record(z.unknown()).optional(),
+});
+export type ProposalNoteChange = z.infer<typeof proposalNoteChangeSchema>;
+
+/**
+ * A candidate new Source (US-031). Importing plain text/Markdown as a Source
+ * produces these; the Source is created on accept via the canonical write path.
+ */
+export const proposalSourceChangeSchema = z.object({
+  op: z.literal('create_source'),
+  title: z.string().min(1).max(500),
+  sourceType: z.string().max(200).optional(),
+  uri: z.string().max(2000).optional(),
+  content: z.string().max(100000).optional(),
+  properties: z.record(z.unknown()).optional(),
+});
+export type ProposalSourceChange = z.infer<typeof proposalSourceChangeSchema>;
+
 /** A single candidate change within a proposal. */
 export const proposalChangeSchema = z.discriminatedUnion('op', [
   proposalEntityChangeSchema,
   proposalClaimChangeSchema,
+  proposalNoteChangeSchema,
+  proposalSourceChangeSchema,
 ]);
 export type ProposalChange = z.infer<typeof proposalChangeSchema>;
 
@@ -225,5 +253,7 @@ export const acceptProposalResultSchema = z.object({
   proposal: proposalSchema,
   createdEntityIds: z.array(z.string().uuid()),
   createdClaimIds: z.array(z.string().uuid()),
+  createdNoteIds: z.array(z.string().uuid()).default([]),
+  createdSourceIds: z.array(z.string().uuid()).default([]),
 });
 export type AcceptProposalResult = z.infer<typeof acceptProposalResultSchema>;
