@@ -122,9 +122,15 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
   }
 
   return (
-    <section aria-label="graph-views" data-testid="graph-views">
-      <h3>Graph views — {kb.name}</h3>
-      <div role="tablist" aria-label="graph-view-modes">
+    <section aria-label="graph-views" data-testid="graph-views" id="graph-views">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Explore</p>
+          <h3>Graph views</h3>
+        </div>
+        <span className="section-meta">{kb.name}</span>
+      </div>
+      <div role="tablist" aria-label="graph-view-modes" className="segmented-tabs">
         {VIEW_MODES.map((m) => (
           <button
             key={m}
@@ -322,8 +328,20 @@ function NetworkView({
             if (!a || !b) return null;
             return (
               <g key={edge.id}>
-                <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#999" strokeWidth={1} />
-                <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} fontSize={9} fill="#666">
+                <line
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke="var(--graph-edge)"
+                  strokeWidth={1}
+                />
+                <text
+                  x={(a.x + b.x) / 2}
+                  y={(a.y + b.y) / 2}
+                  fontSize={9}
+                  fill="var(--muted)"
+                >
                   {edge.predicate}
                 </text>
               </g>
@@ -344,7 +362,7 @@ function NetworkView({
                 data-testid={`network-node-${e.id}`}
                 style={{ cursor: 'pointer' }}
               >
-                <circle cx={p.x} cy={p.y} r={6} fill="#3b82f6" />
+                <circle cx={p.x} cy={p.y} r={7} fill="var(--accent)" />
                 <text x={p.x + 8} y={p.y + 3} fontSize={11}>
                   {e.name}
                 </text>

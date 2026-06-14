@@ -87,9 +87,14 @@ export function App() {
   }, []);
 
   return (
-    <main>
-      <h1>JotMind</h1>
-      <p>Privacy-first, self-hostable graph knowledge app.</p>
+    <main className="app">
+      <header className="app-masthead">
+        <div>
+          <p className="eyebrow">Self-hosted knowledge graph</p>
+          <h1>JotMind</h1>
+          <p>Capture notes, structure claims, preserve provenance, and reason over your graph.</p>
+        </div>
+      </header>
       {error && (
         <p role="alert" data-testid="app-error">
           {error}
@@ -145,10 +150,13 @@ function SetupForm({ onDone }: { onDone: (state: AuthState) => void }) {
   }
 
   return (
-    <section aria-label="first-run-setup">
-      <h2>First-run setup</h2>
-      <p>Create the initial administrator account.</p>
-      <form onSubmit={submit}>
+    <section aria-label="first-run-setup" className="auth-card">
+      <div>
+        <p className="eyebrow">Private by default</p>
+        <h2>First-run setup</h2>
+        <p>Create the initial administrator account for this server instance.</p>
+      </div>
+      <form onSubmit={submit} className="stack-form">
         <CredentialFields
           email={email}
           password={password}
@@ -184,9 +192,12 @@ function LoginForm({ onDone }: { onDone: (state: AuthState) => void }) {
   }
 
   return (
-    <section aria-label="login">
-      <h2>Sign in</h2>
-      <form onSubmit={submit}>
+    <section aria-label="login" className="auth-card">
+      <div>
+        <p className="eyebrow">Existing server</p>
+        <h2>Sign in</h2>
+      </div>
+      <form onSubmit={submit} className="stack-form">
         <CredentialFields
           email={email}
           password={password}
@@ -216,17 +227,42 @@ function AuthedHome({ auth, onLogout }: { auth: AuthState; onLogout: () => void 
   }
 
   return (
-    <section aria-label="account">
-      <p data-testid="current-user">
-        Signed in as {auth.user.email} ({auth.user.role})
-      </p>
-      <button type="button" onClick={() => void doLogout()} data-testid="logout">
-        Sign out
-      </button>
-      <KnowledgeBases csrfToken={auth.csrfToken} />
-      <AiPolicySettings isAdmin={auth.user.role === 'admin'} csrfToken={auth.csrfToken} />
-      {auth.user.role === 'admin' && <AccountCreator csrfToken={auth.csrfToken} />}
-      {error && <p data-testid="logout-error">{error}</p>}
+    <section aria-label="account" className="app-shell">
+      <aside className="app-sidebar" aria-label="server navigation">
+        <div className="brand-lockup">
+          <span aria-hidden="true">JM</span>
+          <div>
+            <strong>JotMind</strong>
+            <small>Graph note server</small>
+          </div>
+        </div>
+        <div className="account-card">
+          <p data-testid="current-user">
+            Signed in as <strong>{auth.user.email}</strong>
+            <span>{auth.user.role}</span>
+          </p>
+          <button type="button" onClick={() => void doLogout()} data-testid="logout">
+            Sign out
+          </button>
+          {error && <p data-testid="logout-error">{error}</p>}
+        </div>
+        <nav className="rail-nav" aria-label="workspace sections">
+          <a href="#knowledge-bases">Knowledge Bases</a>
+          <a href="#ai-policy">AI policy</a>
+          {auth.user.role === 'admin' && <a href="#account-admin">Accounts</a>}
+        </nav>
+      </aside>
+      <div className="app-content">
+        <KnowledgeBases csrfToken={auth.csrfToken} />
+        <section id="ai-policy" className="workspace-panel">
+          <AiPolicySettings isAdmin={auth.user.role === 'admin'} csrfToken={auth.csrfToken} />
+        </section>
+        {auth.user.role === 'admin' && (
+          <section id="account-admin" className="workspace-panel">
+            <AccountCreator csrfToken={auth.csrfToken} />
+          </section>
+        )}
+      </div>
     </section>
   );
 }
@@ -274,65 +310,128 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
   }
 
   return (
-    <section aria-label="knowledge-bases">
-      <h2>Knowledge Bases</h2>
-      {items.length === 0 ? (
-        <p data-testid="kb-empty">No Knowledge Bases yet. Create one to get started.</p>
-      ) : (
-        <ul data-testid="kb-list">
-          {items.map((kb) => (
-            <li key={kb.id}>
-              <button
-                type="button"
-                aria-pressed={selectedId === kb.id}
-                onClick={() => setSelectedId(kb.id)}
-                data-testid={`kb-select-${kb.id}`}
-              >
-                {kb.name} ({kb.role}){selectedId === kb.id ? ' — selected' : ''}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form onSubmit={submit}>
-        <label>
-          Name
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            data-testid="kb-name"
-          />
-        </label>
-        <label>
-          Description
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            data-testid="kb-description"
-          />
-        </label>
-        <button type="submit" disabled={busy} data-testid="kb-create-submit">
-          Create Knowledge Base
-        </button>
-      </form>
-      {error && <p data-testid="kb-error">{error}</p>}
-      {selectedKb && <CommandBox kb={selectedKb} />}
-      {selectedKb && <Answers kb={selectedKb} />}
-      {selectedKb && <GraphViews kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <Search kb={selectedKb} />}
-      {selectedKb && <Modules kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <SchemaDefinitions kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <Capture kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <Imports kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <Proposals kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <Rules kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <KbAdmin kb={selectedKb} csrfToken={csrfToken} />}
+    <section aria-label="knowledge-bases" className="kb-workspace" id="knowledge-bases">
+      <div className="workspace-header">
+        <div>
+          <p className="eyebrow">Knowledge Base scope</p>
+          <h2>Knowledge Bases</h2>
+          <p>
+            Select a graph scope, then capture notes, model entities and claims, review AI work,
+            and inspect reasoning output.
+          </p>
+        </div>
+        {selectedKb && (
+          <div className="kb-status-card">
+            <span>Active KB</span>
+            <strong>{selectedKb.name}</strong>
+            <small>{selectedKb.role}</small>
+          </div>
+        )}
+      </div>
+
+      <div className="kb-layout">
+        <aside className="kb-rail" aria-label="knowledge-base list">
+          {items.length === 0 ? (
+            <p data-testid="kb-empty">No Knowledge Bases yet. Create one to get started.</p>
+          ) : (
+            <ul data-testid="kb-list" className="kb-list">
+              {items.map((kb) => (
+                <li key={kb.id}>
+                  <button
+                    type="button"
+                    aria-pressed={selectedId === kb.id}
+                    onClick={() => setSelectedId(kb.id)}
+                    data-testid={`kb-select-${kb.id}`}
+                  >
+                    <span>{kb.name} </span>
+                    <small>
+                      ({kb.role})
+                      {selectedId === kb.id ? ' — selected' : ''}
+                    </small>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form onSubmit={submit} className="stack-form compact-form">
+            <h3>Create Knowledge Base</h3>
+            <label>
+              Name
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                data-testid="kb-name"
+              />
+            </label>
+            <label>
+              Description
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                data-testid="kb-description"
+              />
+            </label>
+            <button type="submit" disabled={busy} data-testid="kb-create-submit">
+              Create Knowledge Base
+            </button>
+          </form>
+          {error && <p data-testid="kb-error">{error}</p>}
+        </aside>
+
+        <div className="kb-main">
+          {selectedKb ? (
+            <>
+              <div className="kb-hero">
+                <div>
+                  <p className="eyebrow">Graph workspace</p>
+                  <h3>{selectedKb.name}</h3>
+                  <p>{selectedKb.description ?? 'No description set for this Knowledge Base.'}</p>
+                </div>
+                <div className="quick-links" aria-label="quick workspace links">
+                  <a href="#graph-views">Views</a>
+                  <a href="#manual-graph">Manual graph</a>
+                  <a href="#capture">Capture</a>
+                  <a href="#automation">Automation</a>
+                </div>
+              </div>
+              <div className="workflow-grid">
+                <div className="workflow-column primary-flow">
+                  <CommandBox kb={selectedKb} />
+                  <Answers kb={selectedKb} />
+                  <GraphViews kb={selectedKb} csrfToken={csrfToken} />
+                  <Search kb={selectedKb} />
+                </div>
+                <div className="workflow-column" id="manual-graph">
+                  <Entities kb={selectedKb} csrfToken={csrfToken} />
+                  <Claims kb={selectedKb} csrfToken={csrfToken} />
+                  <Capture kb={selectedKb} csrfToken={csrfToken} />
+                </div>
+                <div className="workflow-column" id="automation">
+                  <Modules kb={selectedKb} csrfToken={csrfToken} />
+                  <SchemaDefinitions kb={selectedKb} csrfToken={csrfToken} />
+                  <Imports kb={selectedKb} csrfToken={csrfToken} />
+                  <Proposals kb={selectedKb} csrfToken={csrfToken} />
+                  <Rules kb={selectedKb} csrfToken={csrfToken} />
+                  <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />
+                  <KbAdmin kb={selectedKb} csrfToken={csrfToken} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <p className="eyebrow">No active graph</p>
+              <h3>Select or create a Knowledge Base</h3>
+              <p>
+                JotMind keeps each graph, schema, rule pack, audit stream, and AI policy scoped to a
+                Knowledge Base.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

@@ -1,0 +1,26 @@
+{
+  "candidateId": "ac614ab1-2bbb-4a12-ba7e-7683275b6172",
+  "projectId": "7ab9ed97-7afa-4ba6-863e-20f7c2eb6edd",
+  "runId": "789f1edd-6514-467b-a710-44b6e8a7cd66",
+  "conversationId": "5303a447-9775-46b1-9d39-8c1d16f00131",
+  "provenance": {
+    "summary": "Detected from AGENTS.md, fix_plan.md after a successful run.",
+    "detectedAt": 1781441882192
+  },
+  "sourceRefs": [
+    {
+      "kind": "file",
+      "value": "AGENTS.md",
+      "label": "AGENTS.md",
+      "size": 81545,
+      "copied": true
+    },
+    {
+      "kind": "file",
+      "value": "fix_plan.md",
+      "label": "fix_plan.md",
+      "size": 5022,
+      "copied": true
+    }
+  ]
+}

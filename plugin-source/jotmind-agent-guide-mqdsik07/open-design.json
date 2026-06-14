@@ -1,0 +1,22 @@
+{
+  "$schema": "https://open-design.ai/schemas/plugin.v1.json",
+  "specVersion": "1.0.0",
+  "name": "jotmind-agent-guide-mqdsik07",
+  "title": "JotMind — Agent Guide",
+  "version": "0.1.0",
+  "description": "- Only **Node 18** is available in this environment. Pin tooling to Node-18-compatible versions: Vite 5, Vitest 2, ESLint 9, TypeScript 5.x. Latest pnpm requires Node 22, so use **pnpm 9** (`npm install -g pnpm@9`; npm g",
+  "od": {
+    "kind": "skill",
+    "taskKind": "new-generation",
+    "context": {
+      "skills": [
+        {
+          "path": "./SKILL.md"
+        }
+      ]
+    },
+    "capabilities": [
+      "prompt:inject"
+    ]
+  }
+}
