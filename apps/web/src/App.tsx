@@ -46,6 +46,7 @@ import {
 } from './api.js';
 import { GraphViews } from './GraphViews.js';
 import { KbAdmin } from './KbAdmin.js';
+import { AiPolicySettings, KbAiPolicy } from './AiPolicySettings.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -215,6 +216,7 @@ function AuthedHome({ auth, onLogout }: { auth: AuthState; onLogout: () => void 
         Sign out
       </button>
       <KnowledgeBases csrfToken={auth.csrfToken} />
+      <AiPolicySettings isAdmin={auth.user.role === 'admin'} csrfToken={auth.csrfToken} />
       {auth.user.role === 'admin' && <AccountCreator csrfToken={auth.csrfToken} />}
       {error && <p data-testid="logout-error">{error}</p>}
     </section>
@@ -314,6 +316,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Capture kb={selectedKb} csrfToken={csrfToken} />}
+      {selectedKb && <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <KbAdmin kb={selectedKb} />}
     </section>
   );

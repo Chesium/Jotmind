@@ -23,6 +23,11 @@ import {
 } from './graph/index.js';
 import { createJobsRouter, type JobStore } from './jobs/index.js';
 import { createSearchRouter, type SearchStore } from './search/index.js';
+import {
+  createAiPolicyKbRouter,
+  createAiPolicyRouter,
+  type AiPolicyStore,
+} from './ai-policy/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -92,6 +97,11 @@ export interface AppOptions {
    * PostgreSQL-backed store.
    */
   searchStore?: SearchStore;
+  /**
+   * Layered AI privacy policy store (US-016). Injectable for unit tests.
+   * Defaults to the PostgreSQL-backed store.
+   */
+  aiPolicyStore?: AiPolicyStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -143,6 +153,15 @@ export function createApp(options: AppOptions = {}): Express {
     '/api/knowledge-bases/:kbId/search',
     createSearchRouter({ store: options.searchStore, kbStore: options.kbStore, authStore }),
   );
+  app.use(
+    '/api/knowledge-bases/:kbId/ai/policy',
+    createAiPolicyKbRouter({
+      store: options.aiPolicyStore,
+      kbStore: options.kbStore,
+      authStore,
+    }),
+  );
+  app.use('/api/ai', createAiPolicyRouter({ store: options.aiPolicyStore, authStore }));
   app.use(
     '/api/graph',
     createGraphRouter({ authStore, projectionStore: options.projectionStore, projector }),

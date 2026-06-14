@@ -434,8 +434,8 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `OpenAiCompatibleProvider` (same REST shape). HTTP adapters use global `fetch`
   via `ai/http.ts` `postJson`; failures throw `AiProviderError`.
 - **Secrets are separated from portable config (AC4).** Config schemas are a Zod
-  `discriminatedUnion('kind', ...)`. Two variants per kind: a *portable* schema
-  (safe to export) and a *full* schema that `.extend`s secret fields. The secret
+  `discriminatedUnion('kind', ...)`. Two variants per kind: a _portable_ schema
+  (safe to export) and a _full_ schema that `.extend`s secret fields. The secret
   field list is `AI_PROVIDER_SECRET_FIELDS` (currently `['apiKey']`).
   `toPortableProviderConfig(config)` strips secrets AND re-parses against
   `portableAiProviderConfigSchema` (parse drops unknown keys, so a leaked secret
@@ -448,6 +448,49 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `vi.spyOn(globalThis, 'fetch')` returning a `Response`; no live endpoint. No
   DB, no migration, no router for this story — later stories (US-016 privacy
   settings, US-021 embeddings, US-017/018 proposals) consume this layer.
+
+## Layered AI privacy policy (US-016)
+
+- AI usage is gated by THREE policy layers — `server` / `knowledge_base` / `user`
+  — evaluated **strictest-policy-wins** (`@jotmind/schemas` `ai.ts`:
+  `resolveAiPolicy(policies)`, `AI_POLICY_MODE_RANK`). Modes (least→most
+  permissive): `off` < `local_only` < `remote_per_request` < `remote_always`.
+  Fresh installs (no rows) resolve to `off`/No AI via `DEFAULT_AI_POLICY` (AC1).
+  **Pass a missing applicable layer as `DEFAULT_AI_POLICY`, NOT omitted** — omit
+  a layer only when it does not apply (e.g. non-KB calls skip the KB layer).
+- `remoteEmbeddings` is a SEPARATE per-layer consent (AC4): even when the mode
+  allows remote, `resolveAiPolicy` only sets `remoteEmbeddingsAllowed` when
+  remote is allowed AND **every** applicable layer has `remoteEmbeddings: true`.
+- DB: single `ai_policies` table (`apps/api/src/db/schema.ts`, migration
+  `drizzle/0004_glamorous_jocasta.sql`). One row per layer: `scope='server'` →
+  `scopeId IS NULL` (partial unique index `ai_policies_server_uq` enforces a
+  single server row); `scope IN ('knowledge_base','user')` → `scopeId` set
+  (partial unique `ai_policies_scope_scope_id_uq`). Check constraints validate
+  scope/mode enums + the scope↔scopeId-null relationship. NO soft-delete.
+- Store/router follow the injectable-store pattern: `ai-policy/store.ts`
+  (`AiPolicyStore` interface + `dbAiPolicyStore`; `getPolicy` returns
+  `DEFAULT_AI_POLICY` when no row), `ai-policy/index.ts` (`createAiPolicyRouter`
+  mounted at `/api/ai`, `createAiPolicyKbRouter` mounted at
+  `/api/knowledge-bases/:kbId/ai/policy` AFTER the KB router). `createApp` seam:
+  `aiPolicyStore`. `updatePolicy` UPSERTs the row + writes an `audit_events`
+  (`ai_policy.updated`) row in the SAME tx.
+- Routes: `GET /api/ai/policy/server` (any authed), `PUT` (system admin+CSRF);
+  `GET|PUT /api/ai/policy/me` (self, CSRF on PUT); `GET /api/ai/policy`
+  (effective server+user). KB router: `GET /` (viewer), `PUT /` (KB admin+CSRF),
+  non-members get 404. `updateAiPolicySchema` rejects empty payloads.
+- Confirmation/audit helpers for FUTURE remote calls live in `ai.ts`:
+  `remoteCallConfirmationSchema` (provider/model/feature/contentCategories, AC5)
+  and `buildRemoteAiAuditMetadata()` — an **allowlist** builder so full prompts /
+  note content / API keys / model responses can NEVER leak into audit (AC6). All
+  future remote-AI call sites (US-017/020) MUST record audit via this helper and
+  show a confirmation built from `remoteCallConfirmationSchema`.
+- Web: `apps/web/src/AiPolicySettings.tsx` (own file) exports `<AiPolicySettings>`
+  (server+user layers, server editable only when `isAdmin`; rendered in
+  `AuthedHome`) and `<KbAiPolicy>` (KB layer, editable when
+  `kbRoleSatisfies(kb.role,'admin')`; rendered in the selected-KB section). Both
+  show the effective resolved policy. API client helpers in `api.ts`:
+  `getAiPolicyOverview`/`updateServerAiPolicy`/`updateMyAiPolicy`/`getKbAiPolicy`/
+  `updateKbAiPolicy`.
 
 ## Validation
 

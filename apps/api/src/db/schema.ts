@@ -153,6 +153,60 @@ export const auditEvents = pgTable('audit_events', {
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type NewAuditEventRow = typeof auditEvents.$inferInsert;
 
+/**
+ * Layered AI privacy policy (US-016). One row per policy layer:
+ *   - `scope = 'server'`         → `scopeId` IS NULL (at most one row).
+ *   - `scope = 'knowledge_base'` → `scopeId` = a Knowledge Base id.
+ *   - `scope = 'user'`           → `scopeId` = a user id.
+ * Missing rows resolve to the strictest policy ("No AI"/`off`) in the app layer
+ * (`DEFAULT_AI_POLICY`), so fresh installs default to No AI (AC1). The effective
+ * policy for a call is the strictest across the applicable layers (AC2).
+ * `remoteEmbeddings` is the separate remote-embedding consent (AC4).
+ */
+export const aiPolicies = pgTable(
+  'ai_policies',
+  {
+    id: uuid('id')
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    scope: text('scope').notNull(),
+    scopeId: uuid('scope_id'),
+    mode: text('mode').notNull().default('off'),
+    remoteEmbeddings: boolean('remote_embeddings').notNull().default(false),
+    updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => ({
+    scopeCheck: check(
+      'ai_policies_scope_check',
+      sql`${table.scope} IN ('server', 'knowledge_base', 'user')`,
+    ),
+    modeCheck: check(
+      'ai_policies_mode_check',
+      sql`${table.mode} IN ('off', 'local_only', 'remote_per_request', 'remote_always')`,
+    ),
+    scopeIdCheck: check(
+      'ai_policies_scope_id_check',
+      sql`(${table.scope} = 'server' AND ${table.scopeId} IS NULL)
+          OR (${table.scope} IN ('knowledge_base', 'user') AND ${table.scopeId} IS NOT NULL)`,
+    ),
+    uniqueServer: uniqueIndex('ai_policies_server_uq')
+      .on(table.scope)
+      .where(sql`scope = 'server'`),
+    uniqueScoped: uniqueIndex('ai_policies_scope_scope_id_uq')
+      .on(table.scope, table.scopeId)
+      .where(sql`scope_id IS NOT NULL`),
+  }),
+);
+
+export type AiPolicyRow = typeof aiPolicies.$inferSelect;
+export type NewAiPolicyRow = typeof aiPolicies.$inferInsert;
+
 // ---------------------------------------------------------------------------
 // Canonical graph schema tables (US-005)
 //

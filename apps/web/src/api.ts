@@ -1,4 +1,6 @@
 import {
+  aiPolicySchema,
+  resolvedAiPolicySchema,
   auditEventSchema,
   authStateSchema,
   claimListSchema,
@@ -19,6 +21,9 @@ import {
   sourceListSchema,
   sourceSchema,
   type AccountRole,
+  type AiPolicy,
+  type ResolvedAiPolicy,
+  type UpdateAiPolicy,
   type AuditEvent,
   type AuthState,
   type Claim,
@@ -484,4 +489,98 @@ export async function listKbJobs(knowledgeBaseId: string): Promise<PublicJob[]> 
   if (!res.ok) throw new Error(await errorMessage(res));
   const body = (await res.json()) as { jobs: unknown[] };
   return body.jobs.map((j) => publicJobSchema.parse(j));
+}
+
+// --- Layered AI privacy policy (US-016) ------------------------------------
+
+export interface AiPolicyOverview {
+  server: AiPolicy;
+  user: AiPolicy;
+  effective: ResolvedAiPolicy;
+}
+
+export interface KbAiPolicyView {
+  policy: AiPolicy;
+  server: AiPolicy;
+  user: AiPolicy;
+  effective: ResolvedAiPolicy;
+}
+
+/** The caller's effective non-KB AI policy (server + user layers). */
+export async function getAiPolicyOverview(): Promise<AiPolicyOverview> {
+  const res = await fetch('/api/ai/policy', { credentials: 'include' });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as Record<string, unknown>;
+  return {
+    server: aiPolicySchema.parse(body.server),
+    user: aiPolicySchema.parse(body.user),
+    effective: resolvedAiPolicySchema.parse(body.effective),
+  };
+}
+
+/** Set the server-wide AI policy layer (system admin only). */
+export async function updateServerAiPolicy(
+  changes: UpdateAiPolicy,
+  csrfToken: string,
+): Promise<AiPolicy> {
+  const res = await fetch('/api/ai/policy/server', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(changes),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return aiPolicySchema.parse(await res.json());
+}
+
+/** Set the caller's own user AI policy layer. */
+export async function updateMyAiPolicy(
+  changes: UpdateAiPolicy,
+  csrfToken: string,
+): Promise<AiPolicy> {
+  const res = await fetch('/api/ai/policy/me', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(changes),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return aiPolicySchema.parse(await res.json());
+}
+
+/** Knowledge-Base AI policy + effective policy (server + KB + user). */
+export async function getKbAiPolicy(knowledgeBaseId: string): Promise<KbAiPolicyView> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/ai/policy`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as Record<string, unknown>;
+  return {
+    policy: aiPolicySchema.parse(body.policy),
+    server: aiPolicySchema.parse(body.server),
+    user: aiPolicySchema.parse(body.user),
+    effective: resolvedAiPolicySchema.parse(body.effective),
+  };
+}
+
+/** Set the Knowledge-Base AI policy layer (KB admin/owner only). */
+export async function updateKbAiPolicy(
+  knowledgeBaseId: string,
+  changes: UpdateAiPolicy,
+  csrfToken: string,
+): Promise<KbAiPolicyView> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/ai/policy`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(changes),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as Record<string, unknown>;
+  return {
+    policy: aiPolicySchema.parse(body.policy),
+    server: aiPolicySchema.parse(body.server),
+    user: aiPolicySchema.parse(body.user),
+    effective: resolvedAiPolicySchema.parse(body.effective),
+  };
 }

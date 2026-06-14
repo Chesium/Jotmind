@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   aiProviderConfigSchema,
+  buildRemoteAiAuditMetadata,
+  DEFAULT_AI_POLICY,
   embeddingResultSchema,
   llmCompletionRequestSchema,
   portableAiProviderConfigSchema,
   providerConfigHasSecrets,
+  REMOTE_AI_AUDIT_FORBIDDEN_KEYS,
+  resolveAiPolicy,
   toPortableProviderConfig,
+  updateAiPolicySchema,
+  type AiPolicy,
 } from './ai.js';
 
 describe('aiProviderConfigSchema', () => {
@@ -94,5 +100,173 @@ describe('message + embedding shapes', () => {
       dimensions: 2,
     });
     expect(parsed.embeddings).toHaveLength(1);
+  });
+});
+
+describe('resolveAiPolicy (US-016)', () => {
+  const off: AiPolicy = { mode: 'off', remoteEmbeddings: false };
+  const localOnly: AiPolicy = { mode: 'local_only', remoteEmbeddings: false };
+  const perRequest: AiPolicy = { mode: 'remote_per_request', remoteEmbeddings: false };
+  const always: AiPolicy = { mode: 'remote_always', remoteEmbeddings: true };
+
+  it('defaults to No AI when no policies apply (AC1)', () => {
+    const r = resolveAiPolicy([]);
+    expect(r.mode).toBe('off');
+    expect(r.remoteAllowed).toBe(false);
+    expect(r.remoteEmbeddingsAllowed).toBe(false);
+    expect(r.requiresPerRequestConfirmation).toBe(false);
+  });
+
+  it('the default policy is No AI (AC1)', () => {
+    expect(DEFAULT_AI_POLICY).toEqual({ mode: 'off', remoteEmbeddings: false });
+  });
+
+  it('picks the strictest mode across layers (AC2)', () => {
+    expect(resolveAiPolicy([always, always, perRequest]).mode).toBe('remote_per_request');
+    expect(resolveAiPolicy([perRequest, always, always]).mode).toBe('remote_per_request');
+    expect(resolveAiPolicy([always, localOnly, always]).mode).toBe('local_only');
+    expect(resolveAiPolicy([always, always, off]).mode).toBe('off');
+    expect(resolveAiPolicy([always, always, always]).mode).toBe('remote_always');
+  });
+
+  it('only allows remote_always when every layer selects it (AC3)', () => {
+    expect(resolveAiPolicy([always, always, always]).requiresPerRequestConfirmation).toBe(false);
+    expect(resolveAiPolicy([always, always, perRequest]).requiresPerRequestConfirmation).toBe(true);
+  });
+
+  it('requires every layer to consent to remote embeddings (AC4)', () => {
+    expect(resolveAiPolicy([always, always, always]).remoteEmbeddingsAllowed).toBe(true);
+    expect(
+      resolveAiPolicy([always, always, { mode: 'remote_always', remoteEmbeddings: false }])
+        .remoteEmbeddingsAllowed,
+    ).toBe(false);
+    // No remote embeddings when remote isn't allowed at all.
+    expect(
+      resolveAiPolicy([
+        { mode: 'local_only', remoteEmbeddings: true },
+        { mode: 'local_only', remoteEmbeddings: true },
+      ]).remoteEmbeddingsAllowed,
+    ).toBe(false);
+  });
+});
+
+describe('updateAiPolicySchema (US-016)', () => {
+  it('rejects an empty payload', () => {
+    expect(updateAiPolicySchema.safeParse({}).success).toBe(false);
+  });
+  it('accepts a partial update', () => {
+    expect(updateAiPolicySchema.safeParse({ mode: 'local_only' }).success).toBe(true);
+    expect(updateAiPolicySchema.safeParse({ remoteEmbeddings: true }).success).toBe(true);
+  });
+});
+
+describe('buildRemoteAiAuditMetadata (US-016 AC6)', () => {
+  it('excludes prompts, content, api keys, and responses via allowlist', () => {
+    const meta = buildRemoteAiAuditMetadata({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      feature: 'proposal_extraction',
+      contentCategories: ['note_text'],
+      tokenCounts: { totalTokens: 42 },
+      // Hostile extra fields that must never survive:
+      prompt: 'full secret prompt',
+      content: 'full note content',
+      apiKey: 'sk-secret',
+      response: 'full model response',
+      messages: [{ role: 'user', content: 'secret' }],
+    });
+    const serialized = JSON.stringify(meta);
+    for (const key of REMOTE_AI_AUDIT_FORBIDDEN_KEYS) {
+      expect(Object.prototype.hasOwnProperty.call(meta, key)).toBe(false);
+    }
+    expect(serialized).not.toContain('secret');
+    expect(serialized).not.toContain('full note content');
+    expect(meta.provider).toBe('openai');
+    expect(meta.contentCategories).toEqual(['note_text']);
+    expect(meta.tokenCounts?.totalTokens).toBe(42);
+  });
+});
+
+describe('resolveAiPolicy (US-016)', () => {
+  const off: AiPolicy = { mode: 'off', remoteEmbeddings: false };
+  const localOnly: AiPolicy = { mode: 'local_only', remoteEmbeddings: false };
+  const perRequest: AiPolicy = { mode: 'remote_per_request', remoteEmbeddings: false };
+  const always: AiPolicy = { mode: 'remote_always', remoteEmbeddings: true };
+
+  it('defaults to No AI when no policies apply (AC1)', () => {
+    const r = resolveAiPolicy([]);
+    expect(r.mode).toBe('off');
+    expect(r.remoteAllowed).toBe(false);
+    expect(r.remoteEmbeddingsAllowed).toBe(false);
+    expect(r.requiresPerRequestConfirmation).toBe(false);
+  });
+
+  it('the default policy is No AI (AC1)', () => {
+    expect(DEFAULT_AI_POLICY).toEqual({ mode: 'off', remoteEmbeddings: false });
+  });
+
+  it('picks the strictest mode across layers (AC2)', () => {
+    expect(resolveAiPolicy([always, always, perRequest]).mode).toBe('remote_per_request');
+    expect(resolveAiPolicy([perRequest, always, always]).mode).toBe('remote_per_request');
+    expect(resolveAiPolicy([always, localOnly, always]).mode).toBe('local_only');
+    expect(resolveAiPolicy([always, always, off]).mode).toBe('off');
+    expect(resolveAiPolicy([always, always, always]).mode).toBe('remote_always');
+  });
+
+  it('only allows remote_always when every layer selects it (AC3)', () => {
+    expect(resolveAiPolicy([always, always, always]).requiresPerRequestConfirmation).toBe(false);
+    expect(resolveAiPolicy([always, always, perRequest]).requiresPerRequestConfirmation).toBe(true);
+  });
+
+  it('requires every layer to consent to remote embeddings (AC4)', () => {
+    expect(resolveAiPolicy([always, always, always]).remoteEmbeddingsAllowed).toBe(true);
+    expect(
+      resolveAiPolicy([always, always, { mode: 'remote_always', remoteEmbeddings: false }])
+        .remoteEmbeddingsAllowed,
+    ).toBe(false);
+    // No remote embeddings when remote isn't allowed at all.
+    expect(
+      resolveAiPolicy([
+        { mode: 'local_only', remoteEmbeddings: true },
+        { mode: 'local_only', remoteEmbeddings: true },
+      ]).remoteEmbeddingsAllowed,
+    ).toBe(false);
+  });
+});
+
+describe('updateAiPolicySchema (US-016)', () => {
+  it('rejects an empty payload', () => {
+    expect(updateAiPolicySchema.safeParse({}).success).toBe(false);
+  });
+  it('accepts a partial update', () => {
+    expect(updateAiPolicySchema.safeParse({ mode: 'local_only' }).success).toBe(true);
+    expect(updateAiPolicySchema.safeParse({ remoteEmbeddings: true }).success).toBe(true);
+  });
+});
+
+describe('buildRemoteAiAuditMetadata (US-016 AC6)', () => {
+  it('excludes prompts, content, api keys, and responses via allowlist', () => {
+    const meta = buildRemoteAiAuditMetadata({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      feature: 'proposal_extraction',
+      contentCategories: ['note_text'],
+      tokenCounts: { totalTokens: 42 },
+      // Hostile extra fields that must never survive:
+      prompt: 'full secret prompt',
+      content: 'full note content',
+      apiKey: 'sk-secret',
+      response: 'full model response',
+      messages: [{ role: 'user', content: 'secret' }],
+    });
+    const serialized = JSON.stringify(meta);
+    for (const key of REMOTE_AI_AUDIT_FORBIDDEN_KEYS) {
+      expect(Object.prototype.hasOwnProperty.call(meta, key)).toBe(false);
+    }
+    expect(serialized).not.toContain('secret');
+    expect(serialized).not.toContain('full note content');
+    expect(meta.provider).toBe('openai');
+    expect(meta.contentCategories).toEqual(['note_text']);
+    expect(meta.tokenCounts?.totalTokens).toBe(42);
   });
 });

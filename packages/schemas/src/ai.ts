@@ -217,3 +217,214 @@ export function providerConfigHasSecrets(config: AiProviderConfig): boolean {
     (field) => (config as Record<string, unknown>)[field] !== undefined,
   );
 }
+
+// ===========================================================================
+// Layered AI privacy policy (US-016)
+//
+// AI usage is gated by three independent policy layers — server, Knowledge
+// Base, and user — evaluated with **strictest-policy-wins** semantics (AC2).
+// Fresh installs (no stored rows) resolve to `off` / "No AI" (AC1).
+// ===========================================================================
+
+/**
+ * AI policy modes, ordered least → most permissive. Each layer (server / KB /
+ * user) independently picks one; the effective mode is the **strictest** (lowest
+ * rank) across the applicable layers.
+ *
+ * - `off`                — No AI at all (default for fresh installs, AC1).
+ * - `local_only`         — only local providers (ollama / openai-compatible); no
+ *                          remote calls.
+ * - `remote_per_request` — remote providers allowed but every remote call needs
+ *                          explicit per-request confirmation (AC3).
+ * - `remote_always`      — remote providers allowed without per-request
+ *                          confirmation. Effective only when *every* applicable
+ *                          layer selects it, so "always allowed" is genuinely
+ *                          per-user and per-Knowledge-Base (AC3).
+ */
+export const AI_POLICY_MODES = [
+  'off',
+  'local_only',
+  'remote_per_request',
+  'remote_always',
+] as const;
+export const aiPolicyModeSchema = z.enum(AI_POLICY_MODES);
+export type AiPolicyMode = (typeof AI_POLICY_MODES)[number];
+
+/** Strictness rank: lower = stricter. The effective mode is the minimum rank. */
+export const AI_POLICY_MODE_RANK: Record<AiPolicyMode, number> = {
+  off: 0,
+  local_only: 1,
+  remote_per_request: 2,
+  remote_always: 3,
+};
+
+/** The three layers an AI policy can be attached to. */
+export const AI_POLICY_SCOPES = ['server', 'knowledge_base', 'user'] as const;
+export const aiPolicyScopeSchema = z.enum(AI_POLICY_SCOPES);
+export type AiPolicyScope = (typeof AI_POLICY_SCOPES)[number];
+
+/** A single layer's AI policy. */
+export const aiPolicySchema = z.object({
+  mode: aiPolicyModeSchema,
+  /**
+   * Separate consent for sending content to *remote* embedding providers
+   * (AC4). Even when `mode` permits remote calls, remote embeddings stay
+   * disabled until this is explicitly granted on every applicable layer.
+   */
+  remoteEmbeddings: z.boolean(),
+});
+export type AiPolicy = z.infer<typeof aiPolicySchema>;
+
+/** Default policy applied when no row exists for a layer: No AI (AC1). */
+export const DEFAULT_AI_POLICY: AiPolicy = { mode: 'off', remoteEmbeddings: false };
+
+/** Partial update to a layer's policy. Rejects empty payloads. */
+export const updateAiPolicySchema = z
+  .object({
+    mode: aiPolicyModeSchema.optional(),
+    remoteEmbeddings: z.boolean().optional(),
+  })
+  .refine((v) => v.mode !== undefined || v.remoteEmbeddings !== undefined, {
+    message: 'At least one of mode or remoteEmbeddings is required',
+  });
+export type UpdateAiPolicy = z.infer<typeof updateAiPolicySchema>;
+
+/** The resolved effective policy for a given context (set of applicable layers). */
+export const resolvedAiPolicySchema = z.object({
+  mode: aiPolicyModeSchema,
+  /** True when the effective mode permits remote provider calls. */
+  remoteAllowed: z.boolean(),
+  /** True when remote embeddings are permitted (remote allowed AND all layers consent). */
+  remoteEmbeddingsAllowed: z.boolean(),
+  /** True when remote calls require explicit per-request confirmation (AC3/AC5). */
+  requiresPerRequestConfirmation: z.boolean(),
+});
+export type ResolvedAiPolicy = z.infer<typeof resolvedAiPolicySchema>;
+
+/**
+ * Resolve the effective AI policy from the **applicable** layers using
+ * strictest-policy-wins (AC2). Pass only the layers that apply to the call:
+ * server + user for non-KB calls, server + KB + user for KB-scoped calls.
+ * An empty list (no policies configured anywhere) resolves to `off` (AC1).
+ *
+ * Note: a *missing* row for an applicable scope should be passed as
+ * {@link DEFAULT_AI_POLICY} (= `off`); do NOT omit it. Omit a layer only when it
+ * does not apply to the call (e.g. there is no Knowledge Base).
+ */
+export function resolveAiPolicy(policies: readonly AiPolicy[]): ResolvedAiPolicy {
+  if (policies.length === 0) {
+    return {
+      mode: 'off',
+      remoteAllowed: false,
+      remoteEmbeddingsAllowed: false,
+      requiresPerRequestConfirmation: false,
+    };
+  }
+  const mode = policies.reduce<AiPolicyMode>(
+    (strictest, p) =>
+      AI_POLICY_MODE_RANK[p.mode] < AI_POLICY_MODE_RANK[strictest] ? p.mode : strictest,
+    'remote_always',
+  );
+  const remoteAllowed = mode === 'remote_per_request' || mode === 'remote_always';
+  return {
+    mode,
+    remoteAllowed,
+    remoteEmbeddingsAllowed: remoteAllowed && policies.every((p) => p.remoteEmbeddings),
+    requiresPerRequestConfirmation: remoteAllowed && mode === 'remote_per_request',
+  };
+}
+
+// --- Remote call confirmation (AC5) ----------------------------------------
+
+/**
+ * Coarse categories describing *what kind* of content a remote AI call sends.
+ * Surfaced in confirmation dialogs (AC5) and safe audit metadata (AC6); these
+ * are categories, never the content itself.
+ */
+export const AI_CONTENT_CATEGORIES = [
+  'note_text',
+  'source_text',
+  'entity_data',
+  'claim_data',
+  'search_query',
+  'graph_context',
+] as const;
+export const aiContentCategorySchema = z.enum(AI_CONTENT_CATEGORIES);
+export type AiContentCategory = (typeof AI_CONTENT_CATEGORIES)[number];
+
+/**
+ * The information shown to a user before a remote AI call so they can give
+ * informed consent (AC5): which provider/model, what feature, and the
+ * categories of content that would be sent — never the raw content.
+ */
+export const remoteCallConfirmationSchema = z.object({
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  feature: z.string().min(1),
+  contentCategories: z.array(aiContentCategorySchema),
+});
+export type RemoteCallConfirmation = z.infer<typeof remoteCallConfirmationSchema>;
+
+// --- Safe audit metadata for remote calls (AC6) ----------------------------
+
+/**
+ * Keys that must NEVER appear in remote-AI-call audit metadata (AC6): full
+ * prompts, full note/source content, API keys, and full model responses. The
+ * builder below uses an allowlist (not a denylist), but this list documents the
+ * intent and is asserted by tests.
+ */
+export const REMOTE_AI_AUDIT_FORBIDDEN_KEYS = [
+  'prompt',
+  'prompts',
+  'messages',
+  'content',
+  'input',
+  'apiKey',
+  'response',
+  'completion',
+  'text',
+] as const;
+
+/** Optional, non-sensitive token counts safe to record in audit metadata. */
+export const remoteAiTokenCountsSchema = z.object({
+  promptTokens: z.number().int().nonnegative().optional(),
+  completionTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+});
+export type RemoteAiTokenCounts = z.infer<typeof remoteAiTokenCountsSchema>;
+
+/** Safe audit metadata recorded for a remote AI call (AC6). */
+export const remoteAiAuditMetadataSchema = z.object({
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  feature: z.string().min(1),
+  contentCategories: z.array(aiContentCategorySchema),
+  tokenCounts: remoteAiTokenCountsSchema.optional(),
+});
+export type RemoteAiAuditMetadata = z.infer<typeof remoteAiAuditMetadataSchema>;
+
+export interface RemoteAiAuditInput {
+  provider: string;
+  model: string;
+  feature: string;
+  contentCategories: AiContentCategory[];
+  tokenCounts?: RemoteAiTokenCounts;
+  /** Any extra fields are intentionally IGNORED (allowlist). */
+  [key: string]: unknown;
+}
+
+/**
+ * Build safe audit metadata for a remote AI call (AC6). This is an **allowlist**:
+ * only the known-safe fields are copied through; full prompts, note/source
+ * content, API keys, and model responses can never leak even if present on the
+ * input. All future remote-AI call sites MUST record audit via this helper.
+ */
+export function buildRemoteAiAuditMetadata(input: RemoteAiAuditInput): RemoteAiAuditMetadata {
+  return remoteAiAuditMetadataSchema.parse({
+    provider: input.provider,
+    model: input.model,
+    feature: input.feature,
+    contentCategories: input.contentCategories,
+    tokenCounts: input.tokenCounts,
+  });
+}
