@@ -479,12 +479,22 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `GET|PUT /api/ai/policy/me` (self, CSRF on PUT); `GET /api/ai/policy`
   (effective server+user). KB router: `GET /` (viewer), `PUT /` (KB admin+CSRF),
   non-members get 404. `updateAiPolicySchema` rejects empty payloads.
-- Confirmation/audit helpers for FUTURE remote calls live in `ai.ts`:
-  `remoteCallConfirmationSchema` (provider/model/feature/contentCategories, AC5)
-  and `buildRemoteAiAuditMetadata()` — an **allowlist** builder so full prompts /
-  note content / API keys / model responses can NEVER leak into audit (AC6). All
-  future remote-AI call sites (US-017/020) MUST record audit via this helper and
-  show a confirmation built from `remoteCallConfirmationSchema`.
+- Remote-per-request consent (US-050): request schemas for remote-capable
+  features carry optional `remoteConfirmation` (`remoteCallConfirmationSchema`:
+  provider/model/feature/contentCategories only). Server routes must compute the
+  expected confirmation via `buildRemoteConfirmation()`, return **409** with
+  `remoteConfirmationRequiredBody()` before any remote provider call when
+  `resolveAiPolicy(...).requiresPerRequestConfirmation`, and verify retries with
+  `remoteConfirmationMatches()`. Use `dbRemoteAiAuditStore.recordRemoteCall()`
+  (or an injected fake in unit tests) immediately before the remote call; it
+  stores `ai.remote_call` audit metadata through `buildRemoteAiAuditMetadata()`,
+  an allowlist that never copies prompts, raw note/source content, API keys, or
+  model responses. Web callers catch `RemoteAiConfirmationRequiredError`, show
+  `confirmRemoteAiCall()` (`apps/web/src/remoteConfirmation.ts`), then retry
+  with the exact server-supplied confirmation. Embedding jobs carry the
+  confirmation in `embeddingIndexJobPayloadSchema` and the worker re-checks it
+  before generating remote embeddings; remote embeddings still require the
+  separate `remoteEmbeddingsAllowed` consent.
 - Web: `apps/web/src/AiPolicySettings.tsx` (own file) exports `<AiPolicySettings>`
   (server+user layers, server editable only when `isAdmin`; rendered in
   `AuthedHome`) and `<KbAiPolicy>` (KB layer, editable when

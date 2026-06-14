@@ -9,6 +9,7 @@ import {
   rejectProposalSchema,
   resolveAiPolicy,
   type AcceptProposalResult,
+  type AiContentCategory,
   type CaptureExtractionResult,
   type CaptureResponse,
   type ExtractionAvailability,
@@ -28,6 +29,13 @@ import { dbSourceStore, type SourceStore } from '../sources/store.js';
 import { dbEntityStore, type EntityStore } from '../entities/store.js';
 import { dbClaimStore, type ClaimArgumentInput, type ClaimStore } from '../claims/store.js';
 import { dbAiPolicyStore, type AiPolicyStore } from '../ai-policy/store.js';
+import {
+  buildRemoteConfirmation,
+  dbRemoteAiAuditStore,
+  remoteConfirmationMatches,
+  remoteConfirmationRequiredBody,
+  type RemoteAiAuditStore,
+} from '../ai/remote-consent.js';
 import {
   MOCK_EXTRACTION_LABEL,
   isRemoteProviderKind,
@@ -504,16 +512,25 @@ export interface CaptureRouterOptions {
   aiPolicyStore?: AiPolicyStore;
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
+  remoteAiAuditStore?: RemoteAiAuditStore;
   /** Configured extractor, or null for a No-AI install (AC4). */
   extractor?: GraphExtractor | null;
 }
 
+const CAPTURE_CONTENT_CATEGORIES: Record<'note' | 'source', AiContentCategory[]> = {
+  note: ['note_text'],
+  source: ['source_text'],
+};
+
 /**
  * Build the `/api/knowledge-bases/:kbId/capture` router (US-017). `POST /`
- * stores the text as a Note or Source FIRST (AC1), then — if AI is available —
- * runs extraction and stores the candidates as a single pending proposal (AC2).
- * With no AI it returns the stored record and an `unavailable` extraction state
- * without blocking (AC4). Requires `editor` (+ CSRF); viewers are read-only.
+ * normally stores the text as a Note or Source FIRST (AC1), then — if AI is
+ * available — runs extraction and stores the candidates as a single pending
+ * proposal (AC2). The only pre-store gate is remote-per-request confirmation:
+ * when required, the route returns 409 before persistence so a confirmed retry
+ * cannot duplicate the capture. With no AI it returns the stored record and an
+ * `unavailable` extraction state without blocking (AC4). Requires `editor` (+
+ * CSRF); viewers are read-only.
  */
 export function createCaptureRouter(options: CaptureRouterOptions = {}): Router {
   const proposalStore = options.proposalStore ?? dbProposalStore;
@@ -522,6 +539,7 @@ export function createCaptureRouter(options: CaptureRouterOptions = {}): Router 
   const aiPolicyStore = options.aiPolicyStore ?? dbAiPolicyStore;
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
+  const remoteAiAuditStore = options.remoteAiAuditStore ?? dbRemoteAiAuditStore;
   const extractor = options.extractor ?? null;
   const router = Router({ mergeParams: true });
   const authed = requireAuth(authStore);
@@ -541,6 +559,36 @@ export function createCaptureRouter(options: CaptureRouterOptions = {}): Router 
         return;
       }
       const { kind, title, content, sourceType, uri, extract } = parsed.data;
+
+      // Resolve AI availability before storing when a remote-per-request
+      // confirmation may be needed; an unconfirmed request must not create a
+      // note/source that the confirmed retry would duplicate.
+      const policies = await aiPolicyStore.getPolicies([
+        { scope: 'server', scopeId: null },
+        { scope: 'user', scopeId: ctx.user.id },
+        { scope: 'knowledge_base', scopeId: kbId },
+      ]);
+      const resolved = resolveAiPolicy(policies);
+      const availability = computeExtractionAvailability(extractor, resolved);
+      const remoteExtractor = extractor ? isRemoteProviderKind(extractor.providerKind) : false;
+      const remoteConfirmation =
+        extract !== false && availability.available && extractor && remoteExtractor
+          ? buildRemoteConfirmation({
+              provider: extractor.name,
+              model: extractor.model,
+              feature: 'Quick capture extraction',
+              contentCategories: CAPTURE_CONTENT_CATEGORIES[kind],
+            })
+          : null;
+
+      if (
+        remoteConfirmation &&
+        resolved.requiresPerRequestConfirmation &&
+        !remoteConfirmationMatches(parsed.data.remoteConfirmation, remoteConfirmation)
+      ) {
+        res.status(409).json(remoteConfirmationRequiredBody(remoteConfirmation));
+        return;
+      }
 
       // 1. Store the original text FIRST (AC1) — never lost, even if AI fails.
       let note: Note | null = null;
@@ -569,15 +617,6 @@ export function createCaptureRouter(options: CaptureRouterOptions = {}): Router 
         sourceSourceId = row.id;
       }
 
-      // 2. Resolve AI availability from the layered policy (server + user + KB).
-      const policies = await aiPolicyStore.getPolicies([
-        { scope: 'server', scopeId: null },
-        { scope: 'user', scopeId: ctx.user.id },
-        { scope: 'knowledge_base', scopeId: kbId },
-      ]);
-      const resolved = resolveAiPolicy(policies);
-      const availability = computeExtractionAvailability(extractor, resolved);
-
       // 3. Extract (when available and not explicitly skipped) and queue a proposal.
       let extraction: CaptureExtractionResult;
       if (!availability.available || extract === false || !extractor) {
@@ -589,6 +628,13 @@ export function createCaptureRouter(options: CaptureRouterOptions = {}): Router 
         };
       } else {
         try {
+          if (remoteConfirmation) {
+            await remoteAiAuditStore.recordRemoteCall({
+              knowledgeBaseId: kbId,
+              actorUserId: ctx.user.id,
+              confirmation: remoteConfirmation,
+            });
+          }
           const changes: ProposalChange[] = await extractor.extract(content);
           if (changes.length === 0) {
             extraction = { status: 'empty', availability, proposal: null, error: null };

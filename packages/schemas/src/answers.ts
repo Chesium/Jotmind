@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { remoteCallConfirmationSchema } from './ai.js';
 import { searchResponseSchema } from './search.js';
 
 /**
@@ -18,6 +19,8 @@ import { searchResponseSchema } from './search.js';
 /** Request body for the answer box. */
 export const answerRequestSchema = z.object({
   q: z.string().trim().min(1).max(1000),
+  /** Required only after the server asks for per-request remote AI confirmation. */
+  remoteConfirmation: remoteCallConfirmationSchema.optional(),
 });
 export type AnswerRequest = z.infer<typeof answerRequestSchema>;
 

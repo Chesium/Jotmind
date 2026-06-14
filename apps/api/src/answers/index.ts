@@ -5,6 +5,7 @@ import {
   answerResponseSchema,
   kbRoleSatisfies,
   resolveAiPolicy,
+  type AiContentCategory,
   type AnswerAiInfo,
   type AnswerCitation,
   type AnswerResponse,
@@ -15,6 +16,13 @@ import { asyncHandler, requireAuth, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
 import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
 import { dbAiPolicyStore, type AiPolicyStore } from '../ai-policy/store.js';
+import {
+  buildRemoteConfirmation,
+  dbRemoteAiAuditStore,
+  remoteConfirmationMatches,
+  remoteConfirmationRequiredBody,
+  type RemoteAiAuditStore,
+} from '../ai/remote-consent.js';
 import { isRemoteProviderKind } from '../extraction/index.js';
 import { dbSearchStore, type SearchStore } from '../search/store.js';
 import { dbAnswerEvidenceStore, type AnswerEvidenceStore } from './evidence.js';
@@ -39,9 +47,19 @@ export interface AnswerRouterOptions {
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
   aiPolicyStore?: AiPolicyStore;
+  remoteAiAuditStore?: RemoteAiAuditStore;
   /** Configured generator, or null for a No-AI install (AC2). */
   generator?: AnswerGenerator | null;
 }
+
+const ANSWER_CONTENT_CATEGORIES: AiContentCategory[] = [
+  'search_query',
+  'graph_context',
+  'entity_data',
+  'claim_data',
+  'note_text',
+  'source_text',
+];
 
 /**
  * Whether answer generation may be used given the configured generator and the
@@ -92,6 +110,7 @@ export function createAnswerRouter(options: AnswerRouterOptions = {}): Router {
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
   const aiPolicyStore = options.aiPolicyStore ?? dbAiPolicyStore;
+  const remoteAiAuditStore = options.remoteAiAuditStore ?? dbRemoteAiAuditStore;
   const generator =
     options.generator !== undefined ? options.generator : resolveAnswerGeneratorFromEnv();
   const router = Router({ mergeParams: true });
@@ -148,6 +167,25 @@ export function createAnswerRouter(options: AnswerRouterOptions = {}): Router {
       ]);
       const resolved = resolveAiPolicy(policies);
       const availability = computeAnswerAvailability(generator, resolved);
+      const remoteGenerator = generator ? isRemoteProviderKind(generator.providerKind) : false;
+      const remoteConfirmation =
+        availability.available && generator && remoteGenerator
+          ? buildRemoteConfirmation({
+              provider: generator.name,
+              model: generator.model,
+              feature: 'AI answer generation',
+              contentCategories: ANSWER_CONTENT_CATEGORIES,
+            })
+          : null;
+
+      if (
+        remoteConfirmation &&
+        resolved.requiresPerRequestConfirmation &&
+        !remoteConfirmationMatches(parsed.data.remoteConfirmation, remoteConfirmation)
+      ) {
+        res.status(409).json(remoteConfirmationRequiredBody(remoteConfirmation));
+        return;
+      }
 
       const ai: AnswerAiInfo = {
         attempted: false,
@@ -169,6 +207,13 @@ export function createAnswerRouter(options: AnswerRouterOptions = {}): Router {
         ai.attempted = true;
         try {
           citations = await evidenceStore.gatherEvidence(kbId, query, EVIDENCE_LIMIT);
+          if (remoteConfirmation) {
+            await remoteAiAuditStore.recordRemoteCall({
+              knowledgeBaseId: kbId,
+              actorUserId: ctx.user.id,
+              confirmation: remoteConfirmation,
+            });
+          }
           const result = await generator.generate(query, citations);
           ai.repaired = result.repaired;
           if (result.answer) {

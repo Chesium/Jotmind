@@ -6,6 +6,7 @@ import {
   commandResponseSchema,
   kbRoleSatisfies,
   resolveAiPolicy,
+  type AiContentCategory,
   type CommandAiInfo,
   type CommandInterpretation,
   type CommandResponse,
@@ -16,6 +17,13 @@ import { asyncHandler, requireAuth, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
 import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
 import { dbAiPolicyStore, type AiPolicyStore } from '../ai-policy/store.js';
+import {
+  buildRemoteConfirmation,
+  dbRemoteAiAuditStore,
+  remoteConfirmationMatches,
+  remoteConfirmationRequiredBody,
+  type RemoteAiAuditStore,
+} from '../ai/remote-consent.js';
 import { isRemoteProviderKind } from '../extraction/index.js';
 import { dbSearchStore, type SearchFilters, type SearchStore } from '../search/store.js';
 import { resolveCommandInterpreterFromEnv, type CommandInterpreter } from './interpreter.js';
@@ -33,9 +41,12 @@ export interface CommandRouterOptions {
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
   aiPolicyStore?: AiPolicyStore;
+  remoteAiAuditStore?: RemoteAiAuditStore;
   /** Configured interpreter, or null for a No-AI install (AC1). */
   interpreter?: CommandInterpreter | null;
 }
+
+const COMMAND_CONTENT_CATEGORIES: AiContentCategory[] = ['search_query'];
 
 /**
  * Whether the command interpreter may be used given the configured interpreter
@@ -73,6 +84,7 @@ export function createCommandRouter(options: CommandRouterOptions = {}): Router 
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
   const aiPolicyStore = options.aiPolicyStore ?? dbAiPolicyStore;
+  const remoteAiAuditStore = options.remoteAiAuditStore ?? dbRemoteAiAuditStore;
   const interpreter =
     options.interpreter !== undefined ? options.interpreter : resolveCommandInterpreterFromEnv();
   const router = Router({ mergeParams: true });
@@ -129,6 +141,27 @@ export function createCommandRouter(options: CommandRouterOptions = {}): Router 
       ]);
       const resolved = resolveAiPolicy(policies);
       const availability = computeInterpreterAvailability(interpreter, resolved);
+      const remoteInterpreter = interpreter
+        ? isRemoteProviderKind(interpreter.providerKind)
+        : false;
+      const remoteConfirmation =
+        availability.available && interpreter && remoteInterpreter
+          ? buildRemoteConfirmation({
+              provider: interpreter.name,
+              model: interpreter.model,
+              feature: 'Command interpretation',
+              contentCategories: COMMAND_CONTENT_CATEGORIES,
+            })
+          : null;
+
+      if (
+        remoteConfirmation &&
+        resolved.requiresPerRequestConfirmation &&
+        !remoteConfirmationMatches(parsed.data.remoteConfirmation, remoteConfirmation)
+      ) {
+        res.status(409).json(remoteConfirmationRequiredBody(remoteConfirmation));
+        return;
+      }
 
       const ai: CommandAiInfo = {
         attempted: false,
@@ -149,6 +182,13 @@ export function createCommandRouter(options: CommandRouterOptions = {}): Router 
       if (availability.available && interpreter) {
         ai.attempted = true;
         try {
+          if (remoteConfirmation) {
+            await remoteAiAuditStore.recordRemoteCall({
+              knowledgeBaseId: kbId,
+              actorUserId: ctx.user.id,
+              confirmation: remoteConfirmation,
+            });
+          }
           const result = await interpreter.interpret(query);
           ai.repaired = result.repaired;
           if (result.interpretation) {

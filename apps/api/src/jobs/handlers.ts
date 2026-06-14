@@ -50,6 +50,7 @@ export const defaultJobHandlers: JobHandlerRegistry = {
         knowledgeBaseId: payload.knowledgeBaseId,
         ...(payload.targetTypes ? { targetTypes: payload.targetTypes } : {}),
         requestedBy: payload.requestedBy ?? null,
+        ...(payload.remoteConfirmation ? { remoteConfirmation: payload.remoteConfirmation } : {}),
       },
     );
     return { ...result };

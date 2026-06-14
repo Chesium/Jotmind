@@ -16,6 +16,7 @@ export function isRemoteProviderKind(kind: AiProviderKind): boolean {
 /** An embedding provider plus the config metadata the indexer/status need. */
 export interface ConfiguredEmbeddingProvider {
   provider: EmbeddingProvider;
+  name: string;
   kind: AiProviderKind;
   model: string | null;
   /** True for deterministic mock output (used by tests). */
@@ -33,6 +34,7 @@ export function createConfiguredEmbeddingProvider(
     const model = 'embeddingModel' in config ? (config.embeddingModel ?? null) : null;
     return {
       provider,
+      name: config.name,
       kind: config.kind,
       model,
       demo: config.kind === 'mock',

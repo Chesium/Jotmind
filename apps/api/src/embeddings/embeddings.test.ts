@@ -90,12 +90,12 @@ function memoryEmbeddingStore(stats: EmbeddingKbStats): EmbeddingStore {
   };
 }
 
-function memoryJobStore(): JobStore & { enqueued: Array<{ type: string }> } {
-  const enqueued: Array<{ type: string }> = [];
+function memoryJobStore(): JobStore & { enqueued: Array<{ type: string; payload: unknown }> } {
+  const enqueued: Array<{ type: string; payload: unknown }> = [];
   return {
     enqueued,
     enqueue: (input) => {
-      enqueued.push({ type: input.type });
+      enqueued.push({ type: input.type, payload: input.payload ?? {} });
       const now = new Date();
       const row: JobRow = {
         id: randomUUID(),
@@ -259,6 +259,41 @@ describe('embeddings API', () => {
     expect(res.status).toBe(202);
     expect(res.body.jobId).toBeDefined();
     expect(res.body.status).toBe('queued');
-    expect(ctx.jobStore.enqueued).toEqual([{ type: 'embeddings.index' }]);
+    expect(ctx.jobStore.enqueued[0]?.type).toBe('embeddings.index');
+  });
+
+  it('requires confirmation before enqueueing remote embedding reindex under per-request policy', async () => {
+    process.env.AI_PROVIDER_CONFIG = JSON.stringify({
+      kind: 'openai',
+      name: 'Remote OpenAI',
+      apiKey: 'test-key',
+      llmModel: 'gpt-test',
+      embeddingModel: 'embed-test',
+    });
+    const app2 = buildApp({
+      stats: EMPTY_STATS,
+      policies: {
+        server: { mode: 'remote_per_request', remoteEmbeddings: true },
+        knowledge_base: { mode: 'remote_per_request', remoteEmbeddings: true },
+        user: { mode: 'remote_per_request', remoteEmbeddings: true },
+      },
+    });
+    const { agent, userId, csrf } = await setupAdminAgent(app2.app);
+    app2.kbStore.setRole(KB_ID, userId, 'editor');
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/embeddings/reindex`)
+      .set('x-csrf-token', csrf)
+      .send({ targetTypes: ['note'] });
+
+    expect(res.status).toBe(409);
+    expect(res.body.confirmation).toEqual({
+      provider: 'Remote OpenAI',
+      model: 'embed-test',
+      feature: 'Embedding reindex',
+      contentCategories: ['note_text'],
+    });
+    expect(app2.jobStore.enqueued).toHaveLength(0);
+    delete process.env.AI_PROVIDER_CONFIG;
   });
 });

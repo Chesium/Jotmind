@@ -1,11 +1,19 @@
 import {
   EMBEDDING_TARGET_TYPES,
   resolveAiPolicy,
+  type AiContentCategory,
+  type RemoteCallConfirmation,
   type EmbeddingCounts,
   type EmbeddingIndexResult,
   type EmbeddingTargetType,
 } from '@jotmind/schemas';
 import type { AiPolicyStore, PolicyKey } from '../ai-policy/store.js';
+import {
+  buildRemoteConfirmation,
+  dbRemoteAiAuditStore,
+  remoteConfirmationMatches,
+  type RemoteAiAuditStore,
+} from '../ai/remote-consent.js';
 import type { EmbeddingStore } from './store.js';
 import type { EmbeddingTargetSource } from './targets.js';
 import { resolveEmbeddingProviderFromEnv, type ConfiguredEmbeddingProvider } from './provider.js';
@@ -17,6 +25,8 @@ export interface EmbeddingIndexDeps {
   aiPolicyStore: AiPolicyStore;
   /** Resolve the configured embedding provider, or null when none is set. */
   resolveProvider: () => ConfiguredEmbeddingProvider | null;
+  /** Audit remote embedding calls with allowlisted metadata only. */
+  remoteAiAuditStore?: RemoteAiAuditStore;
 }
 
 export interface RunEmbeddingIndexInput {
@@ -24,12 +34,24 @@ export interface RunEmbeddingIndexInput {
   targetTypes?: EmbeddingTargetType[];
   /** The requesting user, whose AI policy layer also applies. */
   requestedBy?: string | null;
+  /** Per-request consent captured at enqueue time for remote embedding calls. */
+  remoteConfirmation?: RemoteCallConfirmation;
 }
 
 const ZERO_COUNTS: EmbeddingCounts = { entity: 0, claim: 0, note: 0, source: 0 };
+const EMBEDDING_CATEGORY_BY_TARGET: Record<EmbeddingTargetType, AiContentCategory> = {
+  entity: 'entity_data',
+  claim: 'claim_data',
+  note: 'note_text',
+  source: 'source_text',
+};
 
 function skipped(reason: string): EmbeddingIndexResult {
   return { status: 'skipped', reason, indexed: 0, counts: { ...ZERO_COUNTS } };
+}
+
+function categoriesForTargets(targetTypes: EmbeddingTargetType[]): AiContentCategory[] {
+  return [...new Set(targetTypes.map((targetType) => EMBEDDING_CATEGORY_BY_TARGET[targetType]))];
 }
 
 /**
@@ -66,11 +88,37 @@ export async function runEmbeddingIndex(
   if (configured.remote && !resolved.remoteEmbeddingsAllowed) {
     return skipped('Remote embeddings are not permitted by policy');
   }
-
   const targetTypes = input.targetTypes ?? [...EMBEDDING_TARGET_TYPES];
+  const expectedRemoteConfirmation =
+    configured.remote && resolved.remoteEmbeddingsAllowed
+      ? buildRemoteConfirmation({
+          provider: configured.name,
+          model: configured.model,
+          feature: 'Embedding reindex',
+          contentCategories: categoriesForTargets(targetTypes),
+        })
+      : null;
+
+  if (expectedRemoteConfirmation && resolved.requiresPerRequestConfirmation) {
+    if (
+      !input.remoteConfirmation ||
+      !remoteConfirmationMatches(input.remoteConfirmation, expectedRemoteConfirmation)
+    ) {
+      return skipped('Remote embedding confirmation is required by policy');
+    }
+  }
+
   const targets = await deps.targetSource.listTargets(input.knowledgeBaseId, targetTypes);
   if (targets.length === 0) {
     return { status: 'indexed', reason: null, indexed: 0, counts: { ...ZERO_COUNTS } };
+  }
+
+  if (configured.remote) {
+    await (deps.remoteAiAuditStore ?? dbRemoteAiAuditStore).recordRemoteCall({
+      knowledgeBaseId: input.knowledgeBaseId,
+      actorUserId: input.requestedBy ?? null,
+      confirmation: expectedRemoteConfirmation ?? input.remoteConfirmation!,
+    });
   }
 
   const result = await configured.provider.embed({

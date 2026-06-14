@@ -55,6 +55,7 @@ import {
   type AnswerEvidenceStore,
   type AnswerGenerator,
 } from './answers/index.js';
+import type { RemoteAiAuditStore } from './ai/remote-consent.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -161,6 +162,11 @@ export interface AppOptions {
    * Defaults to the store composing search/claim/entity stores.
    */
   answerEvidenceStore?: AnswerEvidenceStore;
+  /**
+   * Allowlisted audit sink for remote AI calls (US-050). Injectable for route
+   * tests; production records `ai.remote_call` audit events.
+   */
+  remoteAiAuditStore?: RemoteAiAuditStore;
   /**
    * Vector embedding store (US-021). Injectable for unit tests. Defaults to the
    * PostgreSQL + pgvector store.
@@ -349,6 +355,7 @@ export function createApp(options: AppOptions = {}): Express {
       authStore,
       aiPolicyStore: options.aiPolicyStore,
       interpreter: commandInterpreter,
+      remoteAiAuditStore: options.remoteAiAuditStore,
     }),
   );
   const answerGenerator =
@@ -364,6 +371,7 @@ export function createApp(options: AppOptions = {}): Express {
       authStore,
       aiPolicyStore: options.aiPolicyStore,
       generator: answerGenerator,
+      remoteAiAuditStore: options.remoteAiAuditStore,
     }),
   );
   app.use(
@@ -405,6 +413,7 @@ export function createApp(options: AppOptions = {}): Express {
       kbStore: options.kbStore,
       authStore,
       extractor,
+      remoteAiAuditStore: options.remoteAiAuditStore,
     }),
   );
   app.use('/api/ai', createAiPolicyRouter({ store: options.aiPolicyStore, authStore }));

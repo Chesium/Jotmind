@@ -8,6 +8,7 @@ import {
   type ProposalChange,
 } from '@jotmind/schemas';
 import {
+  RemoteAiConfirmationRequiredError,
   acceptProposal,
   editProposal,
   listProposals,
@@ -15,6 +16,7 @@ import {
   rejectProposal,
 } from './api.js';
 import { useInvalidate, useInvalidationEffect, AI_POLICY_STALE_MESSAGE } from './invalidation.js';
+import { confirmRemoteAiCall } from './remoteConfirmation.js';
 
 /**
  * Quick-capture + AI proposal review queue (US-017/US-018). Captured text is
@@ -66,16 +68,22 @@ export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: str
     }
     setBusy(true);
     setError(null);
+    const input = {
+      kind: form.kind,
+      title: form.title.trim() || undefined,
+      content: form.content.trim(),
+    };
     try {
-      const result = await quickCapture(
-        kb.id,
-        {
-          kind: form.kind,
-          title: form.title.trim() || undefined,
-          content: form.content.trim(),
-        },
-        csrfToken,
-      );
+      let result: CaptureResponse;
+      try {
+        result = await quickCapture(kb.id, input, csrfToken);
+      } catch (err) {
+        if (!(err instanceof RemoteAiConfirmationRequiredError)) throw err;
+        if (!confirmRemoteAiCall(err.confirmation)) {
+          throw new Error('Remote AI call cancelled.');
+        }
+        result = await quickCapture(kb.id, input, csrfToken, err.confirmation);
+      }
       setLastResult(result);
       setPolicyStale(false);
       setForm({ kind: form.kind, title: '', content: '' });

@@ -131,6 +131,7 @@ function fakeInterpreter(
 const ADMIN = { email: 'admin@example.com', password: 'correct horse battery staple' };
 const KB_ID = '11111111-1111-1111-1111-111111111111';
 const LOCAL: AiPolicy = { mode: 'local_only', remoteEmbeddings: false };
+const REMOTE_PER_REQUEST: AiPolicy = { mode: 'remote_per_request', remoteEmbeddings: false };
 
 async function setupAdminAgent(app: ReturnType<typeof createApp>) {
   const agent = request.agent(app);
@@ -174,6 +175,12 @@ describe('command API (US-019)', () => {
     aiPolicyStore.set({ scope: 'server', scopeId: null }, LOCAL);
     aiPolicyStore.set({ scope: 'user', scopeId: userId }, LOCAL);
     aiPolicyStore.set({ scope: 'knowledge_base', scopeId: KB_ID }, LOCAL);
+  }
+
+  function allowRemotePerRequest(userId: string) {
+    aiPolicyStore.set({ scope: 'server', scopeId: null }, REMOTE_PER_REQUEST);
+    aiPolicyStore.set({ scope: 'user', scopeId: userId }, REMOTE_PER_REQUEST);
+    aiPolicyStore.set({ scope: 'knowledge_base', scopeId: KB_ID }, REMOTE_PER_REQUEST);
   }
 
   beforeEach(() => {
@@ -236,6 +243,32 @@ describe('command API (US-019)', () => {
     const body = commandResponseSchema.parse(res.body);
     expect(body.ai.available).toBe(false);
     expect(body.ai.reason).toMatch(/disabled/i);
+    expect(interp.queries).toHaveLength(0);
+  });
+
+  it('requires confirmation before a remote command interpretation call', async () => {
+    const interp = fakeInterpreter(
+      {
+        interpretation: { intent: 'search', confidence: 0.9, filters: { q: 'ada' } },
+        repaired: false,
+      },
+      { providerKind: 'openai', model: 'gpt-test', verified: false },
+    );
+    const app = buildApp(interp);
+    const { agent, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'viewer');
+    allowRemotePerRequest(userId);
+
+    const res = await agent.post(`/api/knowledge-bases/${KB_ID}/command`).send({ q: 'ada' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.confirmation).toEqual({
+      provider: 'Fake',
+      model: 'gpt-test',
+      feature: 'Command interpretation',
+      contentCategories: ['search_query'],
+    });
+    expect(JSON.stringify(res.body)).not.toContain('ada');
     expect(interp.queries).toHaveLength(0);
   });
 

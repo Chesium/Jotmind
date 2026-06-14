@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { remoteCallConfirmationSchema } from './ai.js';
 import { proposalChangesSchema } from './proposals.js';
 import { searchResponseSchema, searchResultKindSchema, searchResultListSchema } from './search.js';
 
@@ -18,6 +19,8 @@ import { searchResponseSchema, searchResultKindSchema, searchResultListSchema } 
 /** Request body for the command box. */
 export const commandRequestSchema = z.object({
   q: z.string().trim().min(1).max(500),
+  /** Required only after the server asks for per-request remote AI confirmation. */
+  remoteConfirmation: remoteCallConfirmationSchema.optional(),
 });
 export type CommandRequest = z.infer<typeof commandRequestSchema>;
 

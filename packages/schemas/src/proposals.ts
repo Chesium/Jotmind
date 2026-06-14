@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { remoteCallConfirmationSchema } from './ai.js';
 import { noteSchema, proposalStatusSchema, sourceSchema } from './graph.js';
 
 /**
@@ -171,6 +172,8 @@ export const captureRequestSchema = z.object({
   uri: z.string().trim().max(2000).optional(),
   /** Run AI extraction after storing (default true; honored only if AI available). */
   extract: z.boolean().optional(),
+  /** Required only after the server asks for per-request remote AI confirmation. */
+  remoteConfirmation: remoteCallConfirmationSchema.optional(),
 });
 export type CaptureRequest = z.infer<typeof captureRequestSchema>;
 

@@ -7,8 +7,9 @@ import {
   type KnowledgeBase,
   type ReindexEmbeddingsResponse,
 } from '@jotmind/schemas';
-import { getEmbeddingStatus, reindexEmbeddings } from './api.js';
+import { RemoteAiConfirmationRequiredError, getEmbeddingStatus, reindexEmbeddings } from './api.js';
 import { useInvalidate, useInvalidationEffect } from './invalidation.js';
+import { confirmRemoteAiCall } from './remoteConfirmation.js';
 
 const TARGET_LABELS: Record<EmbeddingTargetType, string> = {
   entity: 'Entities',
@@ -75,7 +76,17 @@ export function EmbeddingsPanel({ kb, csrfToken }: { kb: KnowledgeBase; csrfToke
     setError(null);
     setQueuedJob(null);
     try {
-      const res = await reindexEmbeddings(kb.id, { targetTypes: selectedTargets }, csrfToken);
+      const request = { targetTypes: selectedTargets };
+      let res: ReindexEmbeddingsResponse;
+      try {
+        res = await reindexEmbeddings(kb.id, request, csrfToken);
+      } catch (err) {
+        if (!(err instanceof RemoteAiConfirmationRequiredError)) throw err;
+        if (!confirmRemoteAiCall(err.confirmation)) {
+          throw new Error('Remote AI call cancelled.');
+        }
+        res = await reindexEmbeddings(kb.id, request, csrfToken, err.confirmation);
+      }
       setQueuedJob(res);
       invalidate(['jobs']);
       await load();

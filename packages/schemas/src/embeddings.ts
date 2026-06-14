@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { remoteCallConfirmationSchema } from './ai.js';
 import { jobStatusSchema } from './graph.js';
 
 /**
@@ -87,6 +88,8 @@ export type EmbeddingStatus = z.infer<typeof embeddingStatusSchema>;
  */
 export const reindexEmbeddingsSchema = z.object({
   targetTypes: z.array(embeddingTargetTypeSchema).min(1).optional(),
+  /** Required only after the server asks for per-request remote embedding confirmation. */
+  remoteConfirmation: remoteCallConfirmationSchema.optional(),
 });
 export type ReindexEmbeddings = z.infer<typeof reindexEmbeddingsSchema>;
 
@@ -106,6 +109,8 @@ export const embeddingIndexJobPayloadSchema = z.object({
   targetTypes: z.array(embeddingTargetTypeSchema).min(1).optional(),
   /** The user who requested the indexing (their AI policy layer applies). */
   requestedBy: z.string().uuid().nullable().optional(),
+  /** Per-request consent captured when a remote embedding provider is used. */
+  remoteConfirmation: remoteCallConfirmationSchema.optional(),
 });
 export type EmbeddingIndexJobPayload = z.infer<typeof embeddingIndexJobPayloadSchema>;
 

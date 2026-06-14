@@ -39,6 +39,7 @@ import {
   updateSchemaResultSchema,
   publicJobSchema,
   publicUserSchema,
+  remoteCallConfirmationSchema,
   setupStatusSchema,
   searchResponseSchema,
   sourceExcerptListSchema,
@@ -56,6 +57,7 @@ import {
   type EmbeddingStatus,
   type ReindexEmbeddings,
   type ReindexEmbeddingsResponse,
+  type RemoteCallConfirmation,
   type Proposal,
   type ProposalChanges,
   type BuiltinRuleModule,
@@ -131,6 +133,24 @@ async function errorMessage(res: Response): Promise<string> {
     return body.error ?? `Request failed (${String(res.status)})`;
   } catch {
     return `Request failed (${String(res.status)})`;
+  }
+}
+
+export class RemoteAiConfirmationRequiredError extends Error {
+  constructor(readonly confirmation: RemoteCallConfirmation) {
+    super('Remote AI confirmation required');
+  }
+}
+
+async function throwIfRemoteConfirmationRequired(res: Response): Promise<void> {
+  if (res.status !== 409) return;
+  try {
+    const body = (await res.json()) as { confirmation?: unknown };
+    const confirmation = remoteCallConfirmationSchema.parse(body.confirmation);
+    throw new RemoteAiConfirmationRequiredError(confirmation);
+  } catch (err) {
+    if (err instanceof RemoteAiConfirmationRequiredError) throw err;
+    throw new Error(`Request failed (${String(res.status)})`);
   }
 }
 
@@ -575,24 +595,34 @@ export async function search(
  * permitted, the server additionally returns a structured `interpretation` and
  * its `interpretedResults`. Read-only (no mutation), so no CSRF token needed.
  */
-export async function runCommand(knowledgeBaseId: string, q: string): Promise<CommandResponse> {
+export async function runCommand(
+  knowledgeBaseId: string,
+  q: string,
+  remoteConfirmation?: RemoteCallConfirmation,
+): Promise<CommandResponse> {
   const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/command`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ q }),
+    body: JSON.stringify({ q, ...(remoteConfirmation ? { remoteConfirmation } : {}) }),
   });
+  await throwIfRemoteConfirmationRequired(res);
   if (!res.ok) throw new Error(await errorMessage(res));
   return commandResponseSchema.parse(await res.json());
 }
 
-export async function answerQuestion(knowledgeBaseId: string, q: string): Promise<AnswerResponse> {
+export async function answerQuestion(
+  knowledgeBaseId: string,
+  q: string,
+  remoteConfirmation?: RemoteCallConfirmation,
+): Promise<AnswerResponse> {
   const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/answers`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ q }),
+    body: JSON.stringify({ q, ...(remoteConfirmation ? { remoteConfirmation } : {}) }),
   });
+  await throwIfRemoteConfirmationRequired(res);
   if (!res.ok) throw new Error(await errorMessage(res));
   return answerResponseSchema.parse(await res.json());
 }
@@ -763,13 +793,15 @@ export async function quickCapture(
   knowledgeBaseId: string,
   input: CaptureRequest,
   csrfToken: string,
+  remoteConfirmation?: RemoteCallConfirmation,
 ): Promise<CaptureResponse> {
   const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/capture`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, ...(remoteConfirmation ? { remoteConfirmation } : {}) }),
   });
+  await throwIfRemoteConfirmationRequired(res);
   if (!res.ok) throw new Error(await errorMessage(res));
   return captureResponseSchema.parse(await res.json());
 }
@@ -888,13 +920,15 @@ export async function reindexEmbeddings(
   knowledgeBaseId: string,
   request: ReindexEmbeddings,
   csrfToken: string,
+  remoteConfirmation?: RemoteCallConfirmation,
 ): Promise<ReindexEmbeddingsResponse> {
   const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/embeddings/reindex`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
-    body: JSON.stringify(request),
+    body: JSON.stringify({ ...request, ...(remoteConfirmation ? { remoteConfirmation } : {}) }),
   });
+  await throwIfRemoteConfirmationRequired(res);
   if (!res.ok) throw new Error(await errorMessage(res));
   return reindexEmbeddingsResponseSchema.parse(await res.json());
 }

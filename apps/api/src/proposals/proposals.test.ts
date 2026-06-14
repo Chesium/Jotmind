@@ -99,9 +99,11 @@ function createMemoryAiPolicyStore(): AiPolicyStore & {
   return store;
 }
 
-function createMemoryNoteStore(): NoteStore {
+function createMemoryNoteStore(): NoteStore & { created: NoteRow[] } {
   const byId = new Map<string, NoteRow>();
+  const created: NoteRow[] = [];
   return {
+    created,
     listNotes: (kb) => Promise.resolve([...byId.values()].filter((n) => n.knowledgeBaseId === kb)),
     getNote: (kb, id) => {
       const n = byId.get(id);
@@ -121,6 +123,7 @@ function createMemoryNoteStore(): NoteStore {
         deletedAt: null,
       };
       byId.set(row.id, row);
+      created.push(row);
       return Promise.resolve(row);
     },
     updateNote: () => Promise.resolve(undefined),
@@ -347,13 +350,14 @@ function allowAi(h: Harness, userId: string, policy: AiPolicy): void {
 }
 
 const LOCAL_ONLY: AiPolicy = { mode: 'local_only', remoteEmbeddings: false };
+const REMOTE_PER_REQUEST: AiPolicy = { mode: 'remote_per_request', remoteEmbeddings: false };
 
 interface Harness {
   authStore: AuthStore;
   kbStore: ReturnType<typeof createMemoryKbStore>;
   aiPolicyStore: ReturnType<typeof createMemoryAiPolicyStore>;
   proposalStore: ReturnType<typeof createMemoryProposalStore>;
-  noteStore: NoteStore;
+  noteStore: NoteStore & { created: NoteRow[] };
   sourceStore: SourceStore;
   entityStore: ReturnType<typeof createMemoryEntityStore>;
   claimStore: ReturnType<typeof createMemoryClaimStore>;
@@ -473,6 +477,32 @@ describe('proposals + capture API', () => {
     expect(res.body.extraction.status).toBe('unavailable');
     expect(res.body.extraction.availability.reason).toMatch(/remote/i);
     expect(res.body.extraction.availability.verified).toBe(false);
+  });
+
+  it('requires confirmation before remote quick-capture extraction and does not store yet', async () => {
+    const app = makeApp(
+      h,
+      fakeExtractor({ providerKind: 'openai', model: 'gpt-test', verified: false }),
+    );
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    allowAi(h, userId, REMOTE_PER_REQUEST);
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/capture`)
+      .set('x-csrf-token', csrfToken)
+      .send({ kind: 'note', content: 'Ada met Charles.' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.confirmation).toEqual({
+      provider: 'Fake',
+      model: 'gpt-test',
+      feature: 'Quick capture extraction',
+      contentCategories: ['note_text'],
+    });
+    expect(JSON.stringify(res.body)).not.toContain('Ada met Charles');
+    expect(h.noteStore.created).toHaveLength(0);
+    expect(h.proposalStore.audits).toHaveLength(0);
   });
 
   it('labels demo extractor output (AC6)', async () => {

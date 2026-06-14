@@ -5,13 +5,14 @@ import type {
   AnswerResponse,
   KnowledgeBase,
 } from '@jotmind/schemas';
-import { answerQuestion } from './api.js';
+import { RemoteAiConfirmationRequiredError, answerQuestion } from './api.js';
 import {
   useInvalidationEffect,
   RESULT_STALE_DOMAINS,
   RESULT_STALE_MESSAGE,
   AI_POLICY_STALE_MESSAGE,
 } from './invalidation.js';
+import { confirmRemoteAiCall } from './remoteConfirmation.js';
 
 /**
  * Provenance-aware AI answers (US-020). One box asks a natural-language
@@ -48,17 +49,34 @@ export function Answers({ kb }: { kb: KnowledgeBase }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!q.trim()) return;
+    const query = q.trim();
+    if (!query) return;
     setBusy(true);
     setError(null);
     setOpenCitation(null);
     try {
-      setResponse(await answerQuestion(kb.id, q.trim()));
+      setResponse(await answerQuestion(kb.id, query));
       setStale(false);
       setPolicyStale(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Answer failed');
-      setResponse(null);
+      if (err instanceof RemoteAiConfirmationRequiredError) {
+        if (confirmRemoteAiCall(err.confirmation)) {
+          try {
+            setResponse(await answerQuestion(kb.id, query, err.confirmation));
+            setStale(false);
+            setPolicyStale(false);
+          } catch (retryErr) {
+            setError(retryErr instanceof Error ? retryErr.message : 'Answer failed');
+            setResponse(null);
+          }
+        } else {
+          setError('Remote AI call cancelled.');
+          setResponse(null);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : 'Answer failed');
+        setResponse(null);
+      }
     } finally {
       setBusy(false);
     }

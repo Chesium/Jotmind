@@ -62,6 +62,7 @@ function memoryPolicyStore(policies: Partial<Record<string, AiPolicy>>): AiPolic
 function localProvider(): ConfiguredEmbeddingProvider {
   return {
     provider: new MockEmbeddingProvider('Mock Embeddings', 8),
+    name: 'Mock Embeddings',
     kind: 'mock',
     model: null,
     demo: true,
@@ -83,6 +84,10 @@ const sampleTargets: IndexableTarget[] = [
 const localAllowed: AiPolicy = { mode: 'local_only', remoteEmbeddings: false };
 const remoteAllowedNoEmbeddings: AiPolicy = { mode: 'remote_always', remoteEmbeddings: false };
 const remoteAllowedWithEmbeddings: AiPolicy = { mode: 'remote_always', remoteEmbeddings: true };
+const remotePerRequestWithEmbeddings: AiPolicy = {
+  mode: 'remote_per_request',
+  remoteEmbeddings: true,
+};
 
 describe('runEmbeddingIndex', () => {
   it('indexes all four canonical kinds with a local provider (AC2)', async () => {
@@ -188,12 +193,71 @@ describe('runEmbeddingIndex', () => {
           user: remoteAllowedWithEmbeddings,
         }),
         resolveProvider: remoteProvider,
+        remoteAiAuditStore: { recordRemoteCall: () => Promise.resolve() },
       },
       { knowledgeBaseId: KB, requestedBy: '99999999-9999-9999-9999-999999999999' },
     );
 
     expect(result.status).toBe('indexed');
     expect(store.upserts).toHaveLength(4);
+  });
+
+  it('skips a remote provider under per-request policy without matching confirmation', async () => {
+    const store = memoryEmbeddingStore();
+    const result = await runEmbeddingIndex(
+      {
+        embeddingStore: store,
+        targetSource: memoryTargetSource(sampleTargets),
+        aiPolicyStore: memoryPolicyStore({
+          server: remotePerRequestWithEmbeddings,
+          knowledge_base: remotePerRequestWithEmbeddings,
+          user: remotePerRequestWithEmbeddings,
+        }),
+        resolveProvider: remoteProvider,
+      },
+      { knowledgeBaseId: KB, requestedBy: '99999999-9999-9999-9999-999999999999' },
+    );
+
+    expect(result.status).toBe('skipped');
+    expect(result.reason).toMatch(/confirmation/i);
+    expect(store.upserts).toHaveLength(0);
+  });
+
+  it('indexes and audits a remote embedding call when per-request confirmation matches', async () => {
+    const store = memoryEmbeddingStore();
+    const audits: unknown[] = [];
+    const result = await runEmbeddingIndex(
+      {
+        embeddingStore: store,
+        targetSource: memoryTargetSource(sampleTargets),
+        aiPolicyStore: memoryPolicyStore({
+          server: remotePerRequestWithEmbeddings,
+          knowledge_base: remotePerRequestWithEmbeddings,
+          user: remotePerRequestWithEmbeddings,
+        }),
+        resolveProvider: remoteProvider,
+        remoteAiAuditStore: {
+          recordRemoteCall: (input) => {
+            audits.push(input);
+            return Promise.resolve();
+          },
+        },
+      },
+      {
+        knowledgeBaseId: KB,
+        requestedBy: '99999999-9999-9999-9999-999999999999',
+        remoteConfirmation: {
+          provider: 'Mock Embeddings',
+          model: 'default',
+          feature: 'Embedding reindex',
+          contentCategories: ['entity_data', 'claim_data', 'note_text', 'source_text'],
+        },
+      },
+    );
+
+    expect(result.status).toBe('indexed');
+    expect(store.upserts).toHaveLength(4);
+    expect(audits).toHaveLength(1);
   });
 
   it('returns indexed:0 when there is nothing to embed', async () => {

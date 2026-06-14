@@ -47,6 +47,7 @@ function memoryPolicyStore(policies: Partial<Record<string, AiPolicy>>): AiPolic
 
 const localProvider = (): ConfiguredEmbeddingProvider => ({
   provider: new MockEmbeddingProvider('Mock Embeddings', 8),
+  name: 'Mock Embeddings',
   kind: 'mock',
   model: null,
   demo: true,

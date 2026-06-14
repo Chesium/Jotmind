@@ -898,8 +898,8 @@
         "Typecheck passes"
       ],
       "priority": 50,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented remote-per-request confirmation for command interpretation, AI answers, quick capture extraction, and embedding reindex. Shared schemas now accept optional `remoteConfirmation`; API routes compute sanitized provider/model/feature/content-category confirmation objects and return 409 before any remote provider call when effective policy requires confirmation. Web API helpers throw `RemoteAiConfirmationRequiredError`; CommandBox, Answers, Proposals quick capture, and EmbeddingsPanel show `confirmRemoteAiCall()` and retry with the server-supplied confirmation. Remote AI calls are audited through allowlisted `ai.remote_call` metadata only; embedding jobs carry and re-check confirmation before worker-side remote generation, with remote embeddings still gated by separate remoteEmbeddings consent. Tests and browser verification pass."
     },
     {
       "id": "US-051",

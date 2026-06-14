@@ -140,6 +140,7 @@ function fakeGenerator(
 const ADMIN = { email: 'admin@example.com', password: '[REDACTED:password] horse battery staple' };
 const KB_ID = '22222222-2222-2222-2222-222222222222';
 const LOCAL: AiPolicy = { mode: 'local_only', remoteEmbeddings: false };
+const REMOTE_PER_REQUEST: AiPolicy = { mode: 'remote_per_request', remoteEmbeddings: false };
 
 async function setupAdminAgent(app: ReturnType<typeof createApp>) {
   const agent = request.agent(app);
@@ -203,6 +204,12 @@ describe('answers API (US-020)', () => {
     aiPolicyStore.set({ scope: 'knowledge_base', scopeId: KB_ID }, LOCAL);
   }
 
+  function allowRemotePerRequest(userId: string) {
+    aiPolicyStore.set({ scope: 'server', scopeId: null }, REMOTE_PER_REQUEST);
+    aiPolicyStore.set({ scope: 'user', scopeId: userId }, REMOTE_PER_REQUEST);
+    aiPolicyStore.set({ scope: 'knowledge_base', scopeId: KB_ID }, REMOTE_PER_REQUEST);
+  }
+
   beforeEach(() => {
     authStore = createMemoryAuthStore();
     kbStore = createMemoryKbStore();
@@ -259,6 +266,36 @@ describe('answers API (US-020)', () => {
     const body = answerResponseSchema.parse(res.body);
     expect(body.ai.available).toBe(false);
     expect(body.ai.attempted).toBe(false);
+    expect(gen.queries).toHaveLength(0);
+  });
+
+  it('requires confirmation before a remote answer generation call', async () => {
+    const gen = fakeGenerator(
+      { answer: { summary: 's', statements: [] }, repaired: false },
+      { providerKind: 'openai', model: 'gpt-test', verified: false },
+    );
+    const app = buildApp(gen);
+    const { agent, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'viewer');
+    allowRemotePerRequest(userId);
+
+    const res = await agent.post(`/api/knowledge-bases/${KB_ID}/answers`).send({ q: 'who?' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.confirmation).toEqual({
+      provider: 'Fake',
+      model: 'gpt-test',
+      feature: 'AI answer generation',
+      contentCategories: [
+        'search_query',
+        'graph_context',
+        'entity_data',
+        'claim_data',
+        'note_text',
+        'source_text',
+      ],
+    });
+    expect(JSON.stringify(res.body)).not.toContain('who?');
     expect(gen.queries).toHaveLength(0);
   });
 
