@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
 import { AiProviderStatusPanel } from './AiPolicySettings.js';
+import { EmbeddingsPanel } from './EmbeddingsPanel.js';
 import { Rules } from './Rules.js';
 import { Modules } from './Modules.js';
 import { InvalidationProvider, useInvalidationEffect } from './invalidation.js';
@@ -1912,5 +1913,99 @@ describe('AiProviderStatusPanel (US-046)', () => {
     );
     expect(screen.getByTestId('ai-provider-classification')).toHaveTextContent('Remote');
     expect(container.textContent ?? '').not.toMatch(/apiKey|sk-/);
+  });
+});
+
+describe('EmbeddingsPanel (US-048)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const viewerKb: KnowledgeBase = {
+    id: '00000000-0000-0000-0000-000000000048',
+    name: 'Viewer KB',
+    description: null,
+    createdBy: '00000000-0000-0000-0000-000000000001',
+    role: 'viewer',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  it('shows distinct unavailable vector and generation states with backend reason', async () => {
+    mockFetch((url) => {
+      if (url.includes(`/api/knowledge-bases/${viewerKb.id}/embeddings`)) {
+        return {
+          body: {
+            vectorSearchAvailable: false,
+            generationAvailable: false,
+            reason: 'No embedding provider is configured',
+            total: 0,
+            counts: { entity: 0, claim: 0, note: 0, source: 0 },
+            model: null,
+            dimensions: null,
+            lastIndexedAt: null,
+            providerKind: null,
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(<EmbeddingsPanel kb={viewerKb} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('embeddings-vector-status')).toHaveTextContent(
+        'Vector search: Unavailable',
+      ),
+    );
+    expect(screen.getByTestId('embeddings-generation-status')).toHaveTextContent(
+      'Generation: Unavailable',
+    );
+    expect(screen.getByTestId('embeddings-reason')).toHaveTextContent(
+      'No embedding provider is configured',
+    );
+    expect(screen.getByTestId('embeddings-total')).toHaveTextContent('Total embeddings: 0');
+    expect(screen.getByTestId('embeddings-count-entity')).toHaveTextContent('Entities: 0');
+    expect(screen.getByTestId('embeddings-last-indexed')).toHaveTextContent('Not indexed yet');
+  });
+
+  it('shows available status and indexed metadata when embeddings exist', async () => {
+    const indexedAt = '2026-06-14T16:00:00.000Z';
+    mockFetch((url) => {
+      if (url.includes(`/api/knowledge-bases/${viewerKb.id}/embeddings`)) {
+        return {
+          body: {
+            vectorSearchAvailable: true,
+            generationAvailable: true,
+            reason: null,
+            total: 7,
+            counts: { entity: 3, claim: 2, note: 1, source: 1 },
+            model: 'nomic-embed-text',
+            dimensions: 768,
+            lastIndexedAt: indexedAt,
+            providerKind: 'ollama',
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(<EmbeddingsPanel kb={viewerKb} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('embeddings-vector-status')).toHaveTextContent(
+        'Vector search: Available',
+      ),
+    );
+    expect(screen.getByTestId('embeddings-generation-status')).toHaveTextContent(
+      'Generation: Available',
+    );
+    expect(screen.queryByTestId('embeddings-reason')).not.toBeInTheDocument();
+    expect(screen.getByTestId('embeddings-total')).toHaveTextContent('Total embeddings: 7');
+    expect(screen.getByTestId('embeddings-count-claim')).toHaveTextContent('Claims: 2');
+    expect(screen.getByTestId('embeddings-model')).toHaveTextContent('nomic-embed-text');
+    expect(screen.getByTestId('embeddings-dimensions')).toHaveTextContent('768');
+    expect(screen.getByTestId('embeddings-last-indexed')).toHaveTextContent('Last indexed:');
+    expect(screen.getByTestId('embeddings-provider-kind')).toHaveTextContent('ollama');
   });
 });

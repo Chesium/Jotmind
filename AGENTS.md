@@ -355,9 +355,10 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `createdAt` on every kind. `tag` uses JSONB containment
   (`tags @> '["x"]'::jsonb`, exact match). `hasProvenance` = `provenance <> '{}'`.
 - **Vector search availability (AC4):** `getVectorSearchAvailability()` checks
-  `information_schema.tables` for an `embeddings` table. It does not exist yet,
-  so the endpoint returns `vectorSearch.available:false` with a reason and token
-  search still works. When a later story adds embeddings, this flips to true.
+  whether stored rows exist in the `embeddings` table. No rows means
+  `vectorSearch.available:false` with a reason while token search still works;
+  rows mean stored-vector search is available independently of whether a
+  generation provider is currently configured/permitted.
 - Shared shapes in `@jotmind/schemas` `search.ts`: `searchQuerySchema` (coerces
   numeric/boolean query-string params; `hasProvenance` accepts `'true'`/`'false'`
   and transforms to boolean; refines `confidenceMin <= confidenceMax`),
@@ -698,9 +699,13 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   likewise now checks `EXISTS(SELECT 1 FROM embeddings)` rows. NOTE: query-time
   vector search (embedding the query at search time) is deferred — it needs a
   live provider; only the stored-embedding availability/data is implemented.
-- Shared shapes in `@jotmind/schemas` `embeddings.ts`. US-021 has **no UI** and
-  its AC list omits browser verification (only "Tests pass" / "Typecheck
-  passes").
+- Shared shapes in `@jotmind/schemas` `embeddings.ts`. US-021 itself had no UI,
+  but selected-KB embedding status now lives in `apps/web/src/EmbeddingsPanel.tsx`
+  (US-048), rendered in App.tsx's automation column near `<KbAiPolicy>`/admin
+  tooling. The panel reads `getEmbeddingStatus()` from `api.ts`, shows
+  vector-search availability separately from generation availability, and
+  subscribes to `['aiPolicy','jobs']` so provider/policy changes and indexing-job
+  completion can refresh the displayed status.
 
 ## Built-in rule packs (US-022)
 

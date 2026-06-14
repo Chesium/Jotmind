@@ -8,6 +8,7 @@ import {
   claimListSchema,
   claimSchema,
   commandResponseSchema,
+  embeddingStatusSchema,
   entityImpactSchema,
   entityListSchema,
   entitySchema,
@@ -51,6 +52,7 @@ import {
   type CaptureRequest,
   type CaptureResponse,
   type CommandResponse,
+  type EmbeddingStatus,
   type Proposal,
   type ProposalChanges,
   type BuiltinRuleModule,
@@ -867,6 +869,15 @@ export async function listImports(knowledgeBaseId: string): Promise<PublicJob[]>
   if (!res.ok) throw new Error(await errorMessage(res));
   const body = (await res.json()) as { jobs: unknown[] };
   return body.jobs.map((j) => publicJobSchema.parse(j));
+}
+
+/** KB-scoped embedding index status (viewer+). */
+export async function getEmbeddingStatus(knowledgeBaseId: string): Promise<EmbeddingStatus> {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/embeddings`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return embeddingStatusSchema.parse(await res.json());
 }
 
 /** List built-in domain Modules with per-KB installed status (US-029, viewer+). */

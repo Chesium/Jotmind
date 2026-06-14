@@ -860,8 +860,8 @@
         "Typecheck passes"
       ],
       "priority": 48,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Selected-KB embedding status UI added. apps/web/src/api.ts now exports getEmbeddingStatus(), parsing GET /api/knowledge-bases/:kbId/embeddings with embeddingStatusSchema. New apps/web/src/EmbeddingsPanel.tsx renders near KB AI policy/admin automation tooling in App.tsx and shows vector-search availability separately from generation availability, backend reason text, total/counts by target type, latest model/dimensions/lastIndexedAt, and provider kind when present. The panel is read-only/viewer-compatible and refreshes via the selected-KB invalidation bus on aiPolicy/jobs changes. Added focused web tests for unavailable and available/indexed responses. Verified: pnpm verify:quick, pnpm verify, and browser verification with Playwright Chromium against the real API+PostgreSQL (mock AI provider) all passed; dev-browser skill unavailable, so Playwright was used per project convention."
     },
     {
       "id": "US-049",

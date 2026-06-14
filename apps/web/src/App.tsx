@@ -53,6 +53,7 @@ import { AiPolicySettings, KbAiPolicy } from './AiPolicySettings.js';
 import { Proposals } from './Proposals.js';
 import { Imports } from './Imports.js';
 import { Modules } from './Modules.js';
+import { EmbeddingsPanel } from './EmbeddingsPanel.js';
 import { Rules } from './Rules.js';
 import { SchemaDefinitions } from './SchemaDefinitions.js';
 import {
@@ -468,6 +469,7 @@ function KnowledgeBases({
                     <Proposals kb={selectedKb} csrfToken={csrfToken} />
                     <Rules kb={selectedKb} csrfToken={csrfToken} />
                     <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />
+                    <EmbeddingsPanel kb={selectedKb} />
                     {/*
                       US-044: a portable JSON import creates a NEW Knowledge
                       Base, which lives in this `KnowledgeBases` parent's list —
