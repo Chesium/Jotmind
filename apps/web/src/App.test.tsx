@@ -1439,4 +1439,150 @@ describe('App', () => {
       expect(screen.queryByTestId('search-stale')).not.toBeInTheDocument();
     });
   });
+
+  it('shows an imported Knowledge Base in the KB list without reload (US-044)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000160';
+    const importedKbId = '00000000-0000-0000-0000-000000000161';
+    const now = new Date().toISOString();
+    // Simulates the portable import creating a NEW Knowledge Base server-side:
+    // while false the KB list has only the source KB; once the import POST
+    // succeeds the flag flips and the next list GET also returns the new KB.
+    let imported = false;
+
+    const portableExport = {
+      format: 'jotmind.kb.portable',
+      formatVersion: 1,
+      exportedAt: now,
+      fidelity: 'portable-graph',
+      labels: { json: 'j', markdown: 'm', csv: 'c' },
+      secretPolicy: { excludesProviderSecrets: true, excludedSecretFields: [] },
+      knowledgeBase: {
+        id: '00000000-0000-0000-0000-000000000162',
+        name: 'Restored Backup',
+        description: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      data: {
+        schemas: [],
+        entities: [],
+        claims: [],
+        notes: [],
+        sources: [],
+        citations: [],
+        rules: [],
+      },
+      audit: { note: 'export', events: [] },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = init?.method ?? 'GET';
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'owner@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes('/api/graph/projection/status')) {
+          return respond(200, { id: 'default', state: 'synchronized', pendingEvents: 0 });
+        }
+        // The portable import endpoint: creates a new KB and flips the flag so
+        // the next KB-list GET includes it. Must be matched BEFORE the generic
+        // /api/knowledge-bases list matcher below (it has no `${kbId}/`).
+        if (url.includes('/api/knowledge-bases/import-portable') && method === 'POST') {
+          imported = true;
+          return respond(201, {
+            importedAt: now,
+            knowledgeBaseId: importedKbId,
+            knowledgeBaseName: 'Restored Backup',
+            counts: {
+              schemaDefinitions: 0,
+              schemaVersions: 0,
+              entities: 0,
+              claims: 0,
+              notes: 0,
+              sources: 0,
+              citations: 0,
+              rules: 0,
+            },
+            warnings: [],
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/audit`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/jobs`)) return respond(200, { jobs: [] });
+        if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/notes`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/sources`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/source-excerpts`)) return respond(200, []);
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          const source = {
+            id: kbId,
+            name: 'Backup Source KB',
+            description: null,
+            createdBy: '00000000-0000-0000-0000-000000000001',
+            role: 'owner',
+            createdAt: now,
+            updatedAt: now,
+          };
+          const restored = {
+            id: importedKbId,
+            name: 'Restored Backup',
+            description: null,
+            createdBy: '00000000-0000-0000-0000-000000000001',
+            role: 'owner',
+            createdAt: now,
+            updatedAt: now,
+          };
+          return respond(200, imported ? [source, restored] : [source]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    // The imported KB is not in the list yet.
+    expect(screen.queryByTestId(`kb-select-${importedKbId}`)).not.toBeInTheDocument();
+
+    // Select the owner KB so the (admin-gated) KbAdmin import controls render.
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+    await waitFor(() => {
+      expect(screen.getByTestId('kb-import-file')).toBeInTheDocument();
+    });
+
+    // Upload a portable JSON backup; on success the parent KB list refreshes.
+    // jsdom's File does not implement `.text()`, so polyfill it here.
+    const fileText = JSON.stringify(portableExport);
+    const file = new File([fileText], 'backup.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(fileText) });
+    fireEvent.change(screen.getByTestId('kb-import-file'), { target: { files: [file] } });
+
+    // The success message identifies the imported KB by name (AC3)...
+    await waitFor(() => {
+      expect(screen.getByTestId('kb-import-result')).toBeInTheDocument();
+    });
+    // ...and the imported KB now appears in the selector/list without a reload
+    // (AC1/AC2).
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${importedKbId}`)).toBeInTheDocument();
+    });
+  });
 });

@@ -23,7 +23,21 @@ import { useInvalidationEffect } from './invalidation.js';
  * without needing a system-admin account. Only rendered for callers whose KB
  * role is at least `admin`.
  */
-export function KbAdmin({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
+export function KbAdmin({
+  kb,
+  csrfToken,
+  onKbListChanged,
+}: {
+  kb: KnowledgeBase;
+  csrfToken: string;
+  /**
+   * US-044 localized escape hatch (US-035 AC3): a portable JSON import creates a
+   * NEW Knowledge Base in the parent list, which lives OUTSIDE the
+   * per-selected-KB invalidation bus. The parent passes its KB-list refresh so
+   * the imported KB becomes selectable without a page reload.
+   */
+  onKbListChanged?: () => void;
+}) {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [jobs, setJobs] = useState<PublicJob[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +74,7 @@ export function KbAdmin({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: strin
     <section aria-label="kb-admin" data-testid="kb-admin">
       <h3>Administration — {kb.name}</h3>
 
-      <ExportBackup kb={kb} csrfToken={csrfToken} />
+      <ExportBackup kb={kb} csrfToken={csrfToken} onKbListChanged={onKbListChanged} />
       {error && <p data-testid="kb-admin-error">{error}</p>}
       {loading && <p data-testid="kb-admin-loading">Loading…</p>}
 
@@ -100,7 +114,15 @@ export function KbAdmin({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: strin
  * backup/restore format; Markdown is human-readable only; CSV is a structured
  * subset. Importing a portable JSON always creates a NEW Knowledge Base.
  */
-function ExportBackup({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
+function ExportBackup({
+  kb,
+  csrfToken,
+  onKbListChanged,
+}: {
+  kb: KnowledgeBase;
+  csrfToken: string;
+  onKbListChanged?: () => void;
+}) {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PortableImportResult | null>(null);
@@ -113,6 +135,9 @@ function ExportBackup({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
       const parsed = portableKnowledgeBaseExportSchema.parse(JSON.parse(await file.text()));
       const imported = await importPortableKnowledgeBase(parsed, csrfToken);
       setResult(imported);
+      // US-044 AC1/AC2: invalidate the parent KB list so the newly imported KB
+      // becomes selectable immediately without a page reload.
+      onKbListChanged?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Import failed');
     } finally {

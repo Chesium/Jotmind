@@ -428,7 +428,20 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
                     <Proposals kb={selectedKb} csrfToken={csrfToken} />
                     <Rules kb={selectedKb} csrfToken={csrfToken} />
                     <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />
-                    <KbAdmin kb={selectedKb} csrfToken={csrfToken} />
+                    {/*
+                      US-044: a portable JSON import creates a NEW Knowledge
+                      Base, which lives in this `KnowledgeBases` parent's list —
+                      OUTSIDE the per-selected-KB <InvalidationProvider> bus
+                      (the bus is scoped/reset per selected KB and has no
+                      knowledgeBases domain). So we pass `refresh` down as a
+                      documented localized parent-ref escape hatch (US-035 AC3)
+                      to refresh the KB list/selector without a page reload.
+                    */}
+                    <KbAdmin
+                      kb={selectedKb}
+                      csrfToken={csrfToken}
+                      onKbListChanged={() => void refresh()}
+                    />
                   </div>
                 </div>
               </InvalidationProvider>
