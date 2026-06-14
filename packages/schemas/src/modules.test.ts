@@ -62,6 +62,52 @@ describe('BUILTIN_MODULES', () => {
     expect(place.entityTypes).toContain('Place');
   });
 
+  it('ships the reading-character-map Module with Character, Event, Place, and Concept (AC1)', () => {
+    const mod = findBuiltinModule('reading-character-map');
+    expect(mod).toBeDefined();
+    const types = mod!.entityTypes.map((e) => e.name);
+    expect(types).toEqual(expect.arrayContaining(['Character', 'Event', 'Place', 'Concept']));
+  });
+
+  it('Character records first appearance and attributes (AC2)', () => {
+    const mod = findBuiltinModule('reading-character-map')!;
+    const character = mod.entityTypes.find((e) => e.name === 'Character')!;
+    const fields = Object.keys(character.propertySchema);
+    expect(fields).toEqual(
+      expect.arrayContaining(['firstAppearance', 'role', 'species', 'affiliation', 'status']),
+    );
+    // A minimal Character (name only) still validates — no required custom props.
+    expect(validateEntityProperties(character.propertySchema, {}).valid).toBe(true);
+  });
+
+  it('Plot Event supports a numeric sequence number for ordering (AC4)', () => {
+    const mod = findBuiltinModule('reading-character-map')!;
+    const event = mod.entityTypes.find((e) => e.name === 'Event')!;
+    expect(event.propertySchema.sequence?.type).toBe('number');
+    expect(validateEntityProperties(event.propertySchema, { sequence: 'first' }).valid).toBe(false);
+    expect(validateEntityProperties(event.propertySchema, { sequence: 3 }).valid).toBe(true);
+  });
+
+  it('records plot/relationship claims incl. parent_of for family inference (AC2/AC5)', () => {
+    const mod = findBuiltinModule('reading-character-map')!;
+    const predicates = mod.claimPredicates.map((p) => p.name);
+    expect(predicates).toEqual(
+      expect.arrayContaining(['parent_of', 'appears_in', 'first_appears_in', 'knows']),
+    );
+    // The family-relationship rule pack joins on parent_of(parent, child).
+    const parentOf = mod.claimPredicates.find((p) => p.name === 'parent_of')!;
+    const roles = parentOf.spec.argumentRoles.map((r) => r.name);
+    expect(roles).toEqual(expect.arrayContaining(['parent', 'child']));
+  });
+
+  it('references the family-relationship rule pack (AC5)', () => {
+    const mod = findBuiltinModule('reading-character-map')!;
+    expect(mod.rulePacks).toContainEqual({
+      moduleId: 'reading-character-map',
+      packId: 'family-relationship',
+    });
+  });
+
   it('references rule packs that exist in the rule catalog', () => {
     for (const mod of BUILTIN_MODULES) {
       for (const ref of mod.rulePacks) {

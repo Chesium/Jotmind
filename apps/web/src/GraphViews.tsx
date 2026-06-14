@@ -235,10 +235,24 @@ function NetworkView({
   const radius = 170;
   const center = size / 2;
 
+  // Filter the relationship graph to a single work/tag (AC3). Tags are how a
+  // character map scopes to one book/series; an empty value shows everything.
+  const [tag, setTag] = useState('');
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of entities) for (const t of e.tags) set.add(t);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [entities]);
+
+  const visibleEntities = useMemo(
+    () => (tag ? entities.filter((e) => e.tags.includes(tag)) : entities),
+    [entities, tag],
+  );
+
   const positions = useMemo(() => {
     const map = new Map<string, { x: number; y: number }>();
-    const n = Math.max(entities.length, 1);
-    entities.forEach((e, i) => {
+    const n = Math.max(visibleEntities.length, 1);
+    visibleEntities.forEach((e, i) => {
       const angle = (2 * Math.PI * i) / n - Math.PI / 2;
       map.set(e.id, {
         x: center + radius * Math.cos(angle),
@@ -246,7 +260,7 @@ function NetworkView({
       });
     });
     return map;
-  }, [entities, center]);
+  }, [visibleEntities, center]);
 
   const edges = useMemo(() => {
     const result: { id: string; predicate: string; from: string; to: string }[] = [];
@@ -269,49 +283,70 @@ function NetworkView({
 
   return (
     <div data-testid="network-view">
-      <svg
-        width={size}
-        height={size}
-        viewBox={`0 0 ${String(size)} ${String(size)}`}
-        role="img"
-        aria-label="entity network"
-      >
-        {edges.map((edge) => {
-          const a = positions.get(edge.from);
-          const b = positions.get(edge.to);
-          if (!a || !b) return null;
-          return (
-            <g key={edge.id}>
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#999" strokeWidth={1} />
-              <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} fontSize={9} fill="#666">
-                {edge.predicate}
-              </text>
-            </g>
-          );
-        })}
-        {entities.map((e) => {
-          const p = positions.get(e.id);
-          if (!p) return null;
-          return (
-            <g
-              key={e.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => onSelect({ kind: 'entity', id: e.id })}
-              onKeyDown={(ev) => {
-                if (ev.key === 'Enter' || ev.key === ' ') onSelect({ kind: 'entity', id: e.id });
-              }}
-              data-testid={`network-node-${e.id}`}
-              style={{ cursor: 'pointer' }}
-            >
-              <circle cx={p.x} cy={p.y} r={6} fill="#3b82f6" />
-              <text x={p.x + 8} y={p.y + 3} fontSize={11}>
-                {e.name}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+      {allTags.length > 0 && (
+        <label>
+          Filter by tag/work:{' '}
+          <select
+            value={tag}
+            onChange={(ev) => setTag(ev.target.value)}
+            data-testid="network-tag-filter"
+          >
+            <option value="">All</option>
+            {allTags.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {visibleEntities.length === 0 ? (
+        <p data-testid="network-filter-empty">No entities match the selected tag.</p>
+      ) : (
+        <svg
+          width={size}
+          height={size}
+          viewBox={`0 0 ${String(size)} ${String(size)}`}
+          role="img"
+          aria-label="entity network"
+        >
+          {edges.map((edge) => {
+            const a = positions.get(edge.from);
+            const b = positions.get(edge.to);
+            if (!a || !b) return null;
+            return (
+              <g key={edge.id}>
+                <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#999" strokeWidth={1} />
+                <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} fontSize={9} fill="#666">
+                  {edge.predicate}
+                </text>
+              </g>
+            );
+          })}
+          {visibleEntities.map((e) => {
+            const p = positions.get(e.id);
+            if (!p) return null;
+            return (
+              <g
+                key={e.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelect({ kind: 'entity', id: e.id })}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Enter' || ev.key === ' ') onSelect({ kind: 'entity', id: e.id });
+                }}
+                data-testid={`network-node-${e.id}`}
+                style={{ cursor: 'pointer' }}
+              >
+                <circle cx={p.x} cy={p.y} r={6} fill="#3b82f6" />
+                <text x={p.x + 8} y={p.y + 3} fontSize={11}>
+                  {e.name}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      )}
     </div>
   );
 }
@@ -321,10 +356,22 @@ function NetworkView({
 interface TimelineItem {
   key: string;
   date: string;
+  /** Optional explicit plot-order number (US-030 AC4), e.g. from an Event's `sequence` property. */
+  sequence: number | null;
   kind: 'claim' | 'note' | 'event';
   label: string;
   detail: string;
   select: Selection;
+}
+
+/** Read a numeric `sequence` property off an entity's JSONB properties, if present. */
+function readSequence(properties: Record<string, unknown>): number | null {
+  const raw = properties.sequence;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim() !== '' && Number.isFinite(Number(raw))) {
+    return Number(raw);
+  }
+  return null;
 }
 
 /**
@@ -344,6 +391,9 @@ function TimelineView({
   entityById: Map<string, Entity>;
   onSelect: (target: Selection) => void;
 }) {
+  // Order plot events by date (default) or by an explicit sequence number (AC4).
+  const [order, setOrder] = useState<'date' | 'sequence'>('date');
+
   const items = useMemo(() => {
     const result: TimelineItem[] = [];
     for (const claim of claims) {
@@ -354,6 +404,7 @@ function TimelineView({
       result.push({
         key: `claim-${claim.id}`,
         date: claimDate(claim),
+        sequence: null,
         kind: 'claim',
         label: claim.predicate,
         detail: subjects || claim.description || '',
@@ -364,6 +415,7 @@ function TimelineView({
       result.push({
         key: `note-${note.id}`,
         date: note.createdAt,
+        sequence: null,
         kind: 'note',
         label: note.title ?? 'Note',
         detail: note.content.slice(0, 80),
@@ -375,31 +427,62 @@ function TimelineView({
       result.push({
         key: `event-${entity.id}`,
         date: entity.createdAt,
+        sequence: readSequence(entity.properties),
         kind: 'event',
         label: entity.name,
         detail: entity.description ?? '',
         select: { kind: 'entity', id: entity.id },
       });
     }
-    result.sort((a, b) => b.date.localeCompare(a.date));
     return result;
   }, [entities, claims, notes, entityById]);
+
+  const sorted = useMemo(() => {
+    const list = [...items];
+    if (order === 'sequence') {
+      // Sequenced items first (ascending plot order); unsequenced fall back to
+      // newest-date-first so undated/unsequenced records still appear.
+      list.sort((a, b) => {
+        if (a.sequence !== null && b.sequence !== null) return a.sequence - b.sequence;
+        if (a.sequence !== null) return -1;
+        if (b.sequence !== null) return 1;
+        return b.date.localeCompare(a.date);
+      });
+    } else {
+      list.sort((a, b) => b.date.localeCompare(a.date));
+    }
+    return list;
+  }, [items, order]);
 
   if (items.length === 0) {
     return <p data-testid="timeline-empty">No dated records yet.</p>;
   }
 
   return (
-    <ul data-testid="timeline-view">
-      {items.map((item) => (
-        <li key={item.key} data-testid={`timeline-item-${item.key}`}>
-          <button type="button" onClick={() => onSelect(item.select)}>
-            <strong>{formatDate(item.date)}</strong> [{item.kind}] {item.label}
-            {item.detail && <> — {item.detail}</>}
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div data-testid="timeline-container">
+      <label>
+        Order by:{' '}
+        <select
+          value={order}
+          onChange={(ev) => setOrder(ev.target.value as 'date' | 'sequence')}
+          data-testid="timeline-order"
+        >
+          <option value="date">Date</option>
+          <option value="sequence">Plot sequence</option>
+        </select>
+      </label>
+      <ul data-testid="timeline-view">
+        {sorted.map((item) => (
+          <li key={item.key} data-testid={`timeline-item-${item.key}`}>
+            <button type="button" onClick={() => onSelect(item.select)}>
+              {item.sequence !== null && <strong>#{item.sequence} </strong>}
+              <strong>{formatDate(item.date)}</strong> [{item.kind}] {item.label}
+              {item.detail && <> — {item.detail}</>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

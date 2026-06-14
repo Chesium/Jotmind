@@ -1000,7 +1000,7 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
 
 ## Built-in domain Modules (US-029)
 
-- A **Module** is an installable bundle of default *content* for a Knowledge
+- A **Module** is an installable bundle of default _content_ for a Knowledge
   Base: custom entity-type + claim-predicate schemas (US-027) and references to
   built-in rule packs (US-022). The catalog is **static shared content** in
   `@jotmind/schemas` `modules.ts`: `BUILTIN_MODULES` + `findBuiltinModule(id)`.
@@ -1044,6 +1044,28 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
   turning it OFF needs no confirmation. Browser tests must register a
   `page.once('dialog')` handler and use `.click()` (not `.check()`, which asserts
   the box ends up checked) when exercising it.
+
+## Reading / character-map Module (US-030)
+
+- Adding a domain Module is **catalog-only**: append a `BuiltinModule` to
+  `BUILTIN_MODULES` in `@jotmind/schemas` `modules.ts`. The install router
+  (`modules/index.ts`) and `<Modules>` UI are generic, so a new module is
+  automatically installable + browsable with NO API/web/migration changes. The
+  `reading-character-map` module ships `Character`/`Event`/`Place`/`Concept`
+  entity types + plot/relationship predicates (`parent_of`, `appears_in`,
+  `first_appears_in`, `knows`, `married_to`, `allied_with`, `enemy_of`,
+  `located_at`) and references the existing `reading-character-map`/
+  `family-relationship` rule pack (US-022). A module's `parent_of` predicate's
+  roles (`parent`/`child`) MUST match the rule pack's atom names for inference.
+  All four entity types are already in `BUILTIN_ENTITY_TYPES` (graph.ts), so the
+  entity-create `<select>` already offers them.
+- **GraphViews enhancements** (`apps/web/src/GraphViews.tsx`): the **Network**
+  view has a tag/work filter (`network-tag-filter` select → filters
+  `visibleEntities` by tag; `network-filter-empty` when none match). The
+  **Timeline** view has an order toggle (`timeline-order` select: `date` |
+  `sequence`); plot-`Event` entities carry an optional numeric `sequence` JSONB
+  property read by `readSequence()` and shown as `#N`. Sequence mode sorts
+  sequenced items ascending, unsequenced fall back to newest-date-first.
 
 ## Validation
 
