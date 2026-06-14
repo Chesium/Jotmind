@@ -18,6 +18,7 @@ import {
   listSources,
   updateEntity,
 } from './api.js';
+import { useInvalidate, useInvalidationEffect } from './invalidation.js';
 
 /**
  * Multiple views over the same Knowledge Base graph (US-013): a network view of
@@ -69,6 +70,7 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
   const [projection, setProjection] = useState<GraphProjectionStatus | null>(null);
 
   const canEdit = kbRoleSatisfies(kb.role, 'editor');
+  const invalidate = useInvalidate();
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -102,6 +104,18 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
     setSelected(null);
     setTagFilter(null);
   }, [refresh]);
+
+  // Reflect entity/claim/note/source/source-excerpt mutations made in sibling
+  // panels (Entities, Claims, Capture, proposal/import/rule acceptance) by
+  // reloading the relational data that backs every view. Projection-status
+  // banners and AGE fallback are preserved because refresh() also re-fetches the
+  // projection status best-effort (US-037 AC1/AC2/AC3/AC4).
+  useInvalidationEffect(
+    ['entities', 'claims', 'notes', 'sources', 'sourceExcerpts', 'graphViews'],
+    () => {
+      void refresh();
+    },
+  );
 
   const entityById = useMemo(() => {
     const map = new Map<string, Entity>();
@@ -220,7 +234,11 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
           onSelect={navigate}
           onSelectTag={navigateTag}
           onClose={() => setSelected(null)}
-          onChanged={() => void refresh()}
+          onChanged={() => {
+            void refresh();
+            // An entity edit here can retarget claim arg labels too (US-037 AC1).
+            invalidate(['entities', 'claims', 'graphViews']);
+          }}
         />
       )}
     </section>

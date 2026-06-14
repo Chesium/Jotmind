@@ -853,11 +853,11 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
           csrfToken,
         );
         // Editing an entity changes how it appears in claim argument controls.
-        invalidate(['entities', 'claims']);
+        invalidate(['entities', 'claims', 'graphViews']);
       } else {
         await createEntity(kb.id, payload, csrfToken);
         // New entities must become selectable in claim argument dropdowns (AC1/AC3).
-        invalidate(['entities']);
+        invalidate(['entities', 'graphViews']);
       }
       setForm(EMPTY_ENTITY_FORM);
       setEditingId(null);
@@ -893,7 +893,7 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
       if (!window.confirm(`Delete "${entity.name}"? ${detail}`)) return;
       await deleteEntity(kb.id, entity.id, csrfToken);
       // Deleting an entity affects claim arguments that referenced it (AC2).
-      invalidate(['entities', 'claims']);
+      invalidate(['entities', 'claims', 'graphViews']);
       if (editingId === entity.id) cancelEdit();
       await refresh();
     } catch (err) {
@@ -925,7 +925,7 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
       }
       await mergeEntity(kb.id, source.id, targetId, csrfToken);
       // Merges retarget claim arguments server-side, so claims must refresh too (AC2).
-      invalidate(['entities', 'claims']);
+      invalidate(['entities', 'claims', 'graphViews']);
       if (editingId === source.id) cancelEdit();
       setMergeTargets((m) => {
         const next = { ...m };
@@ -1145,6 +1145,7 @@ function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const invalidate = useInvalidate();
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -1235,6 +1236,8 @@ function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
       } else {
         await createClaim(kb.id, payload, csrfToken);
       }
+      // Claim create/update changes graph relationships shown in GraphViews (AC2).
+      invalidate(['claims', 'graphViews']);
       setForm(emptyClaimForm());
       setEditingId(null);
       await refresh();
@@ -1263,6 +1266,8 @@ function Claims({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     }
     try {
       await deleteClaim(kb.id, claim.id, csrfToken);
+      // Deleting a claim removes its relationship from GraphViews (AC2).
+      invalidate(['claims', 'graphViews']);
       if (editingId === claim.id) cancelEdit();
       await refresh();
     } catch (err) {
@@ -1478,6 +1483,7 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const invalidate = useInvalidate();
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -1524,6 +1530,8 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
         { title: noteForm.title.trim() || undefined, content: noteForm.content },
         csrfToken,
       );
+      // New note appears in GraphViews Sources & Notes view (AC3).
+      invalidate(['notes', 'graphViews']);
       setNoteForm({ title: '', content: '' });
       await refresh();
     } catch (err) {
@@ -1558,6 +1566,8 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
         },
         csrfToken,
       );
+      // New source appears in GraphViews Sources & Notes view (AC3).
+      invalidate(['sources', 'graphViews']);
       setSourceForm({ title: '', sourceType: '', uri: '', content: '', metadata: '' });
       await refresh();
     } catch (err) {
@@ -1584,6 +1594,8 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
         },
         csrfToken,
       );
+      // New citation (source excerpt) shows in GraphViews (AC3).
+      invalidate(['sourceExcerpts', 'graphViews']);
       setCitations((m) => ({ ...m, [id]: { excerpt: '', claimId: '' } }));
       await refresh();
     } catch (err) {
@@ -1596,6 +1608,8 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     if (!window.confirm(`Delete this note? Its citations will be removed.`)) return;
     try {
       await deleteNote(kb.id, note.id, csrfToken);
+      // Deleting a note also removes its citations from GraphViews (AC3).
+      invalidate(['notes', 'sourceExcerpts', 'graphViews']);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete note');
@@ -1609,6 +1623,8 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     }
     try {
       await deleteSource(kb.id, source.id, csrfToken);
+      // Deleting a source also removes its citations from GraphViews (AC3).
+      invalidate(['sources', 'sourceExcerpts', 'graphViews']);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete source');
@@ -1619,6 +1635,8 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     setError(null);
     try {
       await deleteSourceExcerpt(kb.id, excerptId, csrfToken);
+      // Deleting a citation updates GraphViews (AC3).
+      invalidate(['sourceExcerpts', 'graphViews']);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete citation');
