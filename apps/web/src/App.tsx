@@ -1510,6 +1510,14 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     void refresh();
   }, [refresh]);
 
+  // Claim create/update/delete (e.g. in the Claims panel) must refresh the
+  // citation claim dropdowns here without a reload (US-038). refresh() reloads
+  // claims (plus notes/sources/excerpts), so new claims appear and deleted ones
+  // disappear as selectable citation targets.
+  useInvalidationEffect(['claims'], () => {
+    void refresh();
+  });
+
   function claimLabel(id: string | null): string {
     if (!id) return '';
     const claim = claims.find((c) => c.id === id);

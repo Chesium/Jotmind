@@ -693,3 +693,14 @@ Thread: https://ampcode.com/threads/T-019ec689-7913-7439-95ff-7911a0379499
   - Browser-verify gotcha: the `network-empty` <p> resolves but is `hidden` in the live layout — assert on `[data-testid^="network-node-"]` count instead. SVG node label getByText('<name>') is brittle (also matches the Entities list) — assert node COUNT. The full-page screenshot may scroll past the network SVG; the Playwright count assertion is the authoritative proof.
   - test:e2e:real global-setup runs db:reset:test which needs JOTMIND_ALLOW_DB_RESET=true (and DATABASE_URL); it truncates everything so first-run setup shows — no manual TRUNCATE needed.
 ---
+
+## Sun 14 Jun 2026 22:45 +08 - US-038
+Thread: https://ampcode.com/threads/T-019ec691-cb47-7363-a381-11c9a234fcac
+- Made the Capture panel a SUBSCRIBER of the 'claims' invalidation domain so claims created/updated/deleted in the Claims panel appear in/disappear from the citation claim dropdowns with no page reload or KB reselect.
+- Files changed: apps/web/src/App.tsx (added `useInvalidationEffect(['claims'], () => void refresh())` to <Capture>; refresh() already reloads listClaims so the citation-claim-<id> <select> updates), apps/web/src/App.test.tsx (new US-038 regression test).
+- The Claims panel already publishes ['claims','graphViews'] on create/update/delete (US-037), so no publisher changes were needed — this was a one-line subscriber wire.
+- **Learnings for future iterations:**
+  - Pattern is now well-established (see Codebase Patterns "Selected-KB invalidation bus wiring"): a READING panel subscribes via useInvalidationEffect to every domain it reads; a MUTATING panel publishes the affected domains. Capture reads claims (for citation dropdowns) so it must subscribe to 'claims' even though it doesn't mutate claims.
+  - GOTCHA for App.test.tsx state-based-mock regression tests: mock record fixtures MUST satisfy the @jotmind/schemas Zod schemas or the api.ts `*ListSchema.parse(...)` throws and the panel silently renders empty (no visible error in the test, just a missing element + a timeout). noteSchema needs `properties:{}`; claimSchema needs `properties:{}` AND each argument needs a valid uuid `id` + numeric `position` + nullable `entityId`. When a citation dropdown won't render, check the note loaded (the citation form only renders per note/source).
+  - US-039..US-045 remain: wire the remaining panels (proposal acceptance -> graph panels; import jobs/proposal sync; inferred-result accept; module install -> schema/rule panels; search/command/answer staleness; KB list after portable import; AI policy availability surfaces).
+---

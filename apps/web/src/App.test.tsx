@@ -742,4 +742,129 @@ describe('App', () => {
       expect(screen.getByTestId(`network-node-${entityId}`)).toBeInTheDocument();
     });
   });
+
+  it('shows a newly created claim in capture citation dropdowns without reload (US-038)', async () => {
+    const kbId = '00000000-0000-0000-0000-0000000000fc';
+    const noteId = '00000000-0000-0000-0000-000000000101';
+    const claimId = '00000000-0000-0000-0000-000000000102';
+    const now = new Date().toISOString();
+    const note = {
+      id: noteId,
+      knowledgeBaseId: kbId,
+      title: 'A note',
+      content: 'Some content',
+      properties: {},
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const createdClaim = {
+      id: claimId,
+      knowledgeBaseId: kbId,
+      predicate: 'knows',
+      description: null,
+      confidence: null,
+      validStart: null,
+      validEnd: null,
+      properties: {},
+      schemaVersionId: null,
+      arguments: [
+        {
+          id: '00000000-0000-0000-0000-000000000103',
+          role: 'subject',
+          position: 0,
+          argumentKind: 'literal',
+          value: 'x',
+          entityId: null,
+        },
+      ],
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+    let claimCreated = false;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = init?.method ?? 'GET';
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes('/api/graph/projection/status')) {
+          return respond(200, { id: 'default', state: 'synchronized', pendingEvents: 0 });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) {
+          if (method === 'POST') {
+            claimCreated = true;
+            return respond(201, createdClaim);
+          }
+          return respond(200, claimCreated ? [createdClaim] : []);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/notes`)) return respond(200, [note]);
+        if (url.includes(`/api/knowledge-bases/${kbId}/sources`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/source-excerpts`)) return respond(200, []);
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Citation Sync KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    // The Capture citation form for the note renders a claim dropdown that
+    // initially has no claim to link.
+    await waitFor(() => {
+      expect(screen.getByTestId(`citation-claim-${noteId}`)).toBeInTheDocument();
+    });
+    expect(
+      within(screen.getByTestId(`citation-claim-${noteId}`)).queryByText(/knows/),
+    ).not.toBeInTheDocument();
+
+    // Create a claim in the Claims panel (literal arg avoids needing an entity).
+    fireEvent.change(screen.getByTestId('claim-predicate'), { target: { value: 'knows' } });
+    fireEvent.change(screen.getByTestId('claim-arg-kind-0'), { target: { value: 'literal' } });
+    fireEvent.change(screen.getByTestId('claim-arg-role-0'), { target: { value: 'subject' } });
+    fireEvent.change(screen.getByTestId('claim-arg-value-0'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByTestId('claim-submit'));
+
+    // Without a page reload or KB reselect, the citation dropdown shows the claim.
+    await waitFor(() => {
+      expect(
+        within(screen.getByTestId(`citation-claim-${noteId}`)).getByText(/knows/),
+      ).toBeInTheDocument();
+    });
+  });
 });
