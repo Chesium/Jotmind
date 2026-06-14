@@ -70,6 +70,28 @@ export const INVALIDATION_DOMAINS: readonly InvalidationDomain[] = [
   'answers',
 ];
 
+/**
+ * Domains whose mutation can change Search / Command / Answer result freshness
+ * (US-043). Covers the canonical graph records those results are derived from
+ * (entities, claims, notes, sources, source excerpts) plus the result-specific
+ * domains published by proposal-accept and inferred-claim acceptance. Exported
+ * as a stable module-level constant so the `useInvalidationEffect` subscription
+ * key stays stable across renders.
+ */
+export const RESULT_STALE_DOMAINS: InvalidationDomain[] = [
+  'entities',
+  'claims',
+  'notes',
+  'sources',
+  'sourceExcerpts',
+  'searchResults',
+  'commandResults',
+  'answers',
+];
+
+/** User-facing message shown when result panels go stale (US-043 AC4). */
+export const RESULT_STALE_MESSAGE = 'Graph data changed. Rerun this search for current results.';
+
 type Listener = () => void;
 
 export interface InvalidationBus {

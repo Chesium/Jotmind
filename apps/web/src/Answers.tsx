@@ -6,6 +6,11 @@ import type {
   KnowledgeBase,
 } from '@jotmind/schemas';
 import { answerQuestion } from './api.js';
+import {
+  useInvalidationEffect,
+  RESULT_STALE_DOMAINS,
+  RESULT_STALE_MESSAGE,
+} from './invalidation.js';
 
 /**
  * Provenance-aware AI answers (US-020). One box asks a natural-language
@@ -30,6 +35,10 @@ export function Answers({ kb }: { kb: KnowledgeBase }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [openCitation, setOpenCitation] = useState<number | null>(null);
+  const [stale, setStale] = useState(false);
+
+  // Mark an existing answer stale when underlying graph data changes (US-043).
+  useInvalidationEffect(RESULT_STALE_DOMAINS, () => setStale(true));
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -39,6 +48,7 @@ export function Answers({ kb }: { kb: KnowledgeBase }) {
     setOpenCitation(null);
     try {
       setResponse(await answerQuestion(kb.id, q.trim()));
+      setStale(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Answer failed');
       setResponse(null);
@@ -68,6 +78,7 @@ export function Answers({ kb }: { kb: KnowledgeBase }) {
         </button>
       </form>
       {error && <p data-testid="answers-error">{error}</p>}
+      {response && stale && <p data-testid="answers-stale">{RESULT_STALE_MESSAGE}</p>}
 
       {response && (
         <div data-testid="answers-results">

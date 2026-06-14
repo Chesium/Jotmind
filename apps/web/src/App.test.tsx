@@ -1332,4 +1332,111 @@ describe('App', () => {
     expect(onSchemasInvalidated).toHaveBeenCalled();
     expect(onRulesInvalidated).toHaveBeenCalled();
   });
+
+  it('marks search results stale after an entity mutation and clears on rerun (US-043)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000150';
+    const entityId = '00000000-0000-0000-0000-000000000151';
+    const now = new Date().toISOString();
+    const created = {
+      id: entityId,
+      knowledgeBaseId: kbId,
+      type: 'Person',
+      name: 'Ada Lovelace',
+      aliases: [],
+      description: null,
+      tags: [],
+      properties: {},
+      schemaVersionId: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+    let entityCreated = false;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = init?.method ?? 'GET';
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes('/api/graph/projection/status')) {
+          return respond(200, { id: 'default', state: 'synchronized', pendingEvents: 0 });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/search`)) {
+          return respond(200, { results: [], vectorSearch: { available: false, reason: null } });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) {
+          if (method === 'POST') {
+            entityCreated = true;
+            return respond(201, created);
+          }
+          return respond(200, entityCreated ? [created] : []);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/notes`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/sources`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/source-excerpts`)) return respond(200, []);
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Stale Sync KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    // Run a search to get results; no stale banner yet.
+    await waitFor(() => {
+      expect(screen.getByTestId('search-submit')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('search-submit'));
+    await waitFor(() => {
+      expect(screen.getByTestId('search-results')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('search-stale')).not.toBeInTheDocument();
+
+    // Creating an entity invalidates the entities domain; search results go stale.
+    fireEvent.change(screen.getByTestId('entity-name'), { target: { value: 'Ada Lovelace' } });
+    fireEvent.click(screen.getByTestId('entity-submit'));
+    await waitFor(() => {
+      expect(screen.getByTestId('search-stale')).toBeInTheDocument();
+    });
+
+    // Rerunning the search clears the stale banner (AC4).
+    fireEvent.click(screen.getByTestId('search-submit'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('search-stale')).not.toBeInTheDocument();
+    });
+  });
 });

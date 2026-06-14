@@ -55,7 +55,13 @@ import { Imports } from './Imports.js';
 import { Modules } from './Modules.js';
 import { Rules } from './Rules.js';
 import { SchemaDefinitions } from './SchemaDefinitions.js';
-import { InvalidationProvider, useInvalidate, useInvalidationEffect } from './invalidation.js';
+import {
+  InvalidationProvider,
+  useInvalidate,
+  useInvalidationEffect,
+  RESULT_STALE_DOMAINS,
+  RESULT_STALE_MESSAGE,
+} from './invalidation.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -456,6 +462,7 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
   const [response, setResponse] = useState<CommandResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -464,6 +471,7 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
     setError(null);
     try {
       setResponse(await runCommand(kb.id, q.trim()));
+      setStale(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Command failed');
       setResponse(null);
@@ -471,6 +479,11 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
       setBusy(false);
     }
   }
+
+  // Mark existing results stale when underlying graph data changes (US-043).
+  // We mark-stale (rather than auto-rerun) so we never loop on the network and
+  // never disturb the user's query draft (AC2/AC3); re-running clears it (AC4).
+  useInvalidationEffect(RESULT_STALE_DOMAINS, () => setStale(true));
 
   const interp = response?.interpretation ?? null;
 
@@ -493,6 +506,7 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
         </button>
       </form>
       {error && <p data-testid="command-error">{error}</p>}
+      {response && stale && <p data-testid="command-stale">{RESULT_STALE_MESSAGE}</p>}
       {response && (
         <div data-testid="command-results">
           <p data-testid="command-ai-status">
@@ -586,6 +600,10 @@ function Search({ kb }: { kb: KnowledgeBase }) {
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
+
+  // Mark existing results stale when underlying graph data changes (US-043).
+  useInvalidationEffect(RESULT_STALE_DOMAINS, () => setStale(true));
 
   function toIso(date: string): string | undefined {
     if (!date) return undefined;
@@ -612,6 +630,7 @@ function Search({ kb }: { kb: KnowledgeBase }) {
         hasProvenance: hasProvenance ? true : undefined,
       });
       setResponse(result);
+      setStale(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed');
       setResponse(null);
@@ -732,6 +751,7 @@ function Search({ kb }: { kb: KnowledgeBase }) {
         </button>
       </form>
       {error && <p data-testid="search-error">{error}</p>}
+      {response && stale && <p data-testid="search-stale">{RESULT_STALE_MESSAGE}</p>}
       {response && (
         <div data-testid="search-results">
           {!response.vectorSearch.available && (
