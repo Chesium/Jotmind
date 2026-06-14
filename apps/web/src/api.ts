@@ -8,12 +8,14 @@ import {
   entityImpactSchema,
   entityListSchema,
   entitySchema,
+  acceptProposalResultSchema,
   captureResponseSchema,
   knowledgeBaseListSchema,
   knowledgeBaseSchema,
   noteListSchema,
   noteSchema,
   proposalListSchema,
+  proposalSchema,
   publicJobSchema,
   publicUserSchema,
   setupStatusSchema,
@@ -24,9 +26,11 @@ import {
   sourceSchema,
   type AccountRole,
   type AiPolicy,
+  type AcceptProposalResult,
   type CaptureRequest,
   type CaptureResponse,
   type Proposal,
+  type ProposalChanges,
   type ResolvedAiPolicy,
   type UpdateAiPolicy,
   type AuditEvent,
@@ -619,4 +623,65 @@ export async function listProposals(knowledgeBaseId: string, status?: string): P
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return proposalListSchema.parse(await res.json());
+}
+
+/**
+ * Accept a pending proposal (US-018). With no `itemIndexes` the whole batch is
+ * applied; an `itemIndexes` array applies only those candidate changes. Returns
+ * the updated proposal plus the ids of the created entities/claims.
+ */
+export async function acceptProposal(
+  knowledgeBaseId: string,
+  proposalId: string,
+  body: { itemIndexes?: number[]; note?: string },
+  csrfToken: string,
+): Promise<AcceptProposalResult> {
+  const res = await fetch(
+    `/api/knowledge-bases/${knowledgeBaseId}/proposals/${proposalId}/accept`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return acceptProposalResultSchema.parse(await res.json());
+}
+
+/** Reject (or dismiss) a pending proposal; it stays linked to its source. */
+export async function rejectProposal(
+  knowledgeBaseId: string,
+  proposalId: string,
+  body: { reason?: string; dismiss?: boolean },
+  csrfToken: string,
+): Promise<Proposal> {
+  const res = await fetch(
+    `/api/knowledge-bases/${knowledgeBaseId}/proposals/${proposalId}/reject`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return proposalSchema.parse(await res.json());
+}
+
+/** Edit a pending proposal's structured changes before accepting (US-018). */
+export async function editProposal(
+  knowledgeBaseId: string,
+  proposalId: string,
+  changes: ProposalChanges,
+  csrfToken: string,
+): Promise<Proposal> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/proposals/${proposalId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ changes }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return proposalSchema.parse(await res.json());
 }

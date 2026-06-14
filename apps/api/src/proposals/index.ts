@@ -1,9 +1,14 @@
 import { Router, type RequestHandler } from 'express';
 import {
+  acceptProposalSchema,
   captureRequestSchema,
+  editProposalSchema,
   kbRoleSatisfies,
+  proposalChangesSchema,
   proposalSchema,
+  rejectProposalSchema,
   resolveAiPolicy,
+  type AcceptProposalResult,
   type CaptureExtractionResult,
   type CaptureResponse,
   type ExtractionAvailability,
@@ -20,6 +25,8 @@ import { dbAuthStore, type AuthStore } from '../auth/store.js';
 import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
 import { dbNoteStore, type NoteStore } from '../notes/store.js';
 import { dbSourceStore, type SourceStore } from '../sources/store.js';
+import { dbEntityStore, type EntityStore } from '../entities/store.js';
+import { dbClaimStore, type ClaimArgumentInput, type ClaimStore } from '../claims/store.js';
 import { dbAiPolicyStore, type AiPolicyStore } from '../ai-policy/store.js';
 import {
   MOCK_EXTRACTION_LABEL,
@@ -114,18 +121,125 @@ export interface ProposalRouterOptions {
   store?: ProposalStore;
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
+  entityStore?: EntityStore;
+  claimStore?: ClaimStore;
+}
+
+/** Outcome of applying a proposal's selected changes (US-018). */
+type ApplyResult =
+  | { ok: true; createdEntityIds: string[]; createdClaimIds: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * Apply the selected create-entity / create-claim items of a proposal as
+ * canonical records (US-018 AC2/AC3/AC4). Entities are created first so claim
+ * arguments can resolve their `ref` to the new id; an arg `ref` that is not a
+ * created entity is treated as an existing entity id and must resolve to a real
+ * entity in the KB (otherwise the apply is rejected — invalid payloads cannot
+ * execute, AC4). Accepted claims carry provenance: source note/source,
+ * provider/model, confidence, and user-confirmation metadata.
+ */
+async function applyProposalChanges(args: {
+  kbId: string;
+  proposal: ProposalRow;
+  items: ProposalChange[];
+  entityStore: EntityStore;
+  claimStore: ClaimStore;
+  actorUserId: string;
+  confirmationNote?: string;
+}): Promise<ApplyResult> {
+  const { kbId, proposal, items, entityStore, claimStore, actorUserId, confirmationNote } = args;
+
+  const entityItems = items.filter((i) => i.op === 'create_entity');
+  const claimItems = items.filter((i) => i.op === 'create_claim');
+
+  // Pre-validate every claim entity-arg ref resolves before mutating anything.
+  const newRefs = new Set(entityItems.map((e) => e.ref));
+  for (const claim of claimItems) {
+    for (const arg of claim.arguments) {
+      if (arg.kind !== 'entity') continue;
+      const ref = arg.ref as string;
+      if (newRefs.has(ref)) continue;
+      const existing = await entityStore.getEntity(kbId, ref);
+      if (!existing) {
+        return { ok: false, reason: `Claim argument references unknown entity "${ref}"` };
+      }
+    }
+  }
+
+  // Create entities, mapping each local ref to its new id.
+  const refToId = new Map<string, string>();
+  const createdEntityIds: string[] = [];
+  for (const item of entityItems) {
+    const entity = await entityStore.createEntity({
+      knowledgeBaseId: kbId,
+      type: item.type,
+      name: item.name,
+      aliases: item.aliases ?? [],
+      description: item.description,
+      tags: item.tags ?? [],
+      properties: item.properties ?? {},
+      actorUserId,
+    });
+    refToId.set(item.ref, entity.id);
+    createdEntityIds.push(entity.id);
+  }
+
+  // Create claims, resolving entity-arg refs and recording provenance (AC3).
+  const acceptedAt = new Date().toISOString();
+  const createdClaimIds: string[] = [];
+  for (const item of claimItems) {
+    const claimArgs: ClaimArgumentInput[] = item.arguments.map((arg) => {
+      if (arg.kind === 'entity') {
+        const ref = arg.ref as string;
+        return {
+          role: arg.role,
+          argumentKind: 'entity' as const,
+          entityId: refToId.get(ref) ?? ref,
+        };
+      }
+      return { role: arg.role, argumentKind: 'literal' as const, value: arg.value };
+    });
+
+    const provenance: Record<string, unknown> = {
+      origin: 'ai_proposal',
+      proposalId: proposal.id,
+      sourceNoteId: proposal.sourceNoteId,
+      sourceSourceId: proposal.sourceSourceId,
+      provider: proposal.provider,
+      model: proposal.model,
+      acceptedBy: actorUserId,
+      acceptedAt,
+    };
+    if (confirmationNote) provenance.confirmationNote = confirmationNote;
+
+    const created = await claimStore.createClaim({
+      knowledgeBaseId: kbId,
+      predicate: item.predicate,
+      description: item.description,
+      confidence: item.confidence,
+      provenance,
+      arguments: claimArgs,
+      actorUserId,
+    });
+    createdClaimIds.push(created.id);
+  }
+
+  return { ok: true, createdEntityIds, createdClaimIds };
 }
 
 /**
- * Build the `/api/knowledge-bases/:kbId/proposals` router (US-017). Mounted with
- * `mergeParams: true`, AFTER the KB router. Reads require `viewer`; non-members
- * get 404 to hide existence (mirrors the other KB-scoped routers). Mutating the
- * queue (accept/reject) arrives in US-018.
+ * Build the `/api/knowledge-bases/:kbId/proposals` router (US-017/US-018).
+ * Mounted with `mergeParams: true`, AFTER the KB router. Reads require `viewer`;
+ * non-members get 404 to hide existence. Reviewing the queue
+ * (edit/accept/reject) requires `editor` + CSRF, so viewers are read-only.
  */
 export function createProposalRouter(options: ProposalRouterOptions = {}): Router {
   const store = options.store ?? dbProposalStore;
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
+  const entityStore = options.entityStore ?? dbEntityStore;
+  const claimStore = options.claimStore ?? dbClaimStore;
   const router = Router({ mergeParams: true });
   const authed = requireAuth(authStore);
   const requireKbRole = makeRequireKbRole({ kbStore });
@@ -144,6 +258,148 @@ export function createProposalRouter(options: ProposalRouterOptions = {}): Route
       };
       const list = await store.listProposals(req.params.kbId as string, filter);
       res.json(list.map(toProposal));
+    }),
+  );
+
+  // Edit a pending proposal's structured changes before accepting (AC2). The
+  // replacement is re-validated, so invalid payloads can never be saved (AC4).
+  router.patch(
+    '/:proposalId',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const kbId = req.params.kbId as string;
+      const ctx = req.auth as AuthContext;
+      const parsed = editProposalSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid proposal changes' });
+        return;
+      }
+      const updated = await store.updateProposalChanges({
+        knowledgeBaseId: kbId,
+        id: req.params.proposalId as string,
+        changes: parsed.data.changes,
+        actorUserId: ctx.user.id,
+      });
+      if (!updated) {
+        res.status(404).json({ error: 'Pending proposal not found' });
+        return;
+      }
+      res.json(toProposal(updated));
+    }),
+  );
+
+  // Accept a pending proposal: apply selected items as canonical records (AC2/
+  // AC3), then mark it accepted. Invalid stored payloads are rejected (AC4).
+  router.post(
+    '/:proposalId/accept',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const kbId = req.params.kbId as string;
+      const ctx = req.auth as AuthContext;
+      const parsedBody = acceptProposalSchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'Invalid accept request' });
+        return;
+      }
+
+      const proposal = await store.getProposal(kbId, req.params.proposalId as string);
+      if (!proposal) {
+        res.status(404).json({ error: 'Proposal not found' });
+        return;
+      }
+      if (proposal.status !== 'pending') {
+        res.status(409).json({ error: 'Proposal has already been reviewed' });
+        return;
+      }
+
+      // Re-validate the stored payload so a malformed proposal cannot execute.
+      const changesParsed = proposalChangesSchema.safeParse(proposal.changes);
+      if (!changesParsed.success) {
+        res.status(422).json({ error: 'Proposal payload is invalid and cannot be applied' });
+        return;
+      }
+      const allItems = changesParsed.data.items;
+
+      // Resolve item-level selection (AC2). Default = the whole batch.
+      let items = allItems;
+      if (parsedBody.data.itemIndexes) {
+        const indexes = parsedBody.data.itemIndexes;
+        if (indexes.some((i) => i >= allItems.length)) {
+          res.status(400).json({ error: 'itemIndexes out of range' });
+          return;
+        }
+        items = indexes.map((i) => allItems[i] as ProposalChange);
+      }
+
+      const applied = await applyProposalChanges({
+        kbId,
+        proposal,
+        items,
+        entityStore,
+        claimStore,
+        actorUserId: ctx.user.id,
+        confirmationNote: parsedBody.data.note,
+      });
+      if (!applied.ok) {
+        res.status(422).json({ error: applied.reason });
+        return;
+      }
+
+      const reviewed = await store.reviewProposal({
+        knowledgeBaseId: kbId,
+        id: proposal.id,
+        status: 'accepted',
+        metadata: {
+          appliedItemCount: items.length,
+          createdEntityIds: applied.createdEntityIds,
+          createdClaimIds: applied.createdClaimIds,
+        },
+        actorUserId: ctx.user.id,
+      });
+      if (!reviewed) {
+        res.status(409).json({ error: 'Proposal has already been reviewed' });
+        return;
+      }
+
+      const result: AcceptProposalResult = {
+        proposal: toProposal(reviewed),
+        createdEntityIds: applied.createdEntityIds,
+        createdClaimIds: applied.createdClaimIds,
+      };
+      res.status(201).json(result);
+    }),
+  );
+
+  // Reject (or dismiss) a pending proposal; it stays linked to its source (AC2).
+  router.post(
+    '/:proposalId/reject',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const kbId = req.params.kbId as string;
+      const ctx = req.auth as AuthContext;
+      const parsed = rejectProposalSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid reject request' });
+        return;
+      }
+      const reviewed = await store.reviewProposal({
+        knowledgeBaseId: kbId,
+        id: req.params.proposalId as string,
+        status: parsed.data.dismiss ? 'dismissed' : 'rejected',
+        reviewReason: parsed.data.reason ?? null,
+        actorUserId: ctx.user.id,
+      });
+      if (!reviewed) {
+        res.status(404).json({ error: 'Pending proposal not found' });
+        return;
+      }
+      res.json(toProposal(reviewed));
     }),
   );
 

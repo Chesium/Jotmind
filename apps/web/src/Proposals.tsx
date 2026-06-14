@@ -7,15 +7,22 @@ import {
   type Proposal,
   type ProposalChange,
 } from '@jotmind/schemas';
-import { listProposals, quickCapture } from './api.js';
+import {
+  acceptProposal,
+  editProposal,
+  listProposals,
+  quickCapture,
+  rejectProposal,
+} from './api.js';
 
 /**
- * Quick-capture + AI proposal review queue (US-017). Captured text is stored as
- * a Note/Source first (never lost), then — when AI is configured and permitted
- * by policy — extraction queues candidate graph changes as pending Proposals.
- * With no AI the capture still succeeds and an unavailable state is shown. The
- * queue here is read-only; reviewing/accepting/rejecting proposals arrives in
- * US-018.
+ * Quick-capture + AI proposal review queue (US-017/US-018). Captured text is
+ * stored as a Note/Source first (never lost), then — when AI is configured and
+ * permitted by policy — extraction queues candidate graph changes as pending
+ * Proposals. With no AI the capture still succeeds and an unavailable state is
+ * shown. Editors can review the queue: accept the whole batch or selected items
+ * (which creates canonical entities/claims preserving provenance), edit the
+ * structured changes, or reject (the proposal stays linked to its source).
  */
 export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   const canEdit = kbRoleSatisfies(kb.role, 'editor');
@@ -130,7 +137,14 @@ export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: str
       ) : (
         <ul data-testid="proposals-list">
           {proposals.map((p) => (
-            <ProposalItem key={p.id} proposal={p} />
+            <ProposalItem
+              key={p.id}
+              proposal={p}
+              kbId={kb.id}
+              csrfToken={csrfToken}
+              canEdit={canEdit}
+              onReviewed={refresh}
+            />
           ))}
         </ul>
       )}
@@ -172,9 +186,84 @@ function CaptureOutcome({ result }: { result: CaptureResponse }) {
   );
 }
 
-/** Render one pending proposal with its candidate changes. */
-function ProposalItem({ proposal }: { proposal: Proposal }) {
+/**
+ * Render one pending proposal with its candidate changes and review controls.
+ * Editors can select a subset of items (item-level accept), accept the whole
+ * batch, reject the proposal, or edit its structured changes as JSON.
+ */
+function ProposalItem({
+  proposal,
+  kbId,
+  csrfToken,
+  canEdit,
+  onReviewed,
+}: {
+  proposal: Proposal;
+  kbId: string;
+  csrfToken: string;
+  canEdit: boolean;
+  onReviewed: () => void | Promise<void>;
+}) {
   const isDemo = proposal.metadata?.demo === true;
+  const items = proposal.changes.items;
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  function toggle(i: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      await onReviewed();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function accept(itemIndexes?: number[]) {
+    void run(() =>
+      acceptProposal(kbId, proposal.id, itemIndexes ? { itemIndexes } : {}, csrfToken),
+    );
+  }
+
+  function reject() {
+    void run(() => rejectProposal(kbId, proposal.id, {}, csrfToken));
+  }
+
+  function startEdit() {
+    setDraft(JSON.stringify(proposal.changes, null, 2));
+    setEditing(true);
+    setError(null);
+  }
+
+  async function saveEdit() {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(draft);
+    } catch {
+      setError('Changes must be valid JSON.');
+      return;
+    }
+    await run(async () => {
+      await editProposal(kbId, proposal.id, parsed as never, csrfToken);
+      setEditing(false);
+    });
+  }
+
   return (
     <li data-testid={`proposal-${proposal.id}`} style={{ marginBottom: '0.75rem' }}>
       <div>
@@ -182,13 +271,91 @@ function ProposalItem({ proposal }: { proposal: Proposal }) {
         {proposal.provider && <> · {proposal.provider}</>}
         {isDemo && <em data-testid={`proposal-demo-${proposal.id}`}> ({MOCK_EXTRACTION_LABEL})</em>}
       </div>
+      {(proposal.sourceNoteId || proposal.sourceSourceId) && (
+        <div data-testid={`proposal-source-${proposal.id}`} style={{ fontSize: '0.85em' }}>
+          Source: {proposal.sourceNoteId ? `note ${proposal.sourceNoteId}` : ''}
+          {proposal.sourceSourceId ? `source ${proposal.sourceSourceId}` : ''}
+        </div>
+      )}
       <ul>
-        {proposal.changes.items.map((change, i) => (
+        {items.map((change, i) => (
           <li key={i} data-testid={`proposal-change-${proposal.id}-${i}`}>
+            {canEdit && (
+              <input
+                type="checkbox"
+                checked={selected.has(i)}
+                onChange={() => toggle(i)}
+                data-testid={`proposal-select-${proposal.id}-${i}`}
+                aria-label={`Select change ${i + 1}`}
+              />
+            )}{' '}
             {describeChange(change)}
           </li>
         ))}
       </ul>
+      {error && (
+        <p data-testid={`proposal-error-${proposal.id}`} style={{ color: 'crimson' }}>
+          {error}
+        </p>
+      )}
+      {canEdit && !editing && (
+        <div data-testid={`proposal-actions-${proposal.id}`}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => accept()}
+            data-testid={`proposal-accept-${proposal.id}`}
+          >
+            Accept all
+          </button>{' '}
+          <button
+            type="button"
+            disabled={busy || selected.size === 0}
+            onClick={() => accept([...selected].sort((a, b) => a - b))}
+            data-testid={`proposal-accept-selected-${proposal.id}`}
+          >
+            Accept selected ({selected.size})
+          </button>{' '}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={reject}
+            data-testid={`proposal-reject-${proposal.id}`}
+          >
+            Reject
+          </button>{' '}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={startEdit}
+            data-testid={`proposal-edit-${proposal.id}`}
+          >
+            Edit
+          </button>
+        </div>
+      )}
+      {canEdit && editing && (
+        <div data-testid={`proposal-edit-form-${proposal.id}`}>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={8}
+            style={{ width: '100%', fontFamily: 'monospace' }}
+            data-testid={`proposal-edit-json-${proposal.id}`}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void saveEdit()}
+            data-testid={`proposal-edit-save-${proposal.id}`}
+          >
+            Save changes
+          </button>{' '}
+          <button type="button" disabled={busy} onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
     </li>
   );
 }

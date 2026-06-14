@@ -22,6 +22,28 @@ export interface ListProposalsFilter {
   sourceSourceId?: string;
 }
 
+/** Replace a pending proposal's structured changes (US-018 AC2). */
+export interface UpdateProposalChangesInput {
+  knowledgeBaseId: string;
+  id: string;
+  changes: ProposalChanges;
+  actorUserId: string;
+}
+
+/** Terminal review states a proposal can move to (US-018). */
+export type ProposalReviewStatus = 'accepted' | 'rejected' | 'dismissed';
+
+/** Record the outcome of reviewing a proposal (accept/reject/dismiss, US-018). */
+export interface ReviewProposalInput {
+  knowledgeBaseId: string;
+  id: string;
+  status: ProposalReviewStatus;
+  reviewReason?: string | null;
+  /** Provenance/context recorded on the audit event (e.g. applied item count). */
+  metadata?: Record<string, unknown>;
+  actorUserId: string;
+}
+
 /**
  * Persistence boundary for AI/import proposals (US-017). Defined as an interface
  * so route handlers can run against an in-memory fake in unit tests (no live DB)
@@ -36,6 +58,13 @@ export interface ProposalStore {
   listProposals(knowledgeBaseId: string, filter?: ListProposalsFilter): Promise<ProposalRow[]>;
   getProposal(knowledgeBaseId: string, id: string): Promise<ProposalRow | undefined>;
   createProposal(input: CreateProposalInput): Promise<ProposalRow>;
+  /** Replace a pending proposal's changes (US-018). Undefined if not found. */
+  updateProposalChanges(input: UpdateProposalChangesInput): Promise<ProposalRow | undefined>;
+  /**
+   * Mark a proposal accepted/rejected/dismissed and record the reviewer + an
+   * audit event (US-018). Returns the updated row, or undefined if not found.
+   */
+  reviewProposal(input: ReviewProposalInput): Promise<ProposalRow | undefined>;
 }
 
 /** PostgreSQL-backed ProposalStore. Resolves the Drizzle client per call. */
@@ -104,6 +133,91 @@ export const dbProposalStore: ProposalStore = {
           provider: proposal.provider,
           itemCount: input.changes.items.length,
         },
+      });
+
+      return proposal;
+    });
+  },
+
+  async updateProposalChanges(input) {
+    return getDb().transaction(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(proposals)
+        .where(
+          and(
+            eq(proposals.id, input.id),
+            eq(proposals.knowledgeBaseId, input.knowledgeBaseId),
+            eq(proposals.status, 'pending'),
+            isNull(proposals.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!existing[0]) return undefined;
+
+      const rows = await tx
+        .update(proposals)
+        .set({ changes: input.changes, updatedAt: new Date() })
+        .where(
+          and(eq(proposals.id, input.id), eq(proposals.knowledgeBaseId, input.knowledgeBaseId)),
+        )
+        .returning();
+      const proposal = rows[0];
+      if (!proposal) throw new Error('Failed to update proposal');
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: proposal.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'proposal.updated',
+        targetType: 'proposal',
+        targetId: proposal.id,
+        metadata: { itemCount: input.changes.items.length },
+      });
+
+      return proposal;
+    });
+  },
+
+  async reviewProposal(input) {
+    return getDb().transaction(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(proposals)
+        .where(
+          and(
+            eq(proposals.id, input.id),
+            eq(proposals.knowledgeBaseId, input.knowledgeBaseId),
+            eq(proposals.status, 'pending'),
+            isNull(proposals.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!existing[0]) return undefined;
+
+      const now = new Date();
+      const rows = await tx
+        .update(proposals)
+        .set({
+          status: input.status,
+          reviewReason: input.reviewReason ?? null,
+          reviewedBy: input.actorUserId,
+          reviewedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(eq(proposals.id, input.id), eq(proposals.knowledgeBaseId, input.knowledgeBaseId)),
+        )
+        .returning();
+      const proposal = rows[0];
+      if (!proposal) throw new Error('Failed to review proposal');
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: proposal.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: `proposal.${input.status}`,
+        targetType: 'proposal',
+        targetId: proposal.id,
+        metadata: input.metadata ?? {},
       });
 
       return proposal;

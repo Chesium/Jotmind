@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acceptProposalSchema,
   captureRequestSchema,
+  editProposalSchema,
   proposalChangeSchema,
   proposalChangesSchema,
   proposalClaimArgumentSchema,
+  rejectProposalSchema,
 } from './proposals.js';
 
 describe('proposal changes', () => {
@@ -63,5 +66,43 @@ describe('captureRequestSchema', () => {
   it('rejects empty content', () => {
     const result = captureRequestSchema.safeParse({ content: '' });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('proposal review schemas (US-018)', () => {
+  it('accepts an empty accept request (batch accept)', () => {
+    expect(acceptProposalSchema.parse({})).toEqual({});
+  });
+
+  it('accepts item-level indexes and a confirmation note', () => {
+    const parsed = acceptProposalSchema.parse({ itemIndexes: [0, 2], note: 'ok' });
+    expect(parsed.itemIndexes).toEqual([0, 2]);
+    expect(parsed.note).toBe('ok');
+  });
+
+  it('rejects an empty itemIndexes array', () => {
+    expect(acceptProposalSchema.safeParse({ itemIndexes: [] }).success).toBe(false);
+  });
+
+  it('rejects negative item indexes', () => {
+    expect(acceptProposalSchema.safeParse({ itemIndexes: [-1] }).success).toBe(false);
+  });
+
+  it('parses a reject request with reason and dismiss', () => {
+    const parsed = rejectProposalSchema.parse({ reason: 'noise', dismiss: true });
+    expect(parsed.reason).toBe('noise');
+    expect(parsed.dismiss).toBe(true);
+  });
+
+  it('re-validates edited changes (invalid payloads rejected, AC4)', () => {
+    expect(
+      editProposalSchema.safeParse({
+        changes: { items: [{ op: 'create_entity', ref: 'x', type: 'Person', name: 'A' }] },
+      }).success,
+    ).toBe(true);
+    expect(
+      editProposalSchema.safeParse({ changes: { items: [{ op: 'create_entity', ref: 'x' }] } })
+        .success,
+    ).toBe(false);
   });
 });

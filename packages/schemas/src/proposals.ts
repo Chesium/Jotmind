@@ -182,3 +182,48 @@ export const captureResponseSchema = z.object({
   extraction: captureExtractionResultSchema,
 });
 export type CaptureResponse = z.infer<typeof captureResponseSchema>;
+
+// --- Proposal review (US-018) ----------------------------------------------
+//
+// Editors review the pending queue and accept/reject/edit proposals at item
+// level (a subset of `changes.items`) or batch level (the whole proposal).
+// Accepting executes the selected create-entity/create-claim candidates as
+// canonical records, preserving provenance; rejecting marks the proposal so it
+// stays linked to its source note/source.
+
+/**
+ * Edit a pending proposal's structured changes before accepting (US-018 AC2).
+ * The replacement payload is re-validated by `proposalChangesSchema`, so invalid
+ * payloads can never be saved (and therefore never executed — AC4).
+ */
+export const editProposalSchema = z.object({
+  changes: proposalChangesSchema,
+});
+export type EditProposalRequest = z.infer<typeof editProposalSchema>;
+
+/**
+ * Accept a pending proposal (US-018 AC2). With no `itemIndexes` the whole batch
+ * is applied; an `itemIndexes` array applies only those items (item-level
+ * accept). A `note` records optional user-confirmation context preserved in
+ * accepted-claim provenance (AC3).
+ */
+export const acceptProposalSchema = z.object({
+  itemIndexes: z.array(z.number().int().nonnegative()).min(1).optional(),
+  note: z.string().max(2000).optional(),
+});
+export type AcceptProposalRequest = z.infer<typeof acceptProposalSchema>;
+
+/** Reject (or dismiss) a pending proposal; it stays linked to its source. */
+export const rejectProposalSchema = z.object({
+  reason: z.string().max(2000).optional(),
+  dismiss: z.boolean().optional(),
+});
+export type RejectProposalRequest = z.infer<typeof rejectProposalSchema>;
+
+/** Result of accepting a proposal: created records plus the updated proposal. */
+export const acceptProposalResultSchema = z.object({
+  proposal: proposalSchema,
+  createdEntityIds: z.array(z.string().uuid()),
+  createdClaimIds: z.array(z.string().uuid()),
+});
+export type AcceptProposalResult = z.infer<typeof acceptProposalResultSchema>;

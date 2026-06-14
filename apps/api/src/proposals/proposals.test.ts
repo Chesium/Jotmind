@@ -9,12 +9,21 @@ import {
   type ProposalChange,
 } from '@jotmind/schemas';
 import { createApp } from '../app.js';
-import type { NoteRow, ProposalRow, SessionRow, SourceRow, UserRow } from '../db/schema.js';
+import type {
+  EntityRow,
+  NoteRow,
+  ProposalRow,
+  SessionRow,
+  SourceRow,
+  UserRow,
+} from '../db/schema.js';
 import { type AuthStore } from '../auth/index.js';
 import type { KnowledgeBaseStore } from '../kb/store.js';
 import type { AiPolicyStore, PolicyKey } from '../ai-policy/store.js';
 import type { NoteStore } from '../notes/store.js';
 import type { SourceStore } from '../sources/store.js';
+import type { EntityStore } from '../entities/store.js';
+import type { ClaimStore, ClaimWithArguments, CreateClaimInput } from '../claims/store.js';
 import type { GraphExtractor } from '../extraction/index.js';
 import type { CreateProposalInput, ListProposalsFilter, ProposalStore } from './store.js';
 
@@ -194,7 +203,110 @@ function createMemoryProposalStore(): ProposalStore & { audits: string[] } {
       audits.push('proposal.created');
       return Promise.resolve(row);
     },
+    updateProposalChanges: (input) => {
+      const p = byId.get(input.id);
+      if (!p || p.knowledgeBaseId !== input.knowledgeBaseId || p.status !== 'pending') {
+        return Promise.resolve(undefined);
+      }
+      const updated: ProposalRow = { ...p, changes: input.changes, updatedAt: new Date() };
+      byId.set(updated.id, updated);
+      audits.push('proposal.updated');
+      return Promise.resolve(updated);
+    },
+    reviewProposal: (input) => {
+      const p = byId.get(input.id);
+      if (!p || p.knowledgeBaseId !== input.knowledgeBaseId || p.status !== 'pending') {
+        return Promise.resolve(undefined);
+      }
+      const now = new Date();
+      const updated: ProposalRow = {
+        ...p,
+        status: input.status,
+        reviewReason: input.reviewReason ?? null,
+        reviewedBy: input.actorUserId,
+        reviewedAt: now,
+        updatedAt: now,
+      };
+      byId.set(updated.id, updated);
+      audits.push(`proposal.${input.status}`);
+      return Promise.resolve(updated);
+    },
   };
+}
+
+function createMemoryEntityStore(): EntityStore & { created: EntityRow[] } {
+  const byId = new Map<string, EntityRow>();
+  const created: EntityRow[] = [];
+  const store: EntityStore & { created: EntityRow[] } = {
+    created,
+    listEntities: (kb) =>
+      Promise.resolve([...byId.values()].filter((e) => e.knowledgeBaseId === kb)),
+    getEntity: (kb, id) => {
+      const e = byId.get(id);
+      return Promise.resolve(e && e.knowledgeBaseId === kb && e.deletedAt === null ? e : undefined);
+    },
+    createEntity: (input) => {
+      const now = new Date();
+      const row: EntityRow = {
+        id: randomUUID(),
+        knowledgeBaseId: input.knowledgeBaseId,
+        type: input.type,
+        name: input.name,
+        aliases: input.aliases ?? [],
+        description: input.description ?? null,
+        tags: input.tags ?? [],
+        properties: input.properties ?? {},
+        schemaVersionId: input.schemaVersionId ?? null,
+        mergedIntoId: null,
+        createdBy: input.actorUserId,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+      byId.set(row.id, row);
+      created.push(row);
+      return Promise.resolve(row);
+    },
+    updateEntity: () => Promise.resolve(undefined),
+    deleteEntity: () => Promise.resolve(undefined),
+    mergeEntities: () => Promise.resolve({ ok: false, reason: 'source_not_found' }),
+    getEntityImpact: () => Promise.resolve(undefined),
+  };
+  return store;
+}
+
+function createMemoryClaimStore(): ClaimStore & { created: CreateClaimInput[] } {
+  const created: CreateClaimInput[] = [];
+  const store: ClaimStore & { created: CreateClaimInput[] } = {
+    created,
+    listClaims: () => Promise.resolve([]),
+    getClaim: () => Promise.resolve(undefined),
+    createClaim: (input) => {
+      created.push(input);
+      const now = new Date();
+      const claim: ClaimWithArguments = {
+        id: randomUUID(),
+        knowledgeBaseId: input.knowledgeBaseId,
+        predicate: input.predicate,
+        description: input.description ?? null,
+        confidence: input.confidence ?? null,
+        validStart: input.validStart ? new Date(input.validStart) : null,
+        validEnd: input.validEnd ? new Date(input.validEnd) : null,
+        properties: input.properties ?? {},
+        provenance: input.provenance ?? {},
+        schemaVersionId: input.schemaVersionId ?? null,
+        createdBy: input.actorUserId,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+        arguments: [],
+      };
+      return Promise.resolve(claim);
+    },
+    updateClaim: () => Promise.resolve(undefined),
+    deleteClaim: () => Promise.resolve(undefined),
+  };
+  return store;
 }
 
 const STATIC_CHANGES: ProposalChange[] = [
@@ -243,6 +355,8 @@ interface Harness {
   proposalStore: ReturnType<typeof createMemoryProposalStore>;
   noteStore: NoteStore;
   sourceStore: SourceStore;
+  entityStore: ReturnType<typeof createMemoryEntityStore>;
+  claimStore: ReturnType<typeof createMemoryClaimStore>;
 }
 
 function makeApp(h: Harness, extractor: GraphExtractor | null) {
@@ -253,6 +367,8 @@ function makeApp(h: Harness, extractor: GraphExtractor | null) {
     proposalStore: h.proposalStore,
     noteStore: h.noteStore,
     sourceStore: h.sourceStore,
+    entityStore: h.entityStore,
+    claimStore: h.claimStore,
     extractor,
   });
 }
@@ -268,6 +384,8 @@ describe('proposals + capture API', () => {
       proposalStore: createMemoryProposalStore(),
       noteStore: createMemoryNoteStore(),
       sourceStore: createMemorySourceStore(),
+      entityStore: createMemoryEntityStore(),
+      claimStore: createMemoryClaimStore(),
     };
   });
 
@@ -438,5 +556,236 @@ describe('proposals + capture API', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].status).toBe('pending');
+  });
+
+  // --- Review actions (US-018) ---------------------------------------------
+
+  /** Seed a pending proposal with one entity + one claim referencing it. */
+  async function seedProposal(userId: string) {
+    const changes = {
+      items: [
+        { op: 'create_entity' as const, ref: 'ada', type: 'Person', name: 'Ada Lovelace' },
+        {
+          op: 'create_claim' as const,
+          predicate: 'knows',
+          confidence: 0.9,
+          arguments: [
+            { role: 'subject', kind: 'entity' as const, ref: 'ada' },
+            { role: 'topic', kind: 'literal' as const, value: 'mathematics' },
+          ],
+        },
+      ],
+    };
+    return h.proposalStore.createProposal({
+      knowledgeBaseId: KB_ID,
+      kind: 'extraction',
+      changes,
+      sourceNoteId: '22222222-2222-2222-2222-222222222222',
+      sourceSourceId: null,
+      provider: 'mock',
+      model: 'demo',
+      metadata: {},
+      actorUserId: userId,
+    });
+  }
+
+  it('accepts a proposal, creating entities and claims with provenance (AC2/AC3)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({ note: 'looks good' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.proposal.status).toBe('accepted');
+    expect(res.body.createdEntityIds).toHaveLength(1);
+    expect(res.body.createdClaimIds).toHaveLength(1);
+    expect(h.entityStore.created).toHaveLength(1);
+    expect(h.claimStore.created).toHaveLength(1);
+
+    const claim = h.claimStore.created[0];
+    expect(claim?.confidence).toBe(0.9);
+    expect(claim?.provenance?.origin).toBe('ai_proposal');
+    expect(claim?.provenance?.provider).toBe('mock');
+    expect(claim?.provenance?.sourceNoteId).toBe('22222222-2222-2222-2222-222222222222');
+    expect(claim?.provenance?.acceptedBy).toBe(userId);
+    expect(claim?.provenance?.confirmationNote).toBe('looks good');
+    // The claim's entity argument resolves to the newly created entity id.
+    const entityId = h.entityStore.created[0]?.id;
+    const arg = claim?.arguments.find((a) => a.argumentKind === 'entity');
+    expect(arg?.entityId).toBe(entityId);
+    expect(h.proposalStore.audits).toContain('proposal.accepted');
+  });
+
+  it('accepts only selected items at the item level (AC2)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+
+    // Apply only the entity item (index 0); skip the claim.
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({ itemIndexes: [0] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.createdEntityIds).toHaveLength(1);
+    expect(res.body.createdClaimIds).toHaveLength(0);
+    expect(h.claimStore.created).toHaveLength(0);
+  });
+
+  it('rejects out-of-range item indexes', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({ itemIndexes: [5] });
+    expect(res.status).toBe(400);
+  });
+
+  it('cannot apply a claim whose entity ref does not resolve (AC4)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await h.proposalStore.createProposal({
+      knowledgeBaseId: KB_ID,
+      kind: 'extraction',
+      changes: {
+        items: [
+          {
+            op: 'create_claim',
+            predicate: 'knows',
+            arguments: [{ role: 'subject', kind: 'entity', ref: 'missing-ref' }],
+          },
+        ],
+      },
+      actorUserId: userId,
+    });
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({});
+    expect(res.status).toBe(422);
+    expect(h.claimStore.created).toHaveLength(0);
+  });
+
+  it('rejects a proposal and keeps it linked to its source (AC2)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/reject`)
+      .set('x-csrf-token', csrfToken)
+      .send({ reason: 'not useful' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('rejected');
+    expect(res.body.reviewReason).toBe('not useful');
+    expect(res.body.sourceNoteId).toBe('22222222-2222-2222-2222-222222222222');
+    expect(h.proposalStore.audits).toContain('proposal.rejected');
+  });
+
+  it('edits a pending proposal before accepting (AC2)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+
+    const res = await agent
+      .patch(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        changes: {
+          items: [{ op: 'create_entity', ref: 'x', type: 'Concept', name: 'Edited' }],
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.changes.items).toHaveLength(1);
+    expect(res.body.changes.items[0].name).toBe('Edited');
+    expect(h.proposalStore.audits).toContain('proposal.updated');
+  });
+
+  it('rejects an invalid edit payload (AC4)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+
+    const res = await agent
+      .patch(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}`)
+      .set('x-csrf-token', csrfToken)
+      .send({ changes: { items: [{ op: 'create_entity', ref: 'x' }] } });
+    expect(res.status).toBe(400);
+  });
+
+  it('forbids viewers from accepting/rejecting/editing (AC5)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'viewer');
+    const proposal = await seedProposal(userId);
+
+    const accept = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({});
+    expect(accept.status).toBe(403);
+
+    const reject = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/reject`)
+      .set('x-csrf-token', csrfToken)
+      .send({});
+    expect(reject.status).toBe(403);
+  });
+
+  it('requires CSRF to accept', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .send({});
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 accepting an unknown proposal', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/33333333-3333-3333-3333-333333333333/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({});
+    expect(res.status).toBe(404);
+  });
+
+  it('cannot accept an already-reviewed proposal', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+    const proposal = await seedProposal(userId);
+    await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/reject`)
+      .set('x-csrf-token', csrfToken)
+      .send({});
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals/${proposal.id}/accept`)
+      .set('x-csrf-token', csrfToken)
+      .send({});
+    expect(res.status).toBe(409);
   });
 });

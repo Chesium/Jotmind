@@ -32,6 +32,8 @@ export interface CreateClaimInput {
   validStart?: string;
   validEnd?: string;
   properties?: Record<string, unknown>;
+  /** Provenance metadata (e.g. accepted-proposal source/provider, US-018 AC3). */
+  provenance?: Record<string, unknown>;
   schemaVersionId?: string;
   arguments: ClaimArgumentInput[];
   actorUserId: string;
@@ -170,6 +172,7 @@ export const dbClaimStore: ClaimStore = {
           validStart: input.validStart ? new Date(input.validStart) : null,
           validEnd: input.validEnd ? new Date(input.validEnd) : null,
           properties: input.properties ?? {},
+          provenance: input.provenance ?? {},
           schemaVersionId: input.schemaVersionId ?? null,
           createdBy: input.actorUserId,
         })

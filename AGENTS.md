@@ -534,9 +534,46 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `captureResponseSchema`, `extractionAvailabilitySchema`. Exported from
   `index.ts`.
 - Web: `apps/web/src/Proposals.tsx` (`<Proposals>`, rendered after `<Capture>`
-  for the selected KB) — quick-capture form + read-only pending-proposal list
-  showing each candidate change and the demo label. API client helpers in
-  `api.ts`: `quickCapture`/`listProposals`.
+  for the selected KB) — quick-capture form + pending-proposal list showing each
+  candidate change, the demo label, and (for editors) review controls. API
+  client helpers in `api.ts`: `quickCapture`/`listProposals`.
+
+## Review & apply proposals (US-018)
+
+- **The proposal router (not the store) applies accepted changes.** Accepting a
+  proposal runs `applyProposalChanges` (in `proposals/index.ts`) which calls the
+  injected `entityStore.createEntity` / `claimStore.createClaim` — so each
+  created record goes through the normal canonical write path (outbox + audit in
+  one tx). The `ProposalStore` only mutates the proposal row
+  (`updateProposalChanges`, `reviewProposal`). `createProposalRouter` now takes
+  `entityStore`/`claimStore` options (wired in `app.ts`); inject in-memory fakes
+  for unit tests.
+- Endpoints (all `editor` + `requireCsrf`; viewers are read-only): `PATCH
+/:proposalId` (replace `changes`, re-validated by `proposalChangesSchema` so
+  invalid payloads can't be saved/executed — AC4), `POST /:proposalId/accept`
+  (body `{ itemIndexes?, note? }`; default = whole batch, `itemIndexes` =
+  item-level subset — AC2), `POST /:proposalId/reject` (body `{ reason?,
+dismiss? }`; sets `rejected`/`dismissed`, proposal stays linked to its source).
+  `reviewProposal`/`updateProposalChanges` only act on `status='pending'` rows
+  (else `undefined` → 404/409), so a proposal can't be reviewed twice.
+- **Apply order + ref resolution:** create-entity items first (mapping each
+  local `ref` → new id), then create-claim items. A claim entity-arg `ref` that
+  isn't a created entity is treated as an existing entity id and is **pre-checked
+  via `entityStore.getEntity`** before any mutation; an unresolved ref aborts the
+  whole accept with 422 (invalid payloads cannot execute, AC4). Accept also
+  re-parses the stored `proposal.changes` with `proposalChangesSchema` first.
+- **Accepted-claim provenance (AC3):** `dbClaimStore.createClaim` now accepts an
+  optional `provenance` field (persisted to the `claims.provenance` JSONB
+  column). The accept handler records `{origin:'ai_proposal', proposalId,
+sourceNoteId, sourceSourceId, provider, model, acceptedBy, acceptedAt,
+confirmationNote?}`. When adding new claim-creating flows that need provenance,
+  pass `provenance` here rather than stuffing it into `properties`.
+- Shared review schemas in `@jotmind/schemas` `proposals.ts`:
+  `editProposalSchema`, `acceptProposalSchema`, `rejectProposalSchema`,
+  `acceptProposalResultSchema` (the accept response = updated proposal +
+  `createdEntityIds`/`createdClaimIds`). Web helpers in `api.ts`:
+  `acceptProposal`/`rejectProposal`/`editProposal`; `<ProposalItem>` renders
+  per-item checkboxes + Accept all / Accept selected / Reject / Edit (JSON).
 
 ## Validation
 

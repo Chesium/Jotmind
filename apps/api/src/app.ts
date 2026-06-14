@@ -180,7 +180,13 @@ export function createApp(options: AppOptions = {}): Express {
   const extractor = options.extractor !== undefined ? options.extractor : resolveExtractorFromEnv();
   app.use(
     '/api/knowledge-bases/:kbId/proposals',
-    createProposalRouter({ store: options.proposalStore, kbStore: options.kbStore, authStore }),
+    createProposalRouter({
+      store: options.proposalStore,
+      kbStore: options.kbStore,
+      authStore,
+      entityStore: options.entityStore,
+      claimStore: options.claimStore,
+    }),
   );
   app.use(
     '/api/knowledge-bases/:kbId/capture',
