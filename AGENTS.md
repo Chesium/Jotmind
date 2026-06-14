@@ -610,6 +610,43 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   `-interpreted-result-<kind>`, `command-no-interpretation`,
   `command-fallback`/`-fallback-result-<kind>`.
 
+## Provenance-aware AI answers (US-020)
+
+- `apps/api/src/answers/` answers a question using graph evidence and cites it.
+  Three pieces mirror the command box (US-019): `evidence.ts`
+  (`AnswerEvidenceStore` + `dbAnswerEvidenceStore` — COMPOSES `searchStore` +
+  `claimStore` + `entityStore`, no new SQL: it runs a token search scoped to
+  `claim/note/source`, then enriches each claim hit with its arguments + entity
+  NAMES so a cited claim carries predicate/connected-entities/confidence/
+  provenance, AC3), `answerer.ts` (`AnswerGenerator` interface +
+  `MockAnswerGenerator` deterministic demo + `LlmAnswerGenerator` strict-JSON
+  with ONE repair retry inside `generate()`; `resolveAnswerGeneratorFromEnv`
+  mirrors `resolveCommandInterpreterFromEnv`), and `index.ts`
+  (`createAnswerRouter`).
+- Mounted at `/api/knowledge-bases/:kbId/answers` (`mergeParams`, AFTER the KB
+  router). Single `POST /` is **read-only** → `viewer`, **no CSRF**, non-members 404. `createApp` seams: `answerGenerator` (default
+  `resolveAnswerGeneratorFromEnv()`) + `answerEvidenceStore`; reuses
+  `searchStore`/`aiPolicyStore`.
+- Manual token search ALWAYS runs as `fallback` so No-AI mode still offers
+  results (AC2). AI is available only when a generator exists + `resolveAiPolicy`
+  (server+user+KB strictest-wins) is not `off` (remote needs `remoteAllowed`),
+  so **viewer generation is gated by policy** (AC6). The generated answer's
+  `statements` are labeled `known|inferred|uncertain|missing` (AC5 — the mock
+  classifies by claim confidence (<0.5 → uncertain) and `provenance.origin`
+  (`rule`/`inferred` → inferred)). The router **clamps each statement's citation
+  refs to real evidence refs** so the model can't fabricate citations (AC1/AC3).
+- Shared shapes in `@jotmind/schemas` `answers.ts`: `answerRequestSchema`,
+  `answerCitationSchema` (the `ref`-indexed evidence), `answerStatementSchema`,
+  `generatedAnswerSchema` (what the generator/LLM produces), `answerResponseSchema`.
+- Web: `<Answers>` in its own file `apps/web/src/Answers.tsx` (rendered after
+  `<CommandBox>` when a KB is selected) + `answerQuestion()` in `api.ts`.
+  Testids: `answers`, `answers-query`, `answers-submit`, `answers-ai-status`,
+  `answers-summary`, `answers-statement-<factKind>`, `answers-citation-open-<ref>`,
+  `answers-citation-detail-<ref>`/`-confidence-<ref>`/`-provenance-<ref>`,
+  `answers-fallback`/`-fallback-result-<kind>`. Clicking a citation toggles an
+  inline detail panel (AC4); keep that single (don't also render a duplicate
+  detail block — duplicate testids break `getByTestId`).
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

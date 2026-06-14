@@ -286,6 +286,130 @@ describe('App', () => {
     expect(screen.getByTestId('detail-description')).toHaveTextContent('Mathematician');
   });
 
+  it('asks a provenance-aware AI answer and shows a cited claim (US-020)', async () => {
+    const kbId = '00000000-0000-0000-0000-0000000000aa';
+    const claimId = '00000000-0000-0000-0000-0000000000c1';
+    const now = new Date().toISOString();
+
+    mockFetch((url) => {
+      if (url.includes('/api/auth/me')) {
+        return {
+          body: {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'viewer@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          },
+        };
+      }
+      if (url.includes(`/api/knowledge-bases/${kbId}/answers`)) {
+        return {
+          body: {
+            query: 'Who does Ada know?',
+            ai: {
+              attempted: true,
+              available: true,
+              reason: null,
+              repaired: false,
+              provider: 'Mock Answerer',
+              model: 'mock',
+              demo: true,
+              verified: true,
+              label: 'Mock AI / deterministic demo output',
+            },
+            answer: {
+              summary: 'Ada knows Charles.',
+              statements: [
+                { text: 'Ada knows Charles Babbage.', factKind: 'known', citations: [0] },
+              ],
+            },
+            citations: [
+              {
+                ref: 0,
+                kind: 'claim',
+                id: claimId,
+                knowledgeBaseId: kbId,
+                title: 'knows',
+                snippet: null,
+                predicate: 'knows',
+                entities: [
+                  {
+                    role: 'subject',
+                    entityId: '00000000-0000-0000-0000-0000000000e1',
+                    name: 'Ada',
+                  },
+                  {
+                    role: 'object',
+                    entityId: '00000000-0000-0000-0000-0000000000e2',
+                    name: 'Charles',
+                  },
+                ],
+                confidence: 0.9,
+                provenance: { origin: 'manual' },
+              },
+            ],
+            fallback: {
+              results: [],
+              vectorSearch: { available: false, reason: 'No embeddings.' },
+            },
+          },
+        };
+      }
+      if (
+        url.match(/\/api\/knowledge-bases\/[^/]+\/(entities|claims|notes|sources|source-excerpts)/)
+      ) {
+        return { body: [] };
+      }
+      if (url.includes(`/api/knowledge-bases/${kbId}/search`)) return { body: { results: [] } };
+      if (url.includes('/api/knowledge-bases')) {
+        return {
+          body: [
+            {
+              id: kbId,
+              name: 'Ask KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'viewer',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('answers')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('answers-query'), {
+      target: { value: 'Who does Ada know?' },
+    });
+    fireEvent.click(screen.getByTestId('answers-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('answers-summary')).toHaveTextContent('Ada knows Charles.');
+    });
+    expect(screen.getByTestId('answers-statement-known')).toBeInTheDocument();
+
+    // Open the citation detail and verify predicate/confidence/provenance (AC3/AC4).
+    fireEvent.click(screen.getByTestId('answers-citation-open-0'));
+    await waitFor(() => {
+      expect(screen.getByTestId('answers-citation-confidence-0')).toHaveTextContent('0.9');
+    });
+    expect(screen.getByTestId('answers-citation-provenance-0')).toHaveTextContent('manual');
+  });
+
   it('shows read-only access for viewers', async () => {
     const kbId = '00000000-0000-0000-0000-0000000000bb';
     mockFetch((url) => {

@@ -39,6 +39,12 @@ import {
   resolveCommandInterpreterFromEnv,
   type CommandInterpreter,
 } from './command/index.js';
+import {
+  createAnswerRouter,
+  resolveAnswerGeneratorFromEnv,
+  type AnswerEvidenceStore,
+  type AnswerGenerator,
+} from './answers/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -129,6 +135,17 @@ export interface AppOptions {
    * No-AI install (manual search still works).
    */
   commandInterpreter?: CommandInterpreter | null;
+  /**
+   * Provenance-aware AI answer generator (US-020). Injectable for unit tests.
+   * Defaults to the env-configured generator, or `null` for a No-AI install
+   * (manual search fallback still works).
+   */
+  answerGenerator?: AnswerGenerator | null;
+  /**
+   * Evidence store backing AI answers (US-020). Injectable for unit tests.
+   * Defaults to the store composing search/claim/entity stores.
+   */
+  answerEvidenceStore?: AnswerEvidenceStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -192,6 +209,21 @@ export function createApp(options: AppOptions = {}): Express {
       authStore,
       aiPolicyStore: options.aiPolicyStore,
       interpreter: commandInterpreter,
+    }),
+  );
+  const answerGenerator =
+    options.answerGenerator !== undefined
+      ? options.answerGenerator
+      : resolveAnswerGeneratorFromEnv();
+  app.use(
+    '/api/knowledge-bases/:kbId/answers',
+    createAnswerRouter({
+      searchStore: options.searchStore,
+      evidenceStore: options.answerEvidenceStore,
+      kbStore: options.kbStore,
+      authStore,
+      aiPolicyStore: options.aiPolicyStore,
+      generator: answerGenerator,
     }),
   );
   app.use(

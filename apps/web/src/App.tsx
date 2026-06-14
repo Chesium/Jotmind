@@ -46,6 +46,7 @@ import {
   updateClaim,
   updateEntity,
 } from './api.js';
+import { Answers } from './Answers.js';
 import { GraphViews } from './GraphViews.js';
 import { KbAdmin } from './KbAdmin.js';
 import { AiPolicySettings, KbAiPolicy } from './AiPolicySettings.js';
@@ -315,6 +316,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       </form>
       {error && <p data-testid="kb-error">{error}</p>}
       {selectedKb && <CommandBox kb={selectedKb} />}
+      {selectedKb && <Answers kb={selectedKb} />}
       {selectedKb && <GraphViews kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Search kb={selectedKb} />}
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}

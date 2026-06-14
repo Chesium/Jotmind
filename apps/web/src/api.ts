@@ -1,5 +1,6 @@
 import {
   aiPolicySchema,
+  answerResponseSchema,
   resolvedAiPolicySchema,
   auditEventSchema,
   authStateSchema,
@@ -28,6 +29,7 @@ import {
   type AccountRole,
   type AiPolicy,
   type AcceptProposalResult,
+  type AnswerResponse,
   type CaptureRequest,
   type CaptureResponse,
   type CommandResponse,
@@ -499,6 +501,17 @@ export async function runCommand(knowledgeBaseId: string, q: string): Promise<Co
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return commandResponseSchema.parse(await res.json());
+}
+
+export async function answerQuestion(knowledgeBaseId: string, q: string): Promise<AnswerResponse> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/answers`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ q }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return answerResponseSchema.parse(await res.json());
 }
 
 /** Knowledge Base audit summary (admin/owner only). Newest events first. */
