@@ -15,6 +15,7 @@ import type { KnowledgeBaseStore } from '../kb/store.js';
 import type { RuleStore } from './store.js';
 import type { RuleFacts } from './engine.js';
 import type { RuleRunStore, SaveRuleRunInput } from './run-store.js';
+import type { ClaimStore, ClaimWithArguments, CreateClaimInput } from '../claims/store.js';
 
 function createMemoryAuthStore(): AuthStore {
   const usersById = new Map<string, UserRow>();
@@ -164,6 +165,57 @@ function createMemoryRuleRunStore(facts: RuleFacts): RuleRunStore & {
       return Promise.resolve(r && r.knowledgeBaseId === kb ? r : undefined);
     },
     listResults: (_kb, runId) => Promise.resolve(resultsByRun.get(runId) ?? []),
+    getResult: (kb, runId, resultId) => {
+      const r = (resultsByRun.get(runId) ?? []).find((x) => x.id === resultId);
+      return Promise.resolve(r && r.knowledgeBaseId === kb ? r : undefined);
+    },
+  };
+}
+
+/** Minimal ClaimStore fake recording created claims (US-025 accept flow). */
+function createMemoryClaimStore(): ClaimStore & { created: CreateClaimInput[] } {
+  const created: CreateClaimInput[] = [];
+  const unsupported = () => Promise.reject(new Error('not used in run tests'));
+  return {
+    created,
+    createClaim: (input) => {
+      created.push(input);
+      const now = new Date();
+      const claim: ClaimWithArguments = {
+        id: randomUUID(),
+        knowledgeBaseId: input.knowledgeBaseId,
+        predicate: input.predicate,
+        description: input.description ?? null,
+        confidence: input.confidence ?? null,
+        validStart: null,
+        validEnd: null,
+        properties: input.properties ?? {},
+        provenance: input.provenance ?? {},
+        schemaVersionId: null,
+        createdBy: input.actorUserId,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+        arguments: input.arguments.map((a, position) => ({
+          id: randomUUID(),
+          knowledgeBaseId: input.knowledgeBaseId,
+          claimId: 'claim',
+          role: a.role,
+          position,
+          argumentKind: a.argumentKind,
+          entityId: a.entityId ?? null,
+          value: a.value ?? null,
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: null,
+        })),
+      };
+      return Promise.resolve(claim);
+    },
+    listClaims: () => Promise.resolve([]),
+    getClaim: unsupported as never,
+    updateClaim: unsupported as never,
+    deleteClaim: unsupported as never,
   };
 }
 
@@ -222,12 +274,13 @@ async function setup(facts: RuleFacts = attendanceFacts()) {
   const kbStore = createMemoryKbStore();
   const ruleStore = createMemoryRuleStore();
   const ruleRunStore = createMemoryRuleRunStore(facts);
-  const app = createApp({ authStore, kbStore, ruleStore, ruleRunStore });
+  const claimStore = createMemoryClaimStore();
+  const app = createApp({ authStore, kbStore, ruleStore, ruleRunStore, claimStore });
   const agent = request.agent(app);
   const res = await agent.post('/api/auth/setup').send(ADMIN);
   const userId = res.body.user.id as string;
   const csrf = res.body.csrfToken as string;
-  return { app, agent, kbStore, ruleStore, ruleRunStore, userId, csrf };
+  return { app, agent, kbStore, ruleStore, ruleRunStore, claimStore, userId, csrf };
 }
 
 describe('rule run router (US-024)', () => {
@@ -374,5 +427,112 @@ describe('rule run router (US-024)', () => {
     ctx.kbStore.setRole(KB, ctx.userId, 'viewer');
     const res = await ctx.agent.get(`/api/knowledge-bases/${KB}/rules/runs`).expect(200);
     expect(res.body).toEqual([]);
+  });
+});
+
+describe('accept inferred result router (US-025)', () => {
+  let ctx: Awaited<ReturnType<typeof setup>>;
+
+  /** Run the acquainted rule as an editor and return the run + first result. */
+  async function runRule(): Promise<{ runId: string; resultId: string }> {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    const rule = ctx.ruleStore.seed({
+      knowledgeBaseId: KB,
+      name: 'acquainted',
+      ruleText: ACQUAINTED,
+    });
+    const run = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/${rule.id}/run`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({})
+      .expect(201);
+    return { runId: run.body.run.id, resultId: run.body.results[0].id };
+  }
+
+  beforeEach(async () => {
+    ctx = await setup();
+  });
+
+  it('converts an inferred result into a claim with provenance (AC1/AC2/AC3)', async () => {
+    const { runId, resultId } = await runRule();
+
+    const res = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/runs/${runId}/results/${resultId}/accept`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ confirmationNote: 'looks right' })
+      .expect(201);
+
+    expect(res.body.claimId).toBeTruthy();
+    expect(res.body.result.id).toBe(resultId);
+    expect(res.body.result.label).toBe('inferred');
+
+    expect(ctx.claimStore.created).toHaveLength(1);
+    const created = ctx.claimStore.created[0]!;
+    expect(created.predicate).toBe('acquainted');
+    // AC3: distinguishable origin.
+    expect(created.provenance?.origin).toBe('inferred');
+    // AC2: source rule, rule run, source claims, accepting user, timestamp.
+    expect(created.provenance?.ruleRunId).toBe(runId);
+    expect(created.provenance?.ruleName).toBe('acquainted');
+    expect(created.provenance?.inferredResultId).toBe(resultId);
+    expect((created.provenance?.sourceClaimIds as string[]).length).toBeGreaterThan(0);
+    expect(created.provenance?.acceptedBy).toBe(ctx.userId);
+    expect(created.provenance?.acceptedAt).toBeTruthy();
+    expect(created.provenance?.confirmationNote).toBe('looks right');
+    // Head args resolve to known entities -> entity claim arguments.
+    expect(created.arguments).toHaveLength(2);
+    expect(created.arguments[0]!.argumentKind).toBe('entity');
+    expect(created.arguments[0]!.entityId).toBeTruthy();
+  });
+
+  it('forbids viewers from accepting inferred results (AC4, 403)', async () => {
+    const { runId, resultId } = await runRule();
+    ctx.kbStore.setRole(KB, ctx.userId, 'viewer');
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/runs/${runId}/results/${resultId}/accept`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({})
+      .expect(403);
+    expect(ctx.claimStore.created).toHaveLength(0);
+  });
+
+  it('requires CSRF to accept (403)', async () => {
+    const { runId, resultId } = await runRule();
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/runs/${runId}/results/${resultId}/accept`)
+      .send({})
+      .expect(403);
+    expect(ctx.claimStore.created).toHaveLength(0);
+  });
+
+  it('returns 404 for an unknown run', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/runs/${randomUUID()}/results/${randomUUID()}/accept`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({})
+      .expect(404);
+  });
+
+  it('returns 404 for an unknown result within a run', async () => {
+    const { runId } = await runRule();
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/runs/${runId}/results/${randomUUID()}/accept`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({})
+      .expect(404);
+    expect(ctx.claimStore.created).toHaveLength(0);
+  });
+
+  it('hides existence from non-members (404)', async () => {
+    const { runId, resultId } = await runRule();
+    ctx.kbStore.setRole(KB, ctx.userId, 'viewer');
+    // Re-create context as a non-member by clearing the role.
+    const otherKb = '22222222-2222-2222-2222-222222222222';
+    await ctx.agent
+      .post(`/api/knowledge-bases/${otherKb}/rules/runs/${runId}/results/${resultId}/accept`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({})
+      .expect(404);
   });
 });

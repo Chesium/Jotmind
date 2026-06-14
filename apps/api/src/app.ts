@@ -230,6 +230,7 @@ export function createApp(options: AppOptions = {}): Express {
     createRuleRouter({
       store: options.ruleStore,
       runStore: options.ruleRunStore,
+      claimStore: options.claimStore,
       kbStore: options.kbStore,
       authStore,
     }),

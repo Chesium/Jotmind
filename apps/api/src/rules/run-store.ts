@@ -59,6 +59,12 @@ export interface RuleRunStore {
   listRuns(knowledgeBaseId: string, opts?: { limit?: number }): Promise<RuleRunRow[]>;
   getRun(knowledgeBaseId: string, runId: string): Promise<RuleRunRow | undefined>;
   listResults(knowledgeBaseId: string, runId: string): Promise<InferredResultRow[]>;
+  /** Fetch a single inferred result by id within a run (US-025 accept flow). */
+  getResult(
+    knowledgeBaseId: string,
+    runId: string,
+    resultId: string,
+  ): Promise<InferredResultRow | undefined>;
 }
 
 /** PostgreSQL-backed RuleRunStore. Resolves the Drizzle client per call. */
@@ -204,5 +210,20 @@ export const dbRuleRunStore: RuleRunStore = {
         ),
       )
       .orderBy(desc(inferredResults.createdAt));
+  },
+
+  async getResult(knowledgeBaseId, runId, resultId) {
+    const rows = await getDb()
+      .select()
+      .from(inferredResults)
+      .where(
+        and(
+          eq(inferredResults.id, resultId),
+          eq(inferredResults.ruleRunId, runId),
+          eq(inferredResults.knowledgeBaseId, knowledgeBaseId),
+        ),
+      )
+      .limit(1);
+    return rows[0];
   },
 };

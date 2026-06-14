@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acceptInferredResultResultSchema,
+  acceptInferredResultSchema,
   BUILTIN_RULE_MODULES,
   builtinRuleModuleListSchema,
   clampRecursionCap,
   findBuiltinRulePack,
+  INFERRED_CLAIM_ORIGIN,
   installRulePackSchema,
   parseRule,
   RULE_RECURSION_CAP_DEFAULT,
@@ -157,5 +160,45 @@ describe('restricted Datalog rule parser (US-023)', () => {
     // ?c is only in a negated atom and ?a is positive; negation var ?c is unsafe
     expect(safe.valid).toBe(false);
     expect(safe.errors.join(' ')).toContain('Unsafe negation');
+  });
+});
+
+describe('accept inferred result schemas (US-025)', () => {
+  it('accepts an empty body and an optional confirmation note', () => {
+    expect(acceptInferredResultSchema.parse({})).toEqual({});
+    expect(acceptInferredResultSchema.parse({ confirmationNote: 'ok' })).toEqual({
+      confirmationNote: 'ok',
+    });
+  });
+
+  it('rejects an over-long confirmation note', () => {
+    const result = acceptInferredResultSchema.safeParse({ confirmationNote: 'x'.repeat(2001) });
+    expect(result.success).toBe(false);
+  });
+
+  it('uses a distinguishable provenance origin (AC3)', () => {
+    expect(INFERRED_CLAIM_ORIGIN).toBe('inferred');
+  });
+
+  it('validates the accept result shape', () => {
+    const result = acceptInferredResultResultSchema.parse({
+      claimId: '00000000-0000-0000-0000-0000000000c1',
+      result: {
+        id: '00000000-0000-0000-0000-0000000000d1',
+        knowledgeBaseId: '00000000-0000-0000-0000-0000000000e1',
+        ruleRunId: '00000000-0000-0000-0000-0000000000f1',
+        ruleId: null,
+        ruleName: 'acquainted',
+        predicate: 'acquainted',
+        label: 'inferred',
+        arguments: [
+          { name: 'a', value: '00000000-0000-0000-0000-0000000000a1', entityName: 'Ada' },
+        ],
+        trace: { claimIds: [], entityIds: [], argumentIds: [] },
+        createdAt: new Date().toISOString(),
+      },
+    });
+    expect(result.claimId).toBe('00000000-0000-0000-0000-0000000000c1');
+    expect(result.result.label).toBe('inferred');
   });
 });

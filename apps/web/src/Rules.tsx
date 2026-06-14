@@ -8,6 +8,7 @@ import {
   type RuleValidationResult,
 } from '@jotmind/schemas';
 import {
+  acceptInferredResult,
   createRule,
   installRulePack,
   listBuiltinRulePacks,
@@ -42,6 +43,8 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
 
   // US-024 rule execution: the most recent run's results, keyed by rule id.
   const [lastRun, setLastRun] = useState<RuleRunResult | null>(null);
+  // US-025: inferred result ids accepted as claims this session -> claim id.
+  const [acceptedResults, setAcceptedResults] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -93,10 +96,25 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
     setBusy(true);
     setError(null);
     setLastRun(null);
+    setAcceptedResults({});
     try {
       setLastRun(await runRule(kb.id, rule.id, csrfToken));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not run rule');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // US-025: accept an inferred result as a stored claim (editor+).
+  async function accept(runId: string, resultId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await acceptInferredResult(kb.id, runId, resultId, csrfToken);
+      setAcceptedResults((prev) => ({ ...prev, [resultId]: res.claimId }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not accept inferred result');
     } finally {
       setBusy(false);
     }
@@ -321,7 +339,21 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
                     {' '}
                     — derived from {result.trace.claimIds.length} claim(s),{' '}
                     {result.trace.argumentIds.length} argument(s)
-                  </small>
+                  </small>{' '}
+                  {acceptedResults[result.id] ? (
+                    <span data-testid={`rules-run-accepted-${result.id}`}>✓ accepted as claim</span>
+                  ) : (
+                    canEdit && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        data-testid={`rules-run-accept-${result.id}`}
+                        onClick={() => void accept(lastRun.run.id, result.id)}
+                      >
+                        Accept as claim
+                      </button>
+                    )
+                  )}
                 </li>
               ))}
             </ul>

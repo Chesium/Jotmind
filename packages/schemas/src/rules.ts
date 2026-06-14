@@ -747,3 +747,34 @@ export function ruleReferencesValidTime(rule: CompiledRule): boolean {
   void rule;
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// US-025: accept inferred results as claims
+// ---------------------------------------------------------------------------
+//
+// An editor can convert an Inferred Result (US-024) into a stored Claim after
+// confirmation (AC1). The accepted claim preserves provenance so it stays
+// distinguishable from user-entered and AI-extracted claims (AC3): source rule,
+// rule run, source claims, timestamp, and accepting user (AC2). Viewers cannot
+// accept (AC4 — enforced at the route, editor + CSRF).
+
+/**
+ * Provenance `origin` recorded on a claim created by accepting an inferred
+ * result. Distinguishes it from user-entered (no `origin`) and AI-extracted
+ * (`ai_proposal`) claims (AC3).
+ */
+export const INFERRED_CLAIM_ORIGIN = 'inferred';
+
+/** Request body for accepting an inferred result as a claim (AC1). */
+export const acceptInferredResultSchema = z.object({
+  /** Optional reviewer confirmation note recorded in provenance. */
+  confirmationNote: z.string().max(2000).optional(),
+});
+export type AcceptInferredResultRequest = z.infer<typeof acceptInferredResultSchema>;
+
+/** Result of accepting an inferred result: the created claim id + the result. */
+export const acceptInferredResultResultSchema = z.object({
+  claimId: z.string().uuid(),
+  result: inferredResultSchema,
+});
+export type AcceptInferredResultResult = z.infer<typeof acceptInferredResultResultSchema>;

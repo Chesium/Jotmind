@@ -187,4 +187,49 @@ describe.skipIf(!hasDatabase)('rule run fact loading + persistence integration',
     expect(audits).toHaveLength(1);
     expect(audits[0]!.targetId).toBe(result.run.id);
   });
+
+  it('fetches a single inferred result scoped to its run + KB (US-025)', async () => {
+    const saved = await dbRuleRunStore.saveRun({
+      knowledgeBaseId: kbId,
+      ruleId: null as unknown as string,
+      ruleName: 'acquainted',
+      status: 'completed',
+      error: null,
+      iterations: 1,
+      limitExceeded: false,
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      triggeredBy: userId,
+      jobId: null,
+      predicate: 'acquainted',
+      results: [
+        {
+          arguments: [
+            { name: 'a', value: adaId, entityName: 'Ada' },
+            { name: 'b', value: babId, entityName: 'Babbage' },
+          ],
+          claimIds: ['11111111-1111-1111-1111-111111111111'],
+          entityIds: [adaId, babId],
+          argumentIds: ['22222222-2222-2222-2222-222222222222'],
+        },
+      ],
+    });
+    const resultId = saved.results[0]!.id;
+
+    const found = await dbRuleRunStore.getResult(kbId, saved.run.id, resultId);
+    expect(found?.id).toBe(resultId);
+    expect(found?.predicate).toBe('acquainted');
+
+    // Wrong run / wrong KB resolve to undefined (scoping).
+    expect(
+      await dbRuleRunStore.getResult(kbId, '33333333-3333-3333-3333-333333333333', resultId),
+    ).toBeUndefined();
+    expect(
+      await dbRuleRunStore.getResult(
+        '44444444-4444-4444-4444-444444444444',
+        saved.run.id,
+        resultId,
+      ),
+    ).toBeUndefined();
+  });
 });

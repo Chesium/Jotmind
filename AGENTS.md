@@ -807,6 +807,37 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   `rules-run-status`, `rules-run-results`, `rules-run-result-<id>`,
   `rules-run-label-<id>`, `rules-run-trace-<id>`, `rules-run-empty`.
 
+## Accept inferred results as claims (US-025)
+
+- An editor can convert an Inferred Result (US-024) into a stored Claim. The
+  route is `POST
+/api/knowledge-bases/:kbId/rules/runs/:runId/results/:resultId/accept`
+  (**editor + CSRF** — it creates a canonical claim; viewers are read-only, AC4)
+  on the same rule router. It mirrors the **US-018 proposal-accept pattern**:
+  the conversion happens **in the ROUTER**, calling the injected
+  `claimStore.createClaim` so the new claim goes through the normal canonical
+  write path (graph outbox + audit in one tx). The `RuleRouterOptions` now take a
+  `claimStore` (wired in `app.ts`); inject an in-memory fake for unit tests.
+- `RuleRunStore` gained `getResult(kbId, runId, resultId)` (scoped to both the
+  run AND the KB) so the accept route can fetch a single inferred result. The
+  in-memory fake in `rules-run.test.ts` implements it too.
+- **Argument mapping:** each resolved head argument of the inferred result
+  becomes a claim argument — `entityName !== null` ⇒ an **entity** arg
+  (`entityId = value`), otherwise a **literal** arg. The role is the head
+  variable name (`arg.name`).
+- **Provenance (AC2/AC3):** the created claim's `provenance` records
+  `{ origin: 'inferred', ruleId, ruleName, ruleRunId, inferredResultId,
+sourceClaimIds, sourceEntityIds, sourceArgumentIds, acceptedBy, acceptedAt,
+confirmationNote? }`. `origin: 'inferred'` (the `INFERRED_CLAIM_ORIGIN`
+  constant in `@jotmind/schemas` `rules.ts`) distinguishes it from user-entered
+  (no `origin`) and AI-extracted (`ai_proposal`) claims — pass it via
+  `CreateClaimInput.provenance`, not `properties`.
+- Shared schemas in `@jotmind/schemas` `rules.ts`: `acceptInferredResultSchema`
+  (`{ confirmationNote? }`), `acceptInferredResultResultSchema`
+  (`{ claimId, result }`), `INFERRED_CLAIM_ORIGIN`. Web: `acceptInferredResult`
+  in `api.ts` + per-result **Accept as claim** button in the `Rules.tsx` run
+  panel. Testids: `rules-run-accept-<resultId>`, `rules-run-accepted-<resultId>`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

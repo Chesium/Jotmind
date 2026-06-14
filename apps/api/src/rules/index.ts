@@ -1,11 +1,16 @@
 import { Router, type RequestHandler } from 'express';
 import {
+  acceptInferredResultResultSchema,
+  acceptInferredResultSchema,
   BUILTIN_RULE_MODULES,
   builtinRuleModuleListSchema,
   createRuleSchema,
   findBuiltinRulePack,
+  inferredResultArgumentSchema,
   inferredResultListSchema,
   inferredResultSchema,
+  inferredResultTraceSchema,
+  INFERRED_CLAIM_ORIGIN,
   installRulePackResultSchema,
   installRulePackSchema,
   kbRoleSatisfies,
@@ -19,10 +24,12 @@ import {
   updateRuleStatusSchema,
   validateRuleSchema,
   type InferredResult,
+  type InferredResultArgument,
   type KbRole,
   type RuleDefinition,
   type RuleRun,
 } from '@jotmind/schemas';
+import { z } from 'zod';
 import type { InferredResultRow, RuleDefinitionRow, RuleRunRow } from '../db/schema.js';
 import { asyncHandler, requireAuth, requireCsrf, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
@@ -30,6 +37,7 @@ import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
 import { dbRuleStore, readAuthoredCap, readBuiltinMeta, type RuleStore } from './store.js';
 import { executeRule } from './engine.js';
 import { dbRuleRunStore, type PersistableInferredResult, type RuleRunStore } from './run-store.js';
+import { dbClaimStore, type ClaimArgumentInput, type ClaimStore } from '../claims/store.js';
 
 export type { RuleStore } from './store.js';
 export { dbRuleStore } from './store.js';
@@ -101,6 +109,7 @@ function toInferredResult(row: InferredResultRow, ruleName: string): InferredRes
 export interface RuleRouterOptions {
   store?: RuleStore;
   runStore?: RuleRunStore;
+  claimStore?: ClaimStore;
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
 }
@@ -114,6 +123,7 @@ export interface RuleRouterOptions {
 export function createRuleRouter(options: RuleRouterOptions = {}): Router {
   const store = options.store ?? dbRuleStore;
   const runStore = options.runStore ?? dbRuleRunStore;
+  const claimStore = options.claimStore ?? dbClaimStore;
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
   const router = Router({ mergeParams: true });
@@ -363,6 +373,86 @@ export function createRuleRouter(options: RuleRouterOptions = {}): Router {
           results: inferredResultListSchema.parse(
             results.map((r) => toInferredResult(r, run.ruleName)),
           ),
+        }),
+      );
+    }),
+  );
+
+  // Accept an inferred result as a stored Claim (US-025). Editor + CSRF (a
+  // write that creates a canonical claim); viewers are read-only (AC4). The new
+  // claim records provenance preserving the source rule, rule run, source
+  // claims, accepting user, and timestamp (AC2) under origin `inferred` so it
+  // stays distinguishable from user-entered and AI-extracted claims (AC3).
+  router.post(
+    '/runs/:runId/results/:resultId/accept',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const ctx = req.auth as AuthContext;
+      const kbId = req.params.kbId as string;
+      const runId = req.params.runId as string;
+      const resultId = req.params.resultId as string;
+
+      const parsedBody = acceptInferredResultSchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'Invalid accept request' });
+        return;
+      }
+
+      const run = await runStore.getRun(kbId, runId);
+      if (!run) {
+        res.status(404).json({ error: 'Rule run not found' });
+        return;
+      }
+      const resultRow = await runStore.getResult(kbId, runId, resultId);
+      if (!resultRow) {
+        res.status(404).json({ error: 'Inferred result not found' });
+        return;
+      }
+
+      const args: InferredResultArgument[] = z
+        .array(inferredResultArgumentSchema)
+        .parse(resultRow.arguments);
+
+      // Map each resolved head argument to a claim argument: a value that
+      // resolves to a known entity becomes an entity ref, otherwise a literal.
+      const claimArgs: ClaimArgumentInput[] = args.map((arg, i) =>
+        arg.entityName !== null
+          ? { role: arg.name ?? `arg${i}`, argumentKind: 'entity', entityId: arg.value }
+          : { role: arg.name ?? `arg${i}`, argumentKind: 'literal', value: arg.value },
+      );
+
+      const trace = inferredResultTraceSchema.parse(resultRow.trace);
+      const acceptedAt = new Date().toISOString();
+      const provenance: Record<string, unknown> = {
+        origin: INFERRED_CLAIM_ORIGIN,
+        ruleId: run.ruleId,
+        ruleName: run.ruleName,
+        ruleRunId: run.id,
+        inferredResultId: resultRow.id,
+        sourceClaimIds: trace.claimIds,
+        sourceEntityIds: trace.entityIds,
+        sourceArgumentIds: trace.argumentIds,
+        acceptedBy: ctx.user.id,
+        acceptedAt,
+      };
+      if (parsedBody.data.confirmationNote) {
+        provenance.confirmationNote = parsedBody.data.confirmationNote;
+      }
+
+      const created = await claimStore.createClaim({
+        knowledgeBaseId: kbId,
+        predicate: resultRow.predicate,
+        provenance,
+        arguments: claimArgs,
+        actorUserId: ctx.user.id,
+      });
+
+      res.status(201).json(
+        acceptInferredResultResultSchema.parse({
+          claimId: created.id,
+          result: toInferredResult(resultRow, run.ruleName),
         }),
       );
     }),

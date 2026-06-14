@@ -19,6 +19,7 @@ import {
   proposalListSchema,
   proposalSchema,
   builtinRuleModuleListSchema,
+  acceptInferredResultResultSchema,
   installRulePackResultSchema,
   ruleDefinitionListSchema,
   ruleDefinitionSchema,
@@ -48,6 +49,7 @@ import {
   type RuleDefinition,
   type RuleRun,
   type RuleRunResult,
+  type AcceptInferredResultResult,
   type RuleValidationResult,
   type UpdateRuleRequest,
   type ResolvedAiPolicy,
@@ -867,4 +869,25 @@ export async function getRuleRun(knowledgeBaseId: string, runId: string): Promis
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return ruleRunResultSchema.parse(await res.json());
+}
+
+/** Accept an inferred result as a stored claim (US-025, editor+). */
+export async function acceptInferredResult(
+  knowledgeBaseId: string,
+  runId: string,
+  resultId: string,
+  csrfToken: string,
+  confirmationNote?: string,
+): Promise<AcceptInferredResultResult> {
+  const res = await fetch(
+    `/api/knowledge-bases/${knowledgeBaseId}/rules/runs/${runId}/results/${resultId}/accept`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+      body: JSON.stringify(confirmationNote ? { confirmationNote } : {}),
+    },
+  );
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return acceptInferredResultResultSchema.parse(await res.json());
 }
