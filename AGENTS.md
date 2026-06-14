@@ -492,6 +492,17 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   `getAiPolicyOverview`/`updateServerAiPolicy`/`updateMyAiPolicy`/`getKbAiPolicy`/
   `updateKbAiPolicy`.
 
+## AI provider status & setup affordances (US-046/047)
+
+- Provider configuration is **environment-only** for V1 (`AI_PROVIDER_CONFIG`
+  JSON). There is no persisted provider store/table and no API for browser-side
+  provider editing. The UI must not render disabled or placeholder provider edit
+  controls; show read-only status plus setup guidance pointing operators to the
+  server environment instead.
+- Only return provider data to the browser through `buildAiProviderStatus()` in
+  `@jotmind/schemas`, which allowlists display-safe fields and strips secrets
+  such as `apiKey`. Never serialize a raw provider config to the client.
+
 ## Quick-capture & AI proposal queue (US-017)
 
 - **Proposals never mutate canonical records** — they sit in a review queue

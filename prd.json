@@ -841,8 +841,8 @@
         "Typecheck passes"
       ],
       "priority": 47,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Provider configuration editing remains intentionally deferred because V1 has no persisted provider store/table; config is environment-only through AI_PROVIDER_CONFIG. The existing AiProviderStatusPanel now points operators to AI_PROVIDER_CONFIG/deployment secrets and explicitly states that the browser does not render provider edit fields, preventing users from entering API keys into a non-functional UI. The panel stays read-only and shows sanitized provider status only (backend status has editable:false/configSource:'environment'; buildAiProviderStatus allowlists display-safe fields and never returns apiKey). Added web regression coverage proving no textbox/select/button provider edit controls are rendered when persistence is deferred, and browser-verified the panel in Chromium with mocked API responses. Verified: pnpm verify fully green."
     },
     {
       "id": "US-048",

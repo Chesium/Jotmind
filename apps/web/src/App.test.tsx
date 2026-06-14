@@ -1784,6 +1784,45 @@ describe('AiProviderStatusPanel (US-046)', () => {
     expect(screen.getByTestId('ai-provider-env-only')).toHaveTextContent(
       /managed by the server environment and cannot be edited in the browser/i,
     );
+    expect(screen.getByTestId('ai-provider-setup-guidance')).toHaveTextContent(
+      /AI_PROVIDER_CONFIG/,
+    );
+  });
+
+  it('does not render provider edit controls when provider persistence is deferred (US-047)', async () => {
+    mockFetch((url) => {
+      if (url.includes('/api/ai/provider'))
+        return {
+          body: {
+            configured: true,
+            editable: false,
+            configSource: 'environment',
+            kind: 'openai',
+            name: 'OpenAI',
+            classification: 'remote',
+            remote: true,
+            demo: false,
+            verified: false,
+            llmModel: 'gpt-4o-mini',
+            embeddingModel: 'text-embedding-3-small',
+            embeddingsSupported: true,
+            baseUrl: 'https://api.openai.com/v1',
+          },
+        };
+      return { status: 404 };
+    });
+    render(<AiProviderStatusPanel />);
+    await waitFor(() =>
+      expect(screen.getByTestId('ai-provider-setup-guidance')).toHaveTextContent(
+        /intentionally does not render provider edit fields/i,
+      ),
+    );
+
+    const panel = within(screen.getByTestId('ai-provider'));
+    expect(panel.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(panel.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(panel.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('ai-provider-env-only')).toHaveTextContent(/AI_PROVIDER_CONFIG/);
   });
 
   it('shows kind, models, base URL, readiness, and local classification (AC1/AC2)', async () => {

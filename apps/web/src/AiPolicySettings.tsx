@@ -222,10 +222,17 @@ export function AiProviderStatusPanel() {
         </ul>
       )}
       {status && (
-        <p data-testid="ai-provider-env-only">
-          Provider configuration is managed by the server environment and cannot be edited in the
-          browser.
-        </p>
+        <div data-testid="ai-provider-env-only">
+          <p>
+            Provider configuration is managed by the server environment and cannot be edited in the
+            browser.
+          </p>
+          <p data-testid="ai-provider-setup-guidance">
+            To change providers, update the server&apos;s <code>AI_PROVIDER_CONFIG</code> JSON (or
+            deployment secret manager) and restart the API. The browser intentionally does not
+            render provider edit fields, so API keys are never entered into a non-functional UI.
+          </p>
+        </div>
       )}
     </section>
   );
