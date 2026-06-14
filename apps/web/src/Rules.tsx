@@ -17,7 +17,7 @@ import {
   setRuleStatus,
   validateRule,
 } from './api.js';
-import { useInvalidate } from './invalidation.js';
+import { useInvalidate, useInvalidationEffect } from './invalidation.js';
 
 const EXAMPLE_RULE =
   'knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).';
@@ -62,6 +62,9 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Show module-provided rule packs / installed rules without reload (US-042 AC3).
+  useInvalidationEffect(['rules'], () => void refresh());
 
   async function install(moduleId: string, packId: string) {
     setBusy(true);

@@ -15,6 +15,7 @@ import {
   listSchemaDefinitions,
   updateSchemaDefinition,
 } from './api.js';
+import { useInvalidationEffect } from './invalidation.js';
 
 /**
  * One schema definition row (US-027 summary + US-028 editing). Editors can
@@ -240,6 +241,9 @@ export function SchemaDefinitions({ kb, csrfToken }: { kb: KnowledgeBase; csrfTo
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Show module-provided schema definitions without reload/KB reselect (US-042 AC2).
+  useInvalidationEffect(['schemas'], () => void refresh());
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

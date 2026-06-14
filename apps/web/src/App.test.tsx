@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
 import { Rules } from './Rules.js';
+import { Modules } from './Modules.js';
 import { InvalidationProvider, useInvalidationEffect } from './invalidation.js';
 import type { KnowledgeBase } from '@jotmind/schemas';
 
@@ -1238,5 +1239,97 @@ describe('App', () => {
     });
     expect(onClaimsInvalidated).toHaveBeenCalled();
     expect(onGraphInvalidated).toHaveBeenCalled();
+  });
+
+  it('invalidates schemas and rules after installing a module (US-042)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000140';
+    const now = new Date().toISOString();
+
+    const moduleBase = {
+      id: 'personal-relationship',
+      name: 'Personal Relationships',
+      description: 'People, events, and places plus relationship inference.',
+      entityTypes: [
+        {
+          name: 'Person',
+          displayName: 'Person',
+          description: 'A person.',
+          propertySchema: {},
+        },
+      ],
+      claimPredicates: [
+        {
+          name: 'knows',
+          displayName: 'knows',
+          description: 'One person knows another.',
+          spec: { argumentRoles: [] },
+        },
+      ],
+      rulePacks: [{ moduleId: 'personal-relationship', packId: 'event-participation' }],
+    };
+
+    let installed = false;
+
+    mockFetch((url) => {
+      if (url.includes(`/api/knowledge-bases/${kbId}/modules/install`)) {
+        installed = true;
+        return { body: { moduleId: moduleBase.id, items: [] } };
+      }
+      if (url.includes(`/api/knowledge-bases/${kbId}/modules`)) {
+        return {
+          body: [
+            {
+              ...moduleBase,
+              installedEntityTypes: installed ? ['Person'] : [],
+              installedClaimPredicates: installed ? ['knows'] : [],
+              fullyInstalled: installed,
+            },
+          ],
+        };
+      }
+      return { status: 404 };
+    });
+
+    const onSchemasInvalidated = vi.fn();
+    const onRulesInvalidated = vi.fn();
+
+    function Probe() {
+      useInvalidationEffect(['schemas'], onSchemasInvalidated);
+      useInvalidationEffect(['rules'], onRulesInvalidated);
+      return null;
+    }
+
+    const kb: KnowledgeBase = {
+      id: kbId,
+      name: 'Modules Sync KB',
+      description: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      role: 'editor',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    render(
+      <InvalidationProvider>
+        <Modules kb={kb} csrfToken="tok" />
+        <Probe />
+      </InvalidationProvider>,
+    );
+
+    // Module starts not-installed.
+    await waitFor(() => {
+      expect(screen.getByTestId(`modules-install-${moduleBase.id}`)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId(`modules-installed-${moduleBase.id}`)).not.toBeInTheDocument();
+
+    // Install it; sibling schema/rule subscribers refresh without reload (AC1/AC2/AC3)
+    // and the Modules panel itself shows installed status (AC4).
+    fireEvent.click(screen.getByTestId(`modules-install-${moduleBase.id}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`modules-installed-${moduleBase.id}`)).toBeInTheDocument();
+    });
+    expect(onSchemasInvalidated).toHaveBeenCalled();
+    expect(onRulesInvalidated).toHaveBeenCalled();
   });
 });

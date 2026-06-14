@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { kbRoleSatisfies, type KnowledgeBase, type ModuleStatus } from '@jotmind/schemas';
 import { installModule, listModules } from './api.js';
+import { useInvalidate, useInvalidationEffect } from './invalidation.js';
 
 /**
  * Built-in domain Modules (US-029). A Module bundles default entity-type and
@@ -11,6 +12,7 @@ import { installModule, listModules } from './api.js';
  */
 export function Modules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   const canEdit = kbRoleSatisfies(kb.role, 'editor');
+  const invalidate = useInvalidate();
   const [modules, setModules] = useState<ModuleStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -28,12 +30,19 @@ export function Modules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: strin
     void refresh();
   }, [refresh]);
 
+  // Refresh installed/skipped status when modules change elsewhere (US-042 AC4).
+  useInvalidationEffect(['modules'], () => void refresh());
+
   async function install(moduleId: string) {
     setBusy(true);
     setError(null);
     try {
       await installModule(kb.id, moduleId, csrfToken);
       await refresh();
+      // Installing a Module creates schema definitions + installs rule packs via
+      // the canonical write paths, so refresh the sibling schema/rule panels and
+      // the audit log without a page reload or KB reselect (US-042 AC1/AC2/AC3).
+      invalidate(['modules', 'schemas', 'rules', 'audit']);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not install module');
     } finally {
