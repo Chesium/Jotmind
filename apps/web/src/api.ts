@@ -18,6 +18,10 @@ import {
   noteSchema,
   proposalListSchema,
   proposalSchema,
+  builtinRuleModuleListSchema,
+  installRulePackResultSchema,
+  ruleDefinitionListSchema,
+  ruleDefinitionSchema,
   publicJobSchema,
   publicUserSchema,
   setupStatusSchema,
@@ -35,6 +39,9 @@ import {
   type CommandResponse,
   type Proposal,
   type ProposalChanges,
+  type BuiltinRuleModule,
+  type InstallRulePackResult,
+  type RuleDefinition,
   type ResolvedAiPolicy,
   type UpdateAiPolicy,
   type AuditEvent,
@@ -718,4 +725,55 @@ export async function editProposal(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return proposalSchema.parse(await res.json());
+}
+
+/** List the catalog of built-in Module rule packs (US-022, viewer+). */
+export async function listBuiltinRulePacks(knowledgeBaseId: string): Promise<BuiltinRuleModule[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/packs`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return builtinRuleModuleListSchema.parse(await res.json());
+}
+
+/** List rules installed in a Knowledge Base (US-022, viewer+). */
+export async function listRules(knowledgeBaseId: string): Promise<RuleDefinition[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleDefinitionListSchema.parse(await res.json());
+}
+
+/** Install a built-in rule pack into a Knowledge Base (US-022, editor+). */
+export async function installRulePack(
+  knowledgeBaseId: string,
+  body: { moduleId: string; packId: string },
+  csrfToken: string,
+): Promise<InstallRulePackResult> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/install`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return installRulePackResultSchema.parse(await res.json());
+}
+
+/** Enable or disable an installed rule (US-022, editor+; auditable). */
+export async function setRuleStatus(
+  knowledgeBaseId: string,
+  ruleId: string,
+  status: 'enabled' | 'disabled',
+  csrfToken: string,
+): Promise<RuleDefinition> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleDefinitionSchema.parse(await res.json());
 }

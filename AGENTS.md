@@ -681,15 +681,52 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   in-process and separate-process workers.
 - **Availability is decoupled from the provider (AC4):** `GET
 /api/knowledge-bases/:kbId/embeddings` returns `vectorSearchAvailable` =
-  *embeddings exist* (independent of whether a generation provider is currently
-  configured/permitted) and `generationAvailable` = *new embeddings can be made
-  now* (provider + policy). The search store's `getVectorSearchAvailability`
+  _embeddings exist_ (independent of whether a generation provider is currently
+  configured/permitted) and `generationAvailable` = _new embeddings can be made
+  now_ (provider + policy). The search store's `getVectorSearchAvailability`
   likewise now checks `EXISTS(SELECT 1 FROM embeddings)` rows. NOTE: query-time
   vector search (embedding the query at search time) is deferred — it needs a
   live provider; only the stored-embedding availability/data is implemented.
 - Shared shapes in `@jotmind/schemas` `embeddings.ts`. US-021 has **no UI** and
   its AC list omits browser verification (only "Tests pass" / "Typecheck
   passes").
+
+## Built-in rule packs (US-022)
+
+- Showcase Modules ship versioned, installable bundles of restricted
+  Datalog-like inference rules so reasoning is useful without authoring rules
+  (US-023 adds custom authoring; US-024 runs them). The catalog is **static
+  shared content** in `@jotmind/schemas` `rules.ts`: `BUILTIN_RULE_MODULES`
+  (Module -> packs -> rules) + `findBuiltinRulePack(moduleId, packId)`. Two
+  Modules ship: `personal-relationship` (event-participation pack) and
+  `reading-character-map` (family-relationship pack), each with >=1 rule.
+  `rules.ts` reuses `ruleStatusSchema`/`RULE_STATUSES` from `graph.ts` (US-005)
+  — do NOT redefine them.
+- `apps/api/src/rules/`: `store.ts` (`RuleStore` + `dbRuleStore`) and `index.ts`
+  (`createRuleRouter`). Mounted at **`/api/knowledge-bases/:kbId/rules`**
+  (`mergeParams:true`, AFTER the KB router). `createApp` seam: `ruleStore`.
+  No DB migration — the `rule_definitions` table existed from US-005.
+- **Rules are NOT graph projection targets** — writes record an `audit_events`
+  row ONLY (no `graph_outbox`, unlike entities/claims/notes/sources). Built-in
+  provenance (`{moduleId, packId, ruleKey, packVersion}`) is stashed in the
+  `rule_definitions.compiled` JSONB under a `builtin` key; `readBuiltinMeta` +
+  the router's `toRule` mapper surface `moduleId`/`packId` on the public shape.
+- **Install is idempotent + versioned (AC4):** `installRulePack` inserts each
+  rule with `status='disabled'` and `version = pack.version`; it skips a rule
+  already present at the same `(kb, name, version)` (matches the
+  `rule_definitions_kb_name_version_uq` partial unique index) and returns
+  `{installed, skipped}`. `setRuleStatus` toggles `enabled`/`disabled` and writes
+  a `rule.enabled`/`rule.disabled` audit row (install writes `rule.installed`).
+- Routes (`GET /packs` catalog + `GET /` installed = viewer; `POST /install` +
+  `PATCH /:ruleId` status = editor + `requireCsrf`; non-members 404). Viewers are
+  read-only. The `/packs` handler is synchronous — use a plain `(req,res)=>{}`,
+  NOT `asyncHandler` (which requires a Promise-returning handler).
+- Web: `apps/web/src/Rules.tsx` (`<Rules>`, rendered after `<Proposals>` for the
+  selected KB) lists built-in Modules/packs with Install buttons + installed
+  rules with Enable/Disable toggles (editor-gated). API helpers in `api.ts`:
+  `listBuiltinRulePacks`/`listRules`/`installRulePack`/`setRuleStatus`. Testids:
+  `rules`, `rules-pack-<mod>-<pack>`, `rules-install-<mod>-<pack>`,
+  `rules-rule-<id>`, `rules-rule-status-<id>`, `rules-toggle-<id>`.
 
 ## Validation
 
