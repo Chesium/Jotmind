@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { schemaDefinitionSchema, schemaExportSchema, type KbRole } from '@jotmind/schemas';
+import {
+  classifySchemaChange,
+  predicateSpecSchema,
+  schemaDefinitionSchema,
+  schemaExportSchema,
+  schemaValidationReportSchema,
+  type KbRole,
+  type PropertySchema,
+} from '@jotmind/schemas';
 import { createApp } from '../app.js';
 import type { SchemaDefinitionRow, SchemaVersionRow, SessionRow, UserRow } from '../db/schema.js';
 import { type AuthStore } from '../auth/index.js';
@@ -150,6 +158,78 @@ export function createMemorySchemaStore(): SchemaStore & {
         metadata: { kind: def.kind, name: def.name, version: version.version },
       });
       return Promise.resolve({ ok: true as const, definition: { ...def, activeVersion: version } });
+    },
+    updateDefinition: (input) => {
+      const def = defs.get(input.id);
+      if (!def || def.knowledgeBaseId !== input.knowledgeBaseId || def.deletedAt !== null) {
+        return Promise.resolve({ ok: false as const, reason: 'not_found' as const });
+      }
+      const active = activeVersionFor(def.id);
+      const currentPropertySchema = (active?.propertySchema as PropertySchema) ?? {};
+      const currentSpec = predicateSpecSchema.parse(
+        (active?.spec as Record<string, unknown>) ?? {},
+      );
+      const nextPropertySchema = input.propertySchema ?? currentPropertySchema;
+      const nextSpec = input.spec ?? currentSpec;
+      const validationChanged = input.propertySchema !== undefined || input.spec !== undefined;
+      const classification = validationChanged
+        ? classifySchemaChange(
+            def.kind as 'entity_type' | 'claim_predicate',
+            { propertySchema: currentPropertySchema, spec: currentSpec },
+            { propertySchema: nextPropertySchema, spec: nextSpec },
+          )
+        : { changeType: 'compatible' as const, reasons: [] };
+
+      const now = new Date();
+      if (input.displayName !== undefined) def.displayName = input.displayName;
+      if (input.description !== undefined) def.description = input.description;
+      def.updatedAt = now;
+
+      let activeVersion = active;
+      if (validationChanged && active) {
+        if (classification.changeType === 'breaking') {
+          active.isActive = false;
+          const maxVersion = Math.max(
+            ...[...versions.values()]
+              .filter((v) => v.schemaDefinitionId === def.id)
+              .map((v) => v.version),
+          );
+          const created: SchemaVersionRow = {
+            id: randomUUID(),
+            schemaDefinitionId: def.id,
+            knowledgeBaseId: input.knowledgeBaseId,
+            version: maxVersion + 1,
+            propertySchema: nextPropertySchema,
+            spec: nextSpec,
+            isActive: true,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: null,
+          };
+          versions.set(created.id, created);
+          activeVersion = created;
+        } else {
+          active.propertySchema = nextPropertySchema;
+          active.spec = nextSpec;
+          active.updatedAt = now;
+          activeVersion = active;
+        }
+      }
+
+      audits.push({
+        knowledgeBaseId: input.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action:
+          classification.changeType === 'breaking' ? 'schema.version_created' : 'schema.updated',
+        targetId: def.id,
+        metadata: { changeType: classification.changeType },
+      });
+
+      return Promise.resolve({
+        ok: true as const,
+        definition: { ...def, activeVersion },
+        classification,
+      });
     },
     getActiveVersionByName: (kb, kind, name) => {
       const def = [...defs.values()].find(
@@ -320,5 +400,125 @@ describe('schema definitions API', () => {
     expect(parsed.knowledgeBaseId).toBe(KB_ID);
     expect(parsed.schemaDefinitions).toHaveLength(1);
     expect(parsed.schemaDefinitions[0]?.name).toBe('Person');
+  });
+
+  async function createPersonSchema(
+    agent: ReturnType<typeof request.agent>,
+    csrfToken: string,
+    propertySchema: Record<string, unknown>,
+  ): Promise<string> {
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/schema`)
+      .set('x-csrf-token', csrfToken)
+      .send({ kind: 'entity_type', name: 'Person', displayName: 'Person', propertySchema });
+    return res.body.id as string;
+  }
+
+  it('applies a compatible change in place (no new version, US-028 AC1)', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createPersonSchema(agent, csrfToken, {
+      born: { type: 'number', required: true },
+    });
+    // Loosen: make `born` optional + add an optional field.
+    const res = await agent
+      .put(`/api/knowledge-bases/${KB_ID}/schema/${id}`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        displayName: 'People',
+        propertySchema: { born: { type: 'number' }, city: { type: 'string' } },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.changeType).toBe('compatible');
+    expect(res.body.definition.displayName).toBe('People');
+    expect(res.body.definition.activeVersion.version).toBe(1);
+    expect(schemaStore.audits.map((a) => a.action)).toContain('schema.updated');
+  });
+
+  it('creates a new active version for a breaking change (US-028 AC2)', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createPersonSchema(agent, csrfToken, { born: { type: 'number' } });
+    // Tighten: make `born` required.
+    const res = await agent
+      .put(`/api/knowledge-bases/${KB_ID}/schema/${id}`)
+      .set('x-csrf-token', csrfToken)
+      .send({ propertySchema: { born: { type: 'number', required: true } } });
+    expect(res.status).toBe(200);
+    expect(res.body.changeType).toBe('breaking');
+    expect(res.body.definition.activeVersion.version).toBe(2);
+    expect(res.body.definition.activeVersion.isActive).toBe(true);
+    expect(schemaStore.audits.map((a) => a.action)).toContain('schema.version_created');
+  });
+
+  it('treats a metadata-only update as compatible', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createPersonSchema(agent, csrfToken, {});
+    const res = await agent
+      .put(`/api/knowledge-bases/${KB_ID}/schema/${id}`)
+      .set('x-csrf-token', csrfToken)
+      .send({ description: 'A human being' });
+    expect(res.status).toBe(200);
+    expect(res.body.changeType).toBe('compatible');
+    expect(res.body.definition.description).toBe('A human being');
+    expect(res.body.definition.activeVersion.version).toBe(1);
+  });
+
+  it('returns 404 when updating a missing definition', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const res = await agent
+      .put(`/api/knowledge-bases/${KB_ID}/schema/${randomUUID()}`)
+      .set('x-csrf-token', csrfToken)
+      .send({ displayName: 'Nope' });
+    expect(res.status).toBe(404);
+  });
+
+  it('forbids viewers from updating (read-only)', async () => {
+    const { agent: adminAgent, csrfToken: adminCsrf, userId: adminId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, adminId, 'editor');
+    const id = await createPersonSchema(adminAgent, adminCsrf, {});
+    const { agent, csrfToken, userId } = await createMemberAgent(app, adminAgent, adminCsrf);
+    kbStore.setRole(KB_ID, userId, 'viewer');
+    const res = await agent
+      .put(`/api/knowledge-bases/${KB_ID}/schema/${id}`)
+      .set('x-csrf-token', csrfToken)
+      .send({ displayName: 'Nope' });
+    expect(res.status).toBe(403);
+  });
+
+  it('reports validation warnings for mismatched existing entities (US-028 AC6)', async () => {
+    // entityStore fake: one entity that lacks the now-required `born` field.
+    const entityStore = {
+      listEntities: () =>
+        Promise.resolve([
+          {
+            id: 'e1',
+            knowledgeBaseId: KB_ID,
+            type: 'Person',
+            name: 'Ada',
+            properties: {},
+            schemaVersionId: 'old-version',
+          },
+        ]),
+      getEntity: () => Promise.resolve(undefined),
+    } as never;
+    const claimStore = { listClaims: () => Promise.resolve([]) } as never;
+    app = createApp({ authStore, kbStore, schemaStore, entityStore, claimStore });
+
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const id = await createPersonSchema(agent, csrfToken, {
+      born: { type: 'number', required: true },
+    });
+    const res = await agent.get(`/api/knowledge-bases/${KB_ID}/schema/${id}/validation`);
+    expect(res.status).toBe(200);
+    const report = schemaValidationReportSchema.parse(res.body);
+    expect(report.totalRecords).toBe(1);
+    expect(report.invalidRecords).toBe(1);
+    expect(report.onOldVersionRecords).toBe(1);
+    expect(report.warnings[0]?.label).toBe('Ada');
+    expect(report.warnings[0]?.issues[0]?.field).toBe('born');
   });
 });

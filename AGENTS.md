@@ -955,6 +955,49 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
   `schema-kind`, `schema-name`, `schema-display-name`, `schema-spec`,
   `schema-submit`, `schema-def-<id>`.
 
+## Schema version evolution (US-028)
+
+- Editing a schema is classified **compatible** (metadata or LOOSEN validation)
+  vs **breaking** (TIGHTEN validation) by pure functions in `@jotmind/schemas`
+  `schema-defs.ts`: `classifyPropertySchemaChange` (entity types),
+  `classifyPredicateSpecChange` (claim predicates), and the kind-dispatching
+  `classifySchemaChange`. **Breaking** = added/now-required field/role, type
+  change, removed field/role, narrowed entity types, or disallowed-literal.
+  **Compatible** = added-optional, made-optional, widened entity types, or
+  newly-allowed-literal. These are shared so the API store and (potential) web
+  preview agree. NO migration — `schema_versions` already has the
+  `version`/`is_active` columns + the one-active partial unique index from US-005.
+- `SchemaStore.updateDefinition` (`apps/api/src/schema-defs/store.ts`): metadata
+  (displayName/description) is always updated in place. **Compatible** validation
+  changes update the active version's `propertySchema`/`spec` IN PLACE (no new
+  version, existing data untouched — AC1). **Breaking** changes deactivate the
+  current version and insert a NEW active version (`version = max+1`) so existing
+  entities/claims keep their old `schema_version_id` and stay valid under it
+  (AC2/AC3). Audit action is `schema.updated` (compatible) or
+  `schema.version_created` (breaking), all in one tx. Returns
+  `{ok,definition,classification}` / `{ok:false,reason:'not_found'}`.
+- Route `PUT /:defId` (editor + CSRF) returns `{changeType, reasons, definition}`.
+  `GET /:defId/validation` (viewer) returns a `schemaValidationReportSchema`
+  report (AC6): it scans existing records of the conceptual `name`/predicate via
+  the injected `entityStore`/`claimStore` (NEW seams on the schema router, wired
+  in `createApp`) and validates each against the ACTIVE version, reporting
+  `warnings` + `onOldVersionRecords`. Cross-version lookups key off the string
+  `type`/`predicate` (AC4 — `getActiveVersionByName` + search already do this);
+  validators treat absent JSONB fields as missing/null rather than throwing (AC5).
+- **GOTCHA:** the in-memory `createMemorySchemaStore()` fake (in
+  `schema-defs.test.ts`) must implement `updateDefinition` too. Unit tests for the
+  validation report inject tiny `entityStore`/`claimStore` fakes
+  (`listEntities`/`getEntity`/`listClaims`) via `createApp`.
+- AI-assisted schema migrations (AC7) are "if present" — JotMind has none, so it
+  is vacuously satisfied; any future one MUST go through the proposal queue
+  (US-018 pattern) and never auto-apply. Web: `SchemaDefinitions.tsx`
+  `<SchemaDefRow>` adds per-row **Edit** (editor) + **Check data** (validation
+  report) controls. Testids: `schema-edit-<id>`, `schema-edit-form-<id>`,
+  `schema-edit-display/-description/-rules-<id>`, `schema-save-<id>`,
+  `schema-result-<id>`, `schema-check-<id>`, `schema-report-<id>`,
+  `schema-warning-<recordId>`. `api.ts`: `updateSchemaDefinition`,
+  `getSchemaValidation`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

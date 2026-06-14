@@ -29,6 +29,8 @@ import {
   ruleValidationResultSchema,
   schemaDefinitionListSchema,
   schemaDefinitionSchema,
+  schemaValidationReportSchema,
+  updateSchemaResultSchema,
   publicJobSchema,
   publicUserSchema,
   setupStatusSchema,
@@ -74,6 +76,9 @@ import {
   type PublicUser,
   type CreateSchemaDefinition,
   type SchemaDefinition,
+  type SchemaValidationReport,
+  type UpdateSchemaDefinition,
+  type UpdateSchemaResult,
   type SearchQuery,
   type SearchResponse,
   type SetupStatus,
@@ -932,4 +937,33 @@ export async function createSchemaDefinition(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return schemaDefinitionSchema.parse(await res.json());
+}
+
+/** Update a schema definition (US-028, editor+). Classified compatible vs breaking. */
+export async function updateSchemaDefinition(
+  knowledgeBaseId: string,
+  defId: string,
+  body: UpdateSchemaDefinition,
+  csrfToken: string,
+): Promise<UpdateSchemaResult> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema/${defId}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return updateSchemaResultSchema.parse(await res.json());
+}
+
+/** Validation report over existing records for a schema definition (US-028 AC6, viewer+). */
+export async function getSchemaValidation(
+  knowledgeBaseId: string,
+  defId: string,
+): Promise<SchemaValidationReport> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema/${defId}/validation`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return schemaValidationReportSchema.parse(await res.json());
 }

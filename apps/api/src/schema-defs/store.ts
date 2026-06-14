@@ -1,6 +1,14 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { PredicateSpec, PropertySchema, SchemaDefinitionKind } from '@jotmind/schemas';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import {
+  classifySchemaChange,
+  predicateSpecSchema,
+  type PredicateSpec,
+  type PropertySchema,
+  type SchemaChangeClassification,
+  type SchemaDefinitionKind,
+} from '@jotmind/schemas';
 import { getDb } from '../db/client.js';
+import type { DbExecutor } from '../graph/outbox.js';
 import {
   auditEvents,
   schemaDefinitions,
@@ -31,6 +39,28 @@ export type CreateSchemaDefinitionResult =
   | { ok: true; definition: SchemaDefinitionWithVersion }
   | { ok: false; reason: 'duplicate_name' };
 
+/** Fields that can be changed by an update (US-028). */
+export interface UpdateSchemaDefinitionInput {
+  knowledgeBaseId: string;
+  id: string;
+  displayName?: string;
+  /** `null` clears the description; `undefined` leaves it unchanged. */
+  description?: string | null;
+  /** New entity-type property schema (entity_type definitions). */
+  propertySchema?: PropertySchema;
+  /** New claim-predicate spec (claim_predicate definitions). */
+  spec?: PredicateSpec;
+  actorUserId: string;
+}
+
+export type UpdateSchemaDefinitionResult =
+  | {
+      ok: true;
+      definition: SchemaDefinitionWithVersion;
+      classification: SchemaChangeClassification;
+    }
+  | { ok: false; reason: 'not_found' };
+
 /**
  * Persistence boundary for custom schema definitions (US-027). Definitions are
  * Knowledge Base scoped; concrete validation rules live in versioned
@@ -47,6 +77,13 @@ export interface SchemaStore {
   ): Promise<SchemaDefinitionWithVersion | undefined>;
   createDefinition(input: CreateSchemaDefinitionInput): Promise<CreateSchemaDefinitionResult>;
   /**
+   * Update a schema definition (US-028). Metadata-only changes and *compatible*
+   * (loosening) validation changes update the active version in place; *breaking*
+   * (tightening) validation changes create and activate a NEW version so existing
+   * data can remain valid under its old referenced version (AC1/AC2/AC3).
+   */
+  updateDefinition(input: UpdateSchemaDefinitionInput): Promise<UpdateSchemaDefinitionResult>;
+  /**
    * Resolve the active schema version for a conceptual type/predicate name, used
    * by entity/claim writes to validate + stamp `schemaVersionId` (US-027 AC3/AC5).
    * Returns undefined when no custom schema constrains the name.
@@ -59,7 +96,7 @@ export interface SchemaStore {
 }
 
 async function loadActiveVersion(
-  db: ReturnType<typeof getDb>,
+  db: DbExecutor,
   schemaDefinitionId: string,
 ): Promise<SchemaVersionRow | null> {
   const rows = await db
@@ -169,6 +206,114 @@ export const dbSchemaStore: SchemaStore = {
       });
 
       return { ok: true as const, definition: { ...def, activeVersion: version } };
+    });
+  },
+
+  async updateDefinition(input) {
+    return getDb().transaction(async (tx) => {
+      const defRows = await tx
+        .select()
+        .from(schemaDefinitions)
+        .where(
+          and(
+            eq(schemaDefinitions.id, input.id),
+            eq(schemaDefinitions.knowledgeBaseId, input.knowledgeBaseId),
+            isNull(schemaDefinitions.deletedAt),
+          ),
+        )
+        .limit(1);
+      const def = defRows[0];
+      if (!def) return { ok: false as const, reason: 'not_found' as const };
+
+      const active = await loadActiveVersion(tx, def.id);
+      const currentPropertySchema = (active?.propertySchema as PropertySchema) ?? {};
+      const currentSpec = predicateSpecSchema.parse(
+        (active?.spec as Record<string, unknown>) ?? {},
+      );
+      const nextPropertySchema = input.propertySchema ?? currentPropertySchema;
+      const nextSpec = input.spec ?? currentSpec;
+
+      const validationChanged = input.propertySchema !== undefined || input.spec !== undefined;
+      const classification = validationChanged
+        ? classifySchemaChange(
+            def.kind as SchemaDefinitionKind,
+            { propertySchema: currentPropertySchema, spec: currentSpec },
+            { propertySchema: nextPropertySchema, spec: nextSpec },
+          )
+        : { changeType: 'compatible' as const, reasons: [] };
+
+      // Update definition metadata (display name / description) in place.
+      const metaUpdate: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.displayName !== undefined) metaUpdate.displayName = input.displayName;
+      if (input.description !== undefined) metaUpdate.description = input.description;
+      await tx.update(schemaDefinitions).set(metaUpdate).where(eq(schemaDefinitions.id, def.id));
+
+      let activeVersion: SchemaVersionRow | null = active;
+
+      if (validationChanged && active) {
+        if (classification.changeType === 'breaking') {
+          // Tighten: deactivate the current version and activate a NEW version so
+          // existing data can remain valid under its old referenced version (AC3).
+          await tx
+            .update(schemaVersions)
+            .set({ isActive: false, updatedAt: new Date() })
+            .where(eq(schemaVersions.id, active.id));
+          const maxRows = await tx
+            .select({ max: sql<number>`max(${schemaVersions.version})` })
+            .from(schemaVersions)
+            .where(eq(schemaVersions.schemaDefinitionId, def.id));
+          const nextVersionNumber = (maxRows[0]?.max ?? active.version) + 1;
+          const inserted = await tx
+            .insert(schemaVersions)
+            .values({
+              schemaDefinitionId: def.id,
+              knowledgeBaseId: input.knowledgeBaseId,
+              version: nextVersionNumber,
+              propertySchema: nextPropertySchema,
+              spec: nextSpec,
+              isActive: true,
+            })
+            .returning();
+          activeVersion = inserted[0] ?? activeVersion;
+        } else {
+          // Compatible: loosen in place — no new version, existing data untouched.
+          const updated = await tx
+            .update(schemaVersions)
+            .set({ propertySchema: nextPropertySchema, spec: nextSpec, updatedAt: new Date() })
+            .where(eq(schemaVersions.id, active.id))
+            .returning();
+          activeVersion = updated[0] ?? activeVersion;
+        }
+      }
+
+      const reloaded = await tx
+        .select()
+        .from(schemaDefinitions)
+        .where(eq(schemaDefinitions.id, def.id))
+        .limit(1);
+      const finalDef = reloaded[0] ?? def;
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: input.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action:
+          classification.changeType === 'breaking' ? 'schema.version_created' : 'schema.updated',
+        targetType: 'schema_definition',
+        targetId: def.id,
+        metadata: {
+          kind: def.kind,
+          name: def.name,
+          changeType: classification.changeType,
+          reasons: classification.reasons,
+          version: activeVersion?.version ?? null,
+        },
+      });
+
+      return {
+        ok: true as const,
+        definition: { ...finalDef, activeVersion },
+        classification,
+      };
     });
   },
 

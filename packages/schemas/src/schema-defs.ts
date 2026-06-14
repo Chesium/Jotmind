@@ -3,6 +3,7 @@ import {
   propertySchemaSchema,
   schemaDefinitionKindSchema,
   type PropertySchema,
+  type SchemaDefinitionKind,
   validateCustomProperties,
 } from './graph.js';
 
@@ -185,3 +186,193 @@ export function validateEntityProperties(
   const result = validateCustomProperties(propertySchema, properties);
   return { valid: result.valid, issues: result.issues };
 }
+
+// ---------------------------------------------------------------------------
+// Schema version evolution (US-028)
+//
+// Editing a schema is classified as either a *compatible* change (update
+// labels/descriptions or LOOSEN validation — applied in place to the active
+// version, existing data untouched, AC1) or a *breaking* change (TIGHTEN
+// validation — creates and activates a new schema version so existing data can
+// remain valid under its referenced old version, AC2/AC3). Cross-version search
+// and reasoning key off the conceptual string `name`/predicate, not
+// `schemaVersionId` (AC4), and JSONB fields absent from older versions are
+// treated as `null` rather than throwing (AC5). Validation warnings for
+// old/mismatched data are surfaced via the validation report (AC6).
+// ---------------------------------------------------------------------------
+
+export const SCHEMA_CHANGE_TYPES = ['compatible', 'breaking'] as const;
+export const schemaChangeTypeSchema = z.enum(SCHEMA_CHANGE_TYPES);
+export type SchemaChangeType = z.infer<typeof schemaChangeTypeSchema>;
+
+/** Classification of a proposed schema edit (US-028). */
+export const schemaChangeClassificationSchema = z.object({
+  changeType: schemaChangeTypeSchema,
+  /** Human-readable reasons describing the notable changes. */
+  reasons: z.array(z.string()),
+});
+export type SchemaChangeClassification = z.infer<typeof schemaChangeClassificationSchema>;
+
+/**
+ * Update a schema definition (US-028). Supply any subset:
+ *   - `displayName` / `description`: metadata only (always compatible),
+ *   - `propertySchema` (entity types) and/or `spec` (claim predicates): new
+ *     validation rules — classified compatible (loosen) vs breaking (tighten).
+ * At least one field must be present.
+ */
+export const updateSchemaDefinitionSchema = z
+  .object({
+    displayName: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    propertySchema: propertySchemaSchema.optional(),
+    spec: predicateSpecSchema.optional(),
+  })
+  .refine(
+    (d) =>
+      d.displayName !== undefined ||
+      d.description !== undefined ||
+      d.propertySchema !== undefined ||
+      d.spec !== undefined,
+    { message: 'No changes supplied' },
+  );
+export type UpdateSchemaDefinition = z.infer<typeof updateSchemaDefinitionSchema>;
+
+/** Result of an update: the new definition state + how the change was classified. */
+export const updateSchemaResultSchema = schemaChangeClassificationSchema.extend({
+  definition: schemaDefinitionSchema,
+});
+export type UpdateSchemaResult = z.infer<typeof updateSchemaResultSchema>;
+
+/**
+ * Classify a change to an entity-type `propertySchema` (US-028). Loosening is
+ * compatible (existing data stays valid); tightening is breaking.
+ *   - BREAKING: adding a required field, making a field required, changing a
+ *     field's type, or removing a field (existing records may carry it).
+ *   - COMPATIBLE: adding an optional field, making a field optional, or no
+ *     validation change.
+ */
+export function classifyPropertySchemaChange(
+  current: PropertySchema,
+  next: PropertySchema,
+): SchemaChangeClassification {
+  const breaking: string[] = [];
+  const compatible: string[] = [];
+
+  for (const name of Object.keys(next)) {
+    if (!(name in current)) {
+      if (next[name]?.required) breaking.push(`Added required field "${name}"`);
+      else compatible.push(`Added optional field "${name}"`);
+    }
+  }
+  for (const name of Object.keys(current)) {
+    const c = current[name];
+    const n = next[name];
+    if (!n) {
+      breaking.push(`Removed field "${name}"`);
+      continue;
+    }
+    if (c && c.type !== n.type) breaking.push(`Changed type of "${name}" (${c.type} → ${n.type})`);
+    if (c && !c.required && n.required) breaking.push(`Made field "${name}" required`);
+    if (c && c.required && !n.required) compatible.push(`Made field "${name}" optional`);
+  }
+
+  return breaking.length > 0
+    ? { changeType: 'breaking', reasons: breaking }
+    : { changeType: 'compatible', reasons: compatible };
+}
+
+/**
+ * Classify a change to a claim-predicate `spec` (US-028).
+ *   - BREAKING: adding a required role, making a role required, removing a role,
+ *     narrowing a role's allowed entity types, or disallowing a previously
+ *     allowed literal.
+ *   - COMPATIBLE: adding an optional role, making a role optional, widening
+ *     allowed entity types, or newly allowing a literal.
+ */
+export function classifyPredicateSpecChange(
+  current: PredicateSpec,
+  next: PredicateSpec,
+): SchemaChangeClassification {
+  const breaking: string[] = [];
+  const compatible: string[] = [];
+  const currentRoles = new Map((current.argumentRoles ?? []).map((r) => [r.name, r]));
+  const nextRoles = new Map((next.argumentRoles ?? []).map((r) => [r.name, r]));
+
+  for (const [name, role] of nextRoles) {
+    if (!currentRoles.has(name)) {
+      if (role.required) breaking.push(`Added required role "${name}"`);
+      else compatible.push(`Added optional role "${name}"`);
+    }
+  }
+  for (const [name, c] of currentRoles) {
+    const n = nextRoles.get(name);
+    if (!n) {
+      breaking.push(`Removed role "${name}"`);
+      continue;
+    }
+    if (!c.required && n.required) breaking.push(`Made role "${name}" required`);
+    if (c.required && !n.required) compatible.push(`Made role "${name}" optional`);
+
+    const cTypes = c.entityTypes ?? [];
+    const nTypes = n.entityTypes ?? [];
+    if (nTypes.length === 0) {
+      if (cTypes.length > 0) compatible.push(`Allowed any entity type for role "${name}"`);
+    } else if (cTypes.length === 0) {
+      breaking.push(`Restricted entity types for role "${name}"`);
+    } else {
+      const removed = cTypes.filter((t) => !nTypes.includes(t));
+      const added = nTypes.filter((t) => !cTypes.includes(t));
+      if (removed.length > 0) breaking.push(`Removed entity types for role "${name}"`);
+      else if (added.length > 0) compatible.push(`Added entity types for role "${name}"`);
+    }
+
+    const cLit = Boolean(c.allowLiteral);
+    const nLit = Boolean(n.allowLiteral);
+    if (cLit && !nLit) breaking.push(`Disallowed literal value for role "${name}"`);
+    if (!cLit && nLit) compatible.push(`Allowed literal value for role "${name}"`);
+  }
+
+  return breaking.length > 0
+    ? { changeType: 'breaking', reasons: breaking }
+    : { changeType: 'compatible', reasons: compatible };
+}
+
+/** Classify a schema edit by kind (US-028). */
+export function classifySchemaChange(
+  kind: SchemaDefinitionKind,
+  current: { propertySchema: PropertySchema; spec: PredicateSpec },
+  next: { propertySchema: PropertySchema; spec: PredicateSpec },
+): SchemaChangeClassification {
+  return kind === 'entity_type'
+    ? classifyPropertySchemaChange(current.propertySchema, next.propertySchema)
+    : classifyPredicateSpecChange(current.spec, next.spec);
+}
+
+// ---------------------------------------------------------------------------
+// Validation report (US-028 AC6) — surface old/mismatched data.
+// ---------------------------------------------------------------------------
+
+/** One existing record that does not validate against the active schema version. */
+export const schemaRecordWarningSchema = z.object({
+  recordId: z.string(),
+  label: z.string(),
+  /** The schema version the record was stamped with (null = none/unconstrained). */
+  schemaVersionId: z.string().nullable(),
+  /** Whether the record references the currently active version. */
+  onActiveVersion: z.boolean(),
+  issues: z.array(z.object({ field: z.string(), message: z.string() })),
+});
+export type SchemaRecordWarning = z.infer<typeof schemaRecordWarningSchema>;
+
+/** Validation report for a schema definition over its existing records (US-028 AC6). */
+export const schemaValidationReportSchema = z.object({
+  definitionId: z.string(),
+  kind: schemaDefinitionKindSchema,
+  name: z.string(),
+  activeVersionId: z.string().nullable(),
+  totalRecords: z.number().int().nonnegative(),
+  invalidRecords: z.number().int().nonnegative(),
+  onOldVersionRecords: z.number().int().nonnegative(),
+  warnings: z.array(schemaRecordWarningSchema),
+});
+export type SchemaValidationReport = z.infer<typeof schemaValidationReportSchema>;

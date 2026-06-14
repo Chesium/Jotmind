@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  classifyPredicateSpecChange,
+  classifyPropertySchemaChange,
+  classifySchemaChange,
   createSchemaDefinitionSchema,
   predicateSpecSchema,
   schemaDefinitionSchema,
+  updateSchemaDefinitionSchema,
   validateEntityProperties,
   validatePredicateArguments,
 } from './schema-defs.js';
@@ -152,5 +156,153 @@ describe('validatePredicateArguments', () => {
       { role: 'whatever', argumentKind: 'entity', entityType: 'Thing' },
     ]);
     expect(result.valid).toBe(true);
+  });
+});
+
+describe('classifyPropertySchemaChange (US-028)', () => {
+  it('treats adding an optional field as compatible', () => {
+    const result = classifyPropertySchemaChange(
+      { born: { type: 'number', required: true } },
+      { born: { type: 'number', required: true }, city: { type: 'string' } },
+    );
+    expect(result.changeType).toBe('compatible');
+  });
+
+  it('treats adding a required field as breaking', () => {
+    const result = classifyPropertySchemaChange(
+      { born: { type: 'number' } },
+      { born: { type: 'number' }, city: { type: 'string', required: true } },
+    );
+    expect(result.changeType).toBe('breaking');
+    expect(result.reasons.join(' ')).toContain('city');
+  });
+
+  it('treats making a field required as breaking', () => {
+    const result = classifyPropertySchemaChange(
+      { born: { type: 'number' } },
+      { born: { type: 'number', required: true } },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+
+  it('treats making a required field optional as compatible (loosen)', () => {
+    const result = classifyPropertySchemaChange(
+      { born: { type: 'number', required: true } },
+      { born: { type: 'number' } },
+    );
+    expect(result.changeType).toBe('compatible');
+  });
+
+  it('treats changing a field type as breaking', () => {
+    const result = classifyPropertySchemaChange(
+      { born: { type: 'number' } },
+      { born: { type: 'string' } },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+
+  it('treats removing a field as breaking', () => {
+    const result = classifyPropertySchemaChange(
+      { born: { type: 'number' }, city: { type: 'string' } },
+      { born: { type: 'number' } },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+});
+
+describe('classifyPredicateSpecChange (US-028)', () => {
+  it('treats adding an optional role as compatible', () => {
+    const result = classifyPredicateSpecChange(
+      { argumentRoles: [{ name: 'subject', required: true }] },
+      { argumentRoles: [{ name: 'subject', required: true }, { name: 'note' }] },
+    );
+    expect(result.changeType).toBe('compatible');
+  });
+
+  it('treats adding a required role as breaking', () => {
+    const result = classifyPredicateSpecChange(
+      { argumentRoles: [{ name: 'subject', required: true }] },
+      {
+        argumentRoles: [
+          { name: 'subject', required: true },
+          { name: 'object', required: true },
+        ],
+      },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+
+  it('treats removing a role as breaking', () => {
+    const result = classifyPredicateSpecChange(
+      { argumentRoles: [{ name: 'subject' }, { name: 'object' }] },
+      { argumentRoles: [{ name: 'subject' }] },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+
+  it('treats widening allowed entity types as compatible', () => {
+    const result = classifyPredicateSpecChange(
+      { argumentRoles: [{ name: 'subject', entityTypes: ['Person'] }] },
+      { argumentRoles: [{ name: 'subject', entityTypes: ['Person', 'Org'] }] },
+    );
+    expect(result.changeType).toBe('compatible');
+  });
+
+  it('treats narrowing allowed entity types as breaking', () => {
+    const result = classifyPredicateSpecChange(
+      { argumentRoles: [{ name: 'subject', entityTypes: ['Person', 'Org'] }] },
+      { argumentRoles: [{ name: 'subject', entityTypes: ['Person'] }] },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+
+  it('treats restricting a previously unrestricted role as breaking', () => {
+    const result = classifyPredicateSpecChange(
+      { argumentRoles: [{ name: 'subject' }] },
+      { argumentRoles: [{ name: 'subject', entityTypes: ['Person'] }] },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+
+  it('treats disallowing a previously allowed literal as breaking', () => {
+    const result = classifyPredicateSpecChange(
+      { argumentRoles: [{ name: 'note', allowLiteral: true }] },
+      { argumentRoles: [{ name: 'note', allowLiteral: false }] },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+});
+
+describe('classifySchemaChange (US-028)', () => {
+  it('dispatches on kind to the property-schema classifier', () => {
+    const result = classifySchemaChange(
+      'entity_type',
+      { propertySchema: { born: { type: 'number' } }, spec: { argumentRoles: [] } },
+      { propertySchema: { born: { type: 'string' } }, spec: { argumentRoles: [] } },
+    );
+    expect(result.changeType).toBe('breaking');
+  });
+
+  it('dispatches on kind to the predicate-spec classifier', () => {
+    const result = classifySchemaChange(
+      'claim_predicate',
+      { propertySchema: {}, spec: { argumentRoles: [{ name: 'a' }] } },
+      { propertySchema: {}, spec: { argumentRoles: [{ name: 'a' }, { name: 'b' }] } },
+    );
+    expect(result.changeType).toBe('compatible');
+  });
+});
+
+describe('updateSchemaDefinitionSchema (US-028)', () => {
+  it('rejects an empty update', () => {
+    expect(updateSchemaDefinitionSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts a metadata-only update', () => {
+    expect(updateSchemaDefinitionSchema.safeParse({ displayName: 'People' }).success).toBe(true);
+  });
+
+  it('accepts a null description (clear)', () => {
+    expect(updateSchemaDefinitionSchema.safeParse({ description: null }).success).toBe(true);
   });
 });

@@ -106,4 +106,95 @@ describe.skipIf(!hasDatabase)('schema definitions integration', () => {
     expect(list[0]?.name).toBe('Place');
     expect(list[0]?.activeVersion?.version).toBe(1);
   });
+
+  it('updates the active version in place for a compatible change (US-028 AC1)', async () => {
+    const created = await dbSchemaStore.createDefinition({
+      knowledgeBaseId: kbId,
+      kind: 'entity_type',
+      name: 'Person',
+      displayName: 'Person',
+      propertySchema: { born: { type: 'number', required: true } },
+      actorUserId: userId,
+    });
+    if (!created.ok) throw new Error('setup failed');
+    const v1Id = created.definition.activeVersion!.id;
+
+    const result = await dbSchemaStore.updateDefinition({
+      knowledgeBaseId: kbId,
+      id: created.definition.id,
+      displayName: 'People',
+      propertySchema: { born: { type: 'number' }, city: { type: 'string' } },
+      actorUserId: userId,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.classification.changeType).toBe('compatible');
+    expect(result.definition.displayName).toBe('People');
+    // Same version row, updated in place.
+    expect(result.definition.activeVersion?.id).toBe(v1Id);
+    expect(result.definition.activeVersion?.version).toBe(1);
+
+    const versionRows = await getDb()
+      .select()
+      .from(schemaVersions)
+      .where(eq(schemaVersions.schemaDefinitionId, created.definition.id));
+    expect(versionRows).toHaveLength(1);
+  });
+
+  it('creates a new active version for a breaking change, old data stays valid (US-028 AC2/AC3)', async () => {
+    const created = await dbSchemaStore.createDefinition({
+      knowledgeBaseId: kbId,
+      kind: 'entity_type',
+      name: 'Place',
+      displayName: 'Place',
+      propertySchema: { region: { type: 'string' } },
+      actorUserId: userId,
+    });
+    if (!created.ok) throw new Error('setup failed');
+    const v1Id = created.definition.activeVersion!.id;
+
+    const result = await dbSchemaStore.updateDefinition({
+      knowledgeBaseId: kbId,
+      id: created.definition.id,
+      // Tighten: make `region` required.
+      propertySchema: { region: { type: 'string', required: true } },
+      actorUserId: userId,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.classification.changeType).toBe('breaking');
+    expect(result.definition.activeVersion?.version).toBe(2);
+    expect(result.definition.activeVersion?.id).not.toBe(v1Id);
+
+    // Both versions persist; only the new one is active. Existing records still
+    // reference v1 (AC3) which remains a valid row.
+    const versionRows = await getDb()
+      .select()
+      .from(schemaVersions)
+      .where(eq(schemaVersions.schemaDefinitionId, created.definition.id));
+    expect(versionRows).toHaveLength(2);
+    const v1 = versionRows.find((v) => v.id === v1Id);
+    expect(v1?.isActive).toBe(false);
+    const audits = await getDb()
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.knowledgeBaseId, kbId),
+          eq(auditEvents.action, 'schema.version_created'),
+        ),
+      );
+    expect(audits.length).toBe(1);
+  });
+
+  it('returns not_found when updating a missing definition', async () => {
+    const result = await dbSchemaStore.updateDefinition({
+      knowledgeBaseId: kbId,
+      id: '00000000-0000-0000-0000-000000000000',
+      displayName: 'Nope',
+      actorUserId: userId,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('not_found');
+  });
 });

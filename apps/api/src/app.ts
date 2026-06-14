@@ -205,7 +205,13 @@ export function createApp(options: AppOptions = {}): Express {
   const schemaStore = options.schemaStore ?? dbSchemaStore;
   app.use(
     '/api/knowledge-bases/:kbId/schema',
-    createSchemaRouter({ store: schemaStore, kbStore: options.kbStore, authStore }),
+    createSchemaRouter({
+      store: schemaStore,
+      kbStore: options.kbStore,
+      authStore,
+      entityStore: options.entityStore,
+      claimStore: options.claimStore,
+    }),
   );
   app.use(
     '/api/knowledge-bases/:kbId/entities',

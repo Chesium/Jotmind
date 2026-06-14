@@ -4,17 +4,22 @@ import {
   kbRoleSatisfies,
   predicateSpecSchema,
   schemaDefinitionSchema,
+  updateSchemaDefinitionSchema,
   validateEntityProperties,
   validatePredicateArguments,
   type ClaimArgumentForValidation,
   type KbRole,
   type PropertySchema,
   type SchemaDefinition,
+  type SchemaRecordWarning,
   type SchemaValidationIssue,
+  type SchemaValidationReport,
 } from '@jotmind/schemas';
 import { asyncHandler, requireAuth, requireCsrf, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
 import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
+import { dbEntityStore, type EntityStore } from '../entities/store.js';
+import { dbClaimStore, type ClaimStore } from '../claims/store.js';
 import type { SchemaVersionRow } from '../db/schema.js';
 import { dbSchemaStore, type SchemaDefinitionWithVersion, type SchemaStore } from './store.js';
 
@@ -120,6 +125,105 @@ export interface SchemaRouterOptions {
   store?: SchemaStore;
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
+  /** Used by the validation report (US-028 AC6) to scan existing records. */
+  entityStore?: EntityStore;
+  claimStore?: ClaimStore;
+}
+
+/**
+ * Build the validation report for a schema definition (US-028 AC6): scan
+ * existing records of the conceptual type against the ACTIVE version and report
+ * those that don't validate, plus how many reference an older schema version.
+ * Properties/roles absent from older versions are treated as `null`/missing by
+ * the validators rather than throwing (AC5).
+ */
+async function buildValidationReport(
+  def: SchemaDefinitionWithVersion,
+  entityStore: EntityStore,
+  claimStore: ClaimStore,
+): Promise<SchemaValidationReport> {
+  const activeVersionId = def.activeVersion?.id ?? null;
+  const warnings: SchemaRecordWarning[] = [];
+  let totalRecords = 0;
+  let onOldVersionRecords = 0;
+
+  if (def.kind === 'entity_type') {
+    const propertySchema = (def.activeVersion?.propertySchema as PropertySchema) ?? {};
+    const entities = (await entityStore.listEntities(def.knowledgeBaseId)).filter(
+      (e) => e.type === def.name,
+    );
+    for (const e of entities) {
+      totalRecords += 1;
+      const onActiveVersion = e.schemaVersionId === activeVersionId;
+      if (!onActiveVersion && e.schemaVersionId !== null) onOldVersionRecords += 1;
+      const result = validateEntityProperties(
+        propertySchema,
+        (e.properties as Record<string, unknown>) ?? {},
+      );
+      if (!result.valid) {
+        warnings.push({
+          recordId: e.id,
+          label: e.name,
+          schemaVersionId: e.schemaVersionId,
+          onActiveVersion,
+          issues: result.issues,
+        });
+      }
+    }
+  } else {
+    const spec = predicateSpecSchema.parse(
+      (def.activeVersion?.spec as Record<string, unknown>) ?? {},
+    );
+    const entityTypeById = new Map<string, string | null>();
+    const resolveType = async (entityId: string): Promise<string | null> => {
+      if (entityTypeById.has(entityId)) return entityTypeById.get(entityId) ?? null;
+      const entity = await entityStore.getEntity(def.knowledgeBaseId, entityId);
+      const type = entity?.type ?? null;
+      entityTypeById.set(entityId, type);
+      return type;
+    };
+    const claims = (await claimStore.listClaims(def.knowledgeBaseId)).filter(
+      (c) => c.predicate === def.name,
+    );
+    for (const c of claims) {
+      totalRecords += 1;
+      const onActiveVersion = c.schemaVersionId === activeVersionId;
+      if (!onActiveVersion && c.schemaVersionId !== null) onOldVersionRecords += 1;
+      const forValidation: ClaimArgumentForValidation[] = [];
+      for (const arg of c.arguments) {
+        let entityType: string | null = null;
+        if (arg.argumentKind === 'entity' && arg.entityId) {
+          entityType = await resolveType(arg.entityId);
+        }
+        forValidation.push({
+          role: arg.role,
+          argumentKind: arg.argumentKind as 'entity' | 'literal',
+          entityType,
+        });
+      }
+      const result = validatePredicateArguments(spec, forValidation);
+      if (!result.valid) {
+        warnings.push({
+          recordId: c.id,
+          label: c.predicate,
+          schemaVersionId: c.schemaVersionId,
+          onActiveVersion,
+          issues: result.issues,
+        });
+      }
+    }
+  }
+
+  return {
+    definitionId: def.id,
+    kind: def.kind as SchemaValidationReport['kind'],
+    name: def.name,
+    activeVersionId,
+    totalRecords,
+    invalidRecords: warnings.length,
+    onOldVersionRecords,
+    warnings,
+  };
 }
 
 /**
@@ -132,6 +236,8 @@ export function createSchemaRouter(options: SchemaRouterOptions = {}): Router {
   const store = options.store ?? dbSchemaStore;
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
+  const entityStore = options.entityStore ?? dbEntityStore;
+  const claimStore = options.claimStore ?? dbClaimStore;
   const router = Router({ mergeParams: true });
   const authed = requireAuth(authStore);
 
@@ -227,6 +333,56 @@ export function createSchemaRouter(options: SchemaRouterOptions = {}): Router {
         return;
       }
       res.json(toSchemaDefinition(def));
+    }),
+  );
+
+  // Validation report over existing records (viewer+, US-028 AC6).
+  router.get(
+    '/:defId/validation',
+    authed,
+    requireKbRole('viewer'),
+    asyncHandler(async (req, res) => {
+      const def = await store.getDefinition(req.params.kbId as string, req.params.defId as string);
+      if (!def) {
+        res.status(404).json({ error: 'Schema definition not found' });
+        return;
+      }
+      res.json(await buildValidationReport(def, entityStore, claimStore));
+    }),
+  );
+
+  // Update a schema definition (editor+, US-028). Compatible changes update the
+  // active version in place; breaking changes create + activate a new version.
+  router.put(
+    '/:defId',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const ctx = req.auth as AuthContext;
+      const parsed = updateSchemaDefinitionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid schema update' });
+        return;
+      }
+      const result = await store.updateDefinition({
+        knowledgeBaseId: req.params.kbId as string,
+        id: req.params.defId as string,
+        displayName: parsed.data.displayName,
+        description: parsed.data.description,
+        propertySchema: parsed.data.propertySchema,
+        spec: parsed.data.spec,
+        actorUserId: ctx.user.id,
+      });
+      if (!result.ok) {
+        res.status(404).json({ error: 'Schema definition not found' });
+        return;
+      }
+      res.json({
+        changeType: result.classification.changeType,
+        reasons: result.classification.reasons,
+        definition: toSchemaDefinition(result.definition),
+      });
     }),
   );
 
