@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
+import { Rules } from './Rules.js';
+import { InvalidationProvider, useInvalidationEffect } from './invalidation.js';
+import type { KnowledgeBase } from '@jotmind/schemas';
 
 function mockFetch(handler: (url: string) => { status?: number; body?: unknown }) {
   vi.stubGlobal(
@@ -1118,5 +1121,122 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByTestId(`proposal-${proposalId}`)).toBeInTheDocument();
     });
+  });
+
+  it('invalidates claims and graph views after accepting an inferred result (US-041)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000130';
+    const ruleId = '00000000-0000-0000-0000-000000000131';
+    const runId = '00000000-0000-0000-0000-000000000132';
+    const resultId = '00000000-0000-0000-0000-000000000133';
+    const claimId = '00000000-0000-0000-0000-000000000134';
+    const now = new Date().toISOString();
+
+    const rule = {
+      id: ruleId,
+      knowledgeBaseId: kbId,
+      name: 'knows-symmetry',
+      description: null,
+      ruleText:
+        'knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).',
+      status: 'enabled',
+      version: 1,
+      moduleId: null,
+      packId: null,
+      valid: true,
+      validationErrors: [],
+      recursionCap: 16,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const result = {
+      id: resultId,
+      knowledgeBaseId: kbId,
+      ruleRunId: runId,
+      ruleId,
+      ruleName: 'knows-symmetry',
+      predicate: 'knows',
+      label: 'inferred',
+      arguments: [{ name: 'a', value: 'Ada', entityName: 'Ada' }],
+      trace: { claimIds: [], entityIds: [], argumentIds: [] },
+      createdAt: now,
+    };
+    const runResult = {
+      run: {
+        id: runId,
+        knowledgeBaseId: kbId,
+        ruleId,
+        ruleName: 'knows-symmetry',
+        status: 'completed',
+        startedAt: now,
+        finishedAt: now,
+        error: null,
+        resultCount: 1,
+        iterations: 1,
+        limitExceeded: false,
+        triggeredBy: '00000000-0000-0000-0000-000000000001',
+        jobId: null,
+        createdAt: now,
+      },
+      results: [result],
+    };
+
+    mockFetch((url) => {
+      if (url.includes(`/api/knowledge-bases/${kbId}/rules/packs`)) return { body: [] };
+      if (
+        url.includes(`/api/knowledge-bases/${kbId}/rules/runs/${runId}/results/${resultId}/accept`)
+      )
+        return { body: { claimId, result } };
+      if (url.includes(`/api/knowledge-bases/${kbId}/rules/${ruleId}/run`))
+        return { body: runResult };
+      if (url.includes(`/api/knowledge-bases/${kbId}/rules`)) return { body: [rule] };
+      return { status: 404 };
+    });
+
+    const onClaimsInvalidated = vi.fn();
+    const onGraphInvalidated = vi.fn();
+
+    function Probe() {
+      useInvalidationEffect(['claims'], onClaimsInvalidated);
+      useInvalidationEffect(['graphViews'], onGraphInvalidated);
+      return null;
+    }
+
+    const kb: KnowledgeBase = {
+      id: kbId,
+      name: 'Rules Sync KB',
+      description: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      role: 'editor',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    render(
+      <InvalidationProvider>
+        <Rules kb={kb} csrfToken="tok" />
+        <Probe />
+      </InvalidationProvider>,
+    );
+
+    // Run the enabled rule to produce an inferred result.
+    await waitFor(() => {
+      expect(screen.getByTestId(`rules-run-${ruleId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`rules-run-${ruleId}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`rules-run-accept-${resultId}`)).toBeInTheDocument();
+    });
+
+    // Accept the inferred result; the sibling claim/graph subscribers refresh
+    // and the Rules panel marks the result as accepted (AC2/AC3/AC4).
+    fireEvent.click(screen.getByTestId(`rules-run-accept-${resultId}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`rules-run-accepted-${resultId}`)).toBeInTheDocument();
+    });
+    expect(onClaimsInvalidated).toHaveBeenCalled();
+    expect(onGraphInvalidated).toHaveBeenCalled();
   });
 });

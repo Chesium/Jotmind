@@ -17,6 +17,7 @@ import {
   setRuleStatus,
   validateRule,
 } from './api.js';
+import { useInvalidate } from './invalidation.js';
 
 const EXAMPLE_RULE =
   'knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).';
@@ -34,6 +35,7 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
   const [rules, setRules] = useState<RuleDefinition[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const invalidate = useInvalidate();
 
   // US-023 custom rule authoring.
   const [name, setName] = useState('');
@@ -113,6 +115,11 @@ export function Rules({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string 
     try {
       const res = await acceptInferredResult(kb.id, runId, resultId, csrfToken);
       setAcceptedResults((prev) => ({ ...prev, [resultId]: res.claimId }));
+      // US-041: accepting an inferred result creates a canonical claim, so
+      // refresh the sibling panels that read claim/graph data plus the derived
+      // AI surfaces and the audit log (AC1). The Rules panel keeps its own
+      // accepted-result marker above (AC4).
+      invalidate(['claims', 'graphViews', 'searchResults', 'answers', 'audit']);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not accept inferred result');
     } finally {
