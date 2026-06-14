@@ -54,10 +54,23 @@ export const graphEventTypeSchema = z.enum(GRAPH_EVENT_TYPES);
 export type GraphEventType = (typeof GRAPH_EVENT_TYPES)[number];
 
 /**
- * Status of the graph projection pipeline (US-006). Exposed by the API so the
- * stub projector is visible as `stubbed: true` and outbox backlog is observable.
+ * Lifecycle state of the derived AGE graph projection (US-026). The rebuild/
+ * repair flow moves the projection through `rebuilding` -> `synchronized`, or
+ * `rebuilding` -> `failed` on error. While `rebuilding`, AGE-dependent traversal
+ * views are disabled and core pages fall back to relational PostgreSQL queries.
+ */
+export const GRAPH_PROJECTION_STATES = ['rebuilding', 'synchronized', 'failed'] as const;
+export const graphProjectionStateSchema = z.enum(GRAPH_PROJECTION_STATES);
+export type GraphProjectionState = z.infer<typeof graphProjectionStateSchema>;
+
+/**
+ * Status of the graph projection pipeline (US-006/US-026). Exposed by the API so
+ * the projector identity, lifecycle `state`, and outbox backlog are observable
+ * (AC7 — projection lag/failure is visible). `state` reflects the rebuild/repair
+ * lifecycle; `counts` reflects the outbox backlog.
  */
 export const graphProjectionStatusSchema = z.object({
+  state: graphProjectionStateSchema,
   projector: z.object({
     name: z.string(),
     stubbed: z.boolean(),
@@ -67,8 +80,26 @@ export const graphProjectionStatusSchema = z.object({
     processed: z.number().int().nonnegative(),
     failed: z.number().int().nonnegative(),
   }),
+  activeKnowledgeBaseId: z.string().uuid().nullable(),
+  lastJobId: z.string().uuid().nullable(),
+  lastRebuildStartedAt: z.string().datetime().nullable(),
+  lastSynchronizedAt: z.string().datetime().nullable(),
+  failedAt: z.string().datetime().nullable(),
+  lastError: z.string().nullable(),
+  updatedAt: z.string().datetime().nullable(),
 });
 export type GraphProjectionStatus = z.infer<typeof graphProjectionStatusSchema>;
+
+/** Durable-job type that rebuilds/repairs the AGE projection (US-026). */
+export const GRAPH_REBUILD_JOB_TYPE = 'graph.projection.rebuild';
+
+/** Payload carried by a {@link GRAPH_REBUILD_JOB_TYPE} job. */
+export const graphRebuildJobPayloadSchema = z.object({
+  /** Limit the rebuild to one Knowledge Base; omit to rebuild everything. */
+  knowledgeBaseId: z.string().uuid().optional(),
+  requestedBy: z.string().uuid().nullable().optional(),
+});
+export type GraphRebuildJobPayload = z.infer<typeof graphRebuildJobPayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // Entity shapes (US-008)

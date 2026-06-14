@@ -286,6 +286,102 @@ describe('App', () => {
     expect(screen.getByTestId('detail-description')).toHaveTextContent('Mathematician');
   });
 
+  it('shows the Indexing Graph state while the projection is rebuilding (US-026)', async () => {
+    const kbId = '00000000-0000-0000-0000-0000000000dd';
+    const entityId = '00000000-0000-0000-0000-0000000000e3';
+    const now = new Date().toISOString();
+    const entity = {
+      id: entityId,
+      knowledgeBaseId: kbId,
+      type: 'Person',
+      name: 'Grace Hopper',
+      aliases: [],
+      description: null,
+      tags: [],
+      properties: {},
+      schemaVersionId: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    mockFetch((url) => {
+      if (url.includes('/api/auth/me')) {
+        return {
+          body: {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          },
+        };
+      }
+      if (url.includes('/api/graph/projection/status')) {
+        return {
+          body: {
+            state: 'rebuilding',
+            projector: { name: 'age:jotmind_graph', stubbed: false },
+            counts: { pending: 2, processed: 0, failed: 0 },
+            activeKnowledgeBaseId: null,
+            lastJobId: null,
+            lastRebuildStartedAt: now,
+            lastSynchronizedAt: null,
+            failedAt: null,
+            lastError: null,
+            updatedAt: now,
+          },
+        };
+      }
+      if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) return { body: [entity] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/notes`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/sources`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/source-excerpts`)) return { body: [] };
+      if (url.includes(`/api/knowledge-bases/${kbId}/search`)) return { body: { results: [] } };
+      if (url.includes('/api/knowledge-bases')) {
+        return {
+          body: [
+            {
+              id: kbId,
+              name: 'Indexing KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-views')).toBeInTheDocument();
+    });
+
+    // Network view shows the "Indexing Graph..." state instead of the network.
+    await waitFor(() => {
+      expect(screen.getByTestId('network-indexing')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId(`network-node-${entityId}`)).not.toBeInTheDocument();
+
+    // Core relational views still work: the table renders the entity.
+    fireEvent.click(screen.getByTestId('view-tab-table'));
+    await waitFor(() => {
+      expect(screen.getByTestId(`table-row-${entityId}`)).toBeInTheDocument();
+    });
+  });
+
   it('asks a provenance-aware AI answer and shows a cited claim (US-020)', async () => {
     const kbId = '00000000-0000-0000-0000-0000000000aa';
     const claimId = '00000000-0000-0000-0000-0000000000c1';

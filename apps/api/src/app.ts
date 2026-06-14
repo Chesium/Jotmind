@@ -16,9 +16,11 @@ import { createNoteRouter, type NoteStore } from './notes/index.js';
 import { createSourceRouter, type SourceStore } from './sources/index.js';
 import { createSourceExcerptRouter, type SourceExcerptStore } from './source-excerpts/index.js';
 import {
+  ageProjector,
   createGraphRouter,
   stubProjector,
   type Projector,
+  type ProjectionStatusStore,
   type ProjectionStore,
 } from './graph/index.js';
 import { createJobsRouter, type JobStore } from './jobs/index.js';
@@ -102,8 +104,13 @@ export interface AppOptions {
    */
   projectionStore?: ProjectionStore;
   /**
-   * Graph projector. Defaults to the stub projector (US-006), which logs but
-   * does not yet write to Apache AGE.
+   * Graph projection lifecycle status store (US-026). Injectable for unit tests.
+   * Defaults to the PostgreSQL-backed store.
+   */
+  projectionStatusStore?: ProjectionStatusStore;
+  /**
+   * Graph projector. Defaults to the real Apache AGE projector (US-026) unless
+   * `GRAPH_PROJECTOR=stub` is set. Injectable so unit tests can supply a fake.
    */
   projector?: Projector;
   /**
@@ -169,7 +176,8 @@ export interface AppOptions {
 export function createApp(options: AppOptions = {}): Express {
   const { checkDatabase = checkDatabaseHealth } = options;
   const authStore = options.authStore ?? dbAuthStore;
-  const projector = options.projector ?? stubProjector;
+  const projector =
+    options.projector ?? (process.env.GRAPH_PROJECTOR === 'stub' ? stubProjector : ageProjector);
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
@@ -298,7 +306,13 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api/ai', createAiPolicyRouter({ store: options.aiPolicyStore, authStore }));
   app.use(
     '/api/graph',
-    createGraphRouter({ authStore, projectionStore: options.projectionStore, projector }),
+    createGraphRouter({
+      authStore,
+      projectionStore: options.projectionStore,
+      projectionStatusStore: options.projectionStatusStore,
+      projector,
+      jobStore: options.jobStore,
+    }),
   );
   app.use('/api/jobs', createJobsRouter({ authStore, store: options.jobStore }));
 

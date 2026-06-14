@@ -838,6 +838,71 @@ confirmationNote? }`. `origin: 'inferred'` (the `INFERRED_CLAIM_ORIGIN`
   in `api.ts` + per-result **Accept as claim** button in the `Rules.tsx` run
   panel. Testids: `rules-run-accept-<resultId>`, `rules-run-accepted-<resultId>`.
 
+## AGE-backed graph projection & traversal (US-026)
+
+- The stub projector (US-006) is replaced by a REAL Apache AGE projector. AGE is
+  a DERIVED index of the canonical relational tables — it never holds canonical
+  data, so an AGE failure can never corrupt records. `createApp`'s default
+  projector is now `ageProjector` unless `GRAPH_PROJECTOR=stub` is set; unit
+  tests inject `projector: stubProjector` (or a fake) to avoid touching AGE.
+- **AGE session pattern (`apps/api/src/graph/age.ts`):** every AGE statement must
+  run on a connection that has done `LOAD 'age'` + `SET search_path`. postgres-js
+  pools connections, so ALL AGE work goes through `withAge(fn)`, which uses
+  `getSqlClient().begin()` (pins one connection), loads age, sets the path, and
+  ensures the `jotmind_graph` graph exists. Run Cypher via the session's
+  `cypher(body, columns, params?)`.
+- **AGE Cypher params (critical gotcha):** AGE requires the 3rd `cypher()` arg to
+  be a bare bind parameter inferred as `agtype` — a literal or a CAST (`$1::agtype`)
+  is REJECTED with "third argument of cypher function must be a parameter".
+  postgres-js sends interpolated values as bind params with the type inferred, so
+  `cypher('g', $$ ... $name ... $$, ${JSON.stringify(params)})` works and the
+  server infers `agtype`. NEVER concatenate user text into the Cypher body — pass
+  it through the param map (handles quote escaping), keeping the projector
+  injection-safe.
+- **Graph model (`age-projector.ts`):** `(:Entity {id,kbId,...})`, `(:Claim
+{id,kbId,predicate,...,literalArgs})`, and `(:Claim)-[:ARGUMENT
+{argumentId,role,position}]->(:Entity)` per entity argument (multi-arg claims =
+  claim node + role-labeled edges, AC2). Use the FIXED `:ARGUMENT` edge label
+  with a `role` property — do NOT create dynamic edge labels from user role text.
+  `project(event)` always RELOADS the current canonical row (never trusts the
+  outbox payload) so create/update/delete/rebuild share one idempotent path
+  (claim upsert = DETACH DELETE then recreate). Note/Source events are accepted
+  as no-ops (not traversal targets yet).
+- **Projection lifecycle status (US-026 AC4):** new singleton `graph_projection_status`
+  table (migration `drizzle/0007`, `id='default'` check constraint) with a
+  `state` of `rebuilding`/`synchronized`/`failed` + rebuild metadata. Accessed via
+  `ProjectionStatusStore` (`dbProjectionStatusStore`); `createApp` seam
+  `projectionStatusStore`. `getProjectionStatus` now returns `state` + lifecycle
+  fields (schema `graphProjectionStatusSchema` extended — update fakes when
+  testing). GOTCHA: this row has an FK to `knowledge_bases`, so a `TRUNCATE
+knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
+  `synchronized` default when the row is missing.
+- **Rebuild = durable job (AC4/AC7, non-locking):** `POST
+/api/graph/projection/rebuild` (system admin+CSRF) now ENQUEUES a
+  `GRAPH_REBUILD_JOB_TYPE` (`graph.projection.rebuild`) job (202 `{job}`) instead
+  of running synchronously; the handler in `jobs/handlers.ts` calls
+  `rebuildProjection` with `ageProjector`. `rebuildProjection` drives the state
+  machine: `markRebuilding` -> `projector.prepareRebuild()` (clears AGE, optional
+  Projector method) -> reproject every non-deleted canonical record ->
+  `markSynchronized`; on error `markFailed` + rethrow. App writes/relational reads
+  are never blocked (AGE is separate), so it is non-locking.
+- **Traversal service (`traversal.ts`, AC6):** traversal-dependent views/rules
+  query AGE ONLY through `GraphTraversalService` (`ageTraversalService` /
+  `createAgeTraversalService({statusStore})`), never raw Cypher. It throws
+  `GraphProjectionUnavailableError` when `state` is `rebuilding`/`failed` so
+  callers fall back. `getEntityNeighborhood` returns nodes+role-labeled edges.
+- **Web (AC5/AC7):** `getGraphProjectionStatus()` in `api.ts`; `GraphViews.tsx`
+  loads it best-effort (core relational views work even if it fails) and, while
+  `state==='rebuilding'`, replaces the Network view with an `network-indexing`
+  "Indexing Graph…" panel (other tabs keep using relational data). It also shows
+  `graph-projection-failed` and `graph-projection-lag` (pending>0) banners.
+- **Testing:** unit tests use in-memory `ProjectionStore`/`ProjectionStatusStore`
+  - the stub/fake projector (no DB). Real AGE behavior is covered by
+    `age-projector.integration.test.ts` (`skipIf` no DATABASE_URL): param-escaping,
+    entity projection, multi-arg edges, idempotency, rebuild, delete, traversal,
+    rebuilding-unavailable. AGE persists between test runs — call
+    `ageProjector.prepareRebuild()` in setup/teardown to clear it.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

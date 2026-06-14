@@ -10,6 +10,7 @@ import {
   entityImpactSchema,
   entityListSchema,
   entitySchema,
+  graphProjectionStatusSchema,
   acceptProposalResultSchema,
   captureResponseSchema,
   knowledgeBaseListSchema,
@@ -64,6 +65,7 @@ import {
   type CreateSourceExcerpt,
   type Entity,
   type EntityImpact,
+  type GraphProjectionStatus,
   type KnowledgeBase,
   type Note,
   type PublicJob,
@@ -445,6 +447,17 @@ export async function listSourceExcerpts(
   );
   if (!res.ok) throw new Error(await errorMessage(res));
   return sourceExcerptListSchema.parse(await res.json());
+}
+
+/**
+ * Graph projection status (US-026): lifecycle state, projector identity, and
+ * outbox backlog. Drives the "Indexing Graph..." network state and lag/failure
+ * visibility.
+ */
+export async function getGraphProjectionStatus(): Promise<GraphProjectionStatus> {
+  const res = await fetch('/api/graph/projection/status', { credentials: 'include' });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return graphProjectionStatusSchema.parse(await res.json());
 }
 
 /** Create a source excerpt / citation referencing a note or source (editor+). */

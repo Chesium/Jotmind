@@ -3,12 +3,14 @@ import {
   kbRoleSatisfies,
   type Claim,
   type Entity,
+  type GraphProjectionStatus,
   type KnowledgeBase,
   type Note,
   type Source,
   type SourceExcerptView,
 } from '@jotmind/schemas';
 import {
+  getGraphProjectionStatus,
   listClaims,
   listEntities,
   listNotes,
@@ -64,6 +66,7 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
   const [mode, setMode] = useState<ViewMode>('network');
   const [selected, setSelected] = useState<Selection | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [projection, setProjection] = useState<GraphProjectionStatus | null>(null);
 
   const canEdit = kbRoleSatisfies(kb.role, 'editor');
 
@@ -84,6 +87,13 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
       setExcerpts(x);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load graph views');
+    }
+    // Projection status is best-effort: core (relational) views must keep
+    // working even if the AGE projection status is unavailable.
+    try {
+      setProjection(await getGraphProjectionStatus());
+    } catch {
+      setProjection(null);
     }
   }, [kb.id]);
 
@@ -131,9 +141,30 @@ export function GraphViews({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: st
 
       {error && <p data-testid="graph-views-error">{error}</p>}
 
-      {mode === 'network' && (
-        <NetworkView entities={entities} claims={claims} onSelect={navigate} />
+      {projection?.state === 'failed' && (
+        <p data-testid="graph-projection-failed" role="alert">
+          ⚠ Graph index failed: {projection.lastError ?? 'Unknown error'}. Core search/table/detail
+          views use relational data and remain available.
+        </p>
       )}
+      {projection && projection.state !== 'rebuilding' && projection.counts.pending > 0 && (
+        <p data-testid="graph-projection-lag">
+          Graph index lag: {projection.counts.pending} pending update(s) not yet projected.
+        </p>
+      )}
+
+      {mode === 'network' &&
+        (projection?.state === 'rebuilding' ? (
+          <div data-testid="network-indexing">
+            <strong>Indexing Graph…</strong>
+            <p>
+              The network/traversal view is temporarily unavailable while the graph index rebuilds.
+              Timeline, Table, Detail and Sources views still work from relational data.
+            </p>
+          </div>
+        ) : (
+          <NetworkView entities={entities} claims={claims} onSelect={navigate} />
+        ))}
       {mode === 'timeline' && (
         <TimelineView
           entities={entities}

@@ -1,9 +1,20 @@
-import { EMBEDDING_INDEX_JOB_TYPE, embeddingIndexJobPayloadSchema } from '@jotmind/schemas';
+import {
+  EMBEDDING_INDEX_JOB_TYPE,
+  GRAPH_REBUILD_JOB_TYPE,
+  embeddingIndexJobPayloadSchema,
+  graphRebuildJobPayloadSchema,
+} from '@jotmind/schemas';
 import { dbAiPolicyStore } from '../ai-policy/store.js';
 import { dbEmbeddingStore } from '../embeddings/store.js';
 import { dbEmbeddingTargetSource } from '../embeddings/targets.js';
 import { resolveEmbeddingProviderFromEnv } from '../embeddings/provider.js';
 import { runEmbeddingIndex } from '../embeddings/indexer.js';
+import { ageProjector } from '../graph/age-projector.js';
+import {
+  dbProjectionStatusStore,
+  dbProjectionStore,
+  rebuildProjection,
+} from '../graph/projector.js';
 import type { JobHandlerRegistry } from './worker.js';
 
 /**
@@ -37,6 +48,22 @@ export const defaultJobHandlers: JobHandlerRegistry = {
         requestedBy: payload.requestedBy ?? null,
       },
     );
+    return { ...result };
+  },
+
+  // AGE graph projection rebuild/repair (US-026). Regenerates the derived AGE
+  // projection from the canonical relational tables, driving the projection
+  // status through rebuilding -> synchronized (or failed). Self-contained so it
+  // runs identically in the in-process and separate-process workers.
+  [GRAPH_REBUILD_JOB_TYPE]: async (job) => {
+    const payload = graphRebuildJobPayloadSchema.parse(job.payload ?? {});
+    const result = await rebuildProjection({
+      store: dbProjectionStore,
+      statusStore: dbProjectionStatusStore,
+      projector: ageProjector,
+      jobId: job.id,
+      ...(payload.knowledgeBaseId ? { knowledgeBaseId: payload.knowledgeBaseId } : {}),
+    });
     return { ...result };
   },
 };
