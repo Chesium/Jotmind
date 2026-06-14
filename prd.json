@@ -280,8 +280,8 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Layered AI privacy policy: server/knowledge_base/user layers resolved strictest-policy-wins via resolveAiPolicy (packages/schemas/src/ai.ts; AI_POLICY_MODE_RANK off<local_only<remote_per_request<remote_always). Fresh installs default to No AI (DEFAULT_AI_POLICY, missing rows). remoteEmbeddings is separate per-layer consent (remoteEmbeddingsAllowed only when remote allowed AND every layer consents). Single ai_policies table (migration drizzle/0004) with partial unique indexes (one server row; unique scope+scopeId) + scope/mode/scope-null check constraints. ai-policy/store.ts (AiPolicyStore + dbAiPolicyStore, UPSERT + audit_events ai_policy.updated in same tx) and ai-policy/index.ts (createAiPolicyRouter at /api/ai, createAiPolicyKbRouter at /api/knowledge-bases/:kbId/ai/policy AFTER KB router). Routes: server GET any-authed/PUT admin+CSRF; /me self GET+PUT CSRF; /policy effective server+user; KB GET viewer/PUT KB-admin+CSRF, 404 for non-members. Confirmation+audit helpers (remoteCallConfirmationSchema AC5, buildRemoteAiAuditMetadata allowlist AC6 \u2014 never leaks prompts/content/keys/responses) ready for US-017/020. Web AiPolicySettings.tsx (<AiPolicySettings> server+user, <KbAiPolicy> KB-scoped) + api.ts helpers. Tests: 25 schema unit, 11 API router unit (in-memory stores), 3 DB integration (pass against live PG). pnpm verify green; Playwright browser verification confirmed setup->No-AI default->edit user/server->strictest effective."
     },
     {
       "id": "US-017",
