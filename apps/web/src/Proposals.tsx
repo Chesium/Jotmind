@@ -14,7 +14,7 @@ import {
   quickCapture,
   rejectProposal,
 } from './api.js';
-import { useInvalidate } from './invalidation.js';
+import { useInvalidate, useInvalidationEffect } from './invalidation.js';
 
 /**
  * Quick-capture + AI proposal review queue (US-017/US-018). Captured text is
@@ -47,6 +47,10 @@ export function Proposals({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: str
     setLastResult(null);
     void refresh();
   }, [refresh]);
+
+  // Refresh the pending queue when proposals change elsewhere — e.g. an import
+  // job completes and produces a pending proposal in another panel (US-040 AC3).
+  useInvalidationEffect(['proposals'], () => void refresh());
 
   async function submit(e: FormEvent) {
     e.preventDefault();

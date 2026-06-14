@@ -993,4 +993,130 @@ describe('App', () => {
       expect(screen.getByTestId(`network-node-${entityId}`)).toBeInTheDocument();
     });
   });
+
+  it('shows a proposal from a completed import without reload (US-040)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000120';
+    const jobId = '00000000-0000-0000-0000-000000000121';
+    const proposalId = '00000000-0000-0000-0000-000000000122';
+    const now = new Date().toISOString();
+    const proposal = {
+      id: proposalId,
+      knowledgeBaseId: kbId,
+      kind: 'import',
+      status: 'pending',
+      changes: {
+        items: [{ op: 'create_entity', ref: 'e1', type: 'Person', name: 'Ada Lovelace' }],
+      },
+      sourceNoteId: null,
+      sourceSourceId: null,
+      sourceExcerptId: null,
+      provider: null,
+      model: null,
+      reviewReason: null,
+      metadata: {},
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      reviewedBy: null,
+      reviewedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    // Simulates the background worker finishing the import job. While false the
+    // job is still running and no proposal exists; once flipped the job has
+    // succeeded and produced a pending proposal.
+    let importFinished = false;
+    const importJob = (status: string) => ({
+      id: jobId,
+      knowledgeBaseId: kbId,
+      type: 'import',
+      status,
+      attempts: 1,
+      maxAttempts: 3,
+      runAfter: now,
+      payload: {},
+      result: null,
+      failureReason: null,
+      ownerUserId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'owner@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes('/api/graph/projection/status')) {
+          return respond(200, { id: 'default', state: 'synchronized', pendingEvents: 0 });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/imports`)) {
+          return respond(200, { jobs: [importJob(importFinished ? 'succeeded' : 'running')] });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/jobs`)) {
+          return respond(200, { jobs: [importJob(importFinished ? 'succeeded' : 'running')] });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/audit`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/proposals`)) {
+          return respond(200, importFinished ? [proposal] : []);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/notes`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/sources`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/source-excerpts`)) return respond(200, []);
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Import Sync KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'owner',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    // The running import shows in the list; no proposal is pending yet.
+    await waitFor(() => {
+      expect(screen.getByTestId(`imports-job-${jobId}`)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId(`proposal-${proposalId}`)).not.toBeInTheDocument();
+
+    // The background worker finishes; refreshing import status (the clear refresh
+    // path) detects the completion and surfaces the new proposal in the Proposals
+    // panel without a page reload or KB reselect.
+    importFinished = true;
+    fireEvent.click(screen.getByTestId('imports-refresh'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`proposal-${proposalId}`)).toBeInTheDocument();
+    });
+  });
 });

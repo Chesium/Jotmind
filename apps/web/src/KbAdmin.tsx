@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   kbRoleSatisfies,
   portableKnowledgeBaseExportSchema,
@@ -15,6 +15,7 @@ import {
   markdownExportUrl,
   portableJsonExportUrl,
 } from './api.js';
+import { useInvalidationEffect } from './invalidation.js';
 
 /**
  * Admin/owner panel for a Knowledge Base (US-014 AC4). Surfaces the audit
@@ -30,28 +31,28 @@ export function KbAdmin({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: strin
 
   const canAdmin = kbRoleSatisfies(kb.role, 'admin');
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!canAdmin) return;
-    let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([listKbAudit(kb.id), listKbJobs(kb.id)])
-      .then(([auditEvents, jobRows]) => {
-        if (cancelled) return;
-        setEvents(auditEvents);
-        setJobs(jobRows);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Could not load admin data');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const [auditEvents, jobRows] = await Promise.all([listKbAudit(kb.id), listKbJobs(kb.id)]);
+      setEvents(auditEvents);
+      setJobs(jobRows);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not load admin data');
+    } finally {
+      setLoading(false);
+    }
   }, [kb.id, canAdmin]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Job/audit status must not stay permanently stale after selected-KB jobs
+  // change in another panel (e.g. an import enqueues or completes) — US-040 AC4.
+  useInvalidationEffect(['jobs', 'audit'], () => void load());
 
   if (!canAdmin) return null;
 
