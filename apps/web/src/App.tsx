@@ -812,6 +812,12 @@ function Entities({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
     void refresh();
   }, [refresh]);
 
+  // Entities created elsewhere (e.g. accepting a proposal) must appear here
+  // without a reload (US-039 AC2).
+  useInvalidationEffect(['entities'], () => {
+    void refresh();
+  });
+
   function buildPayload(): {
     type: string;
     name: string;
@@ -1513,8 +1519,10 @@ function Capture({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   // Claim create/update/delete (e.g. in the Claims panel) must refresh the
   // citation claim dropdowns here without a reload (US-038). refresh() reloads
   // claims (plus notes/sources/excerpts), so new claims appear and deleted ones
-  // disappear as selectable citation targets.
-  useInvalidationEffect(['claims'], () => {
+  // disappear as selectable citation targets. Notes/sources created elsewhere
+  // (e.g. accepting a proposal) must also appear here without a reload (US-039
+  // AC4).
+  useInvalidationEffect(['claims', 'notes', 'sources', 'sourceExcerpts'], () => {
     void refresh();
   });
 

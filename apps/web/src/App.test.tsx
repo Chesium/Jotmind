@@ -867,4 +867,130 @@ describe('App', () => {
       ).toBeInTheDocument();
     });
   });
+
+  it('shows entities/claims/graph nodes from an accepted proposal without reload (US-039)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000110';
+    const proposalId = '00000000-0000-0000-0000-000000000111';
+    const entityId = '00000000-0000-0000-0000-000000000112';
+    const now = new Date().toISOString();
+    const proposal = {
+      id: proposalId,
+      knowledgeBaseId: kbId,
+      kind: 'ai_extraction',
+      status: 'pending',
+      changes: {
+        items: [{ op: 'create_entity', ref: 'e1', type: 'Person', name: 'Alan Turing' }],
+      },
+      sourceNoteId: null,
+      sourceSourceId: null,
+      sourceExcerptId: null,
+      provider: null,
+      model: null,
+      reviewReason: null,
+      metadata: {},
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      reviewedBy: null,
+      reviewedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const createdEntity = {
+      id: entityId,
+      knowledgeBaseId: kbId,
+      type: 'Person',
+      name: 'Alan Turing',
+      aliases: [],
+      description: null,
+      tags: [],
+      properties: {},
+      schemaVersionId: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      createdAt: now,
+      updatedAt: now,
+    };
+    let accepted = false;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes('/api/graph/projection/status')) {
+          return respond(200, { id: 'default', state: 'synchronized', pendingEvents: 0 });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/proposals/${proposalId}/accept`)) {
+          accepted = true;
+          return respond(200, {
+            proposal: { ...proposal, status: 'accepted' },
+            createdEntityIds: [entityId],
+            createdClaimIds: [],
+            createdNoteIds: [],
+            createdSourceIds: [],
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/proposals`)) {
+          return respond(200, accepted ? [] : [proposal]);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/entities`)) {
+          return respond(200, accepted ? [createdEntity] : []);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/claims`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/notes`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/sources`)) return respond(200, []);
+        if (url.includes(`/api/knowledge-bases/${kbId}/source-excerpts`)) return respond(200, []);
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Proposal Sync KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    // The pending proposal renders; the entity it would create is not yet shown.
+    await waitFor(() => {
+      expect(screen.getByTestId(`proposal-accept-${proposalId}`)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId(`network-node-${entityId}`)).not.toBeInTheDocument();
+
+    // Accept the proposal.
+    fireEvent.click(screen.getByTestId(`proposal-accept-${proposalId}`));
+
+    // Without a page reload or KB reselect, the created entity appears in the
+    // graph network view (GraphViews refreshes via the invalidation bus).
+    await waitFor(() => {
+      expect(screen.getByTestId(`network-node-${entityId}`)).toBeInTheDocument();
+    });
+  });
 });

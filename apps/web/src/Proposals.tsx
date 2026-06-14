@@ -14,6 +14,7 @@ import {
   quickCapture,
   rejectProposal,
 } from './api.js';
+import { useInvalidate } from './invalidation.js';
 
 /**
  * Quick-capture + AI proposal review queue (US-017/US-018). Captured text is
@@ -211,6 +212,7 @@ function ProposalItem({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const invalidate = useInvalidate();
 
   function toggle(i: number) {
     setSelected((prev) => {
@@ -235,9 +237,24 @@ function ProposalItem({
   }
 
   function accept(itemIndexes?: number[]) {
-    void run(() =>
-      acceptProposal(kbId, proposal.id, itemIndexes ? { itemIndexes } : {}, csrfToken),
-    );
+    void run(async () => {
+      await acceptProposal(kbId, proposal.id, itemIndexes ? { itemIndexes } : {}, csrfToken);
+      // Accepting creates canonical entities/claims/notes/sources, so refresh
+      // every sibling panel that reads graph data plus derived AI surfaces, and
+      // remove this proposal from pending queues (US-039 AC1).
+      invalidate([
+        'proposals',
+        'entities',
+        'claims',
+        'notes',
+        'sources',
+        'sourceExcerpts',
+        'graphViews',
+        'searchResults',
+        'answers',
+        'audit',
+      ]);
+    });
   }
 
   function reject() {
