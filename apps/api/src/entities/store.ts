@@ -30,6 +30,8 @@ export interface UpdateEntityFields {
   description?: string | null;
   tags?: string[];
   properties?: Record<string, unknown>;
+  /** Active schema version the record was validated against (US-027 AC5). */
+  schemaVersionId?: string | null;
 }
 
 export interface UpdateEntityInput {
@@ -185,6 +187,7 @@ export const dbEntityStore: EntityStore = {
       if (fields.description !== undefined) set.description = fields.description;
       if (fields.tags !== undefined) set.tags = fields.tags;
       if (fields.properties !== undefined) set.properties = fields.properties;
+      if (fields.schemaVersionId !== undefined) set.schemaVersionId = fields.schemaVersionId;
 
       const rows = await tx
         .update(entities)

@@ -26,6 +26,7 @@ import {
 import { createJobsRouter, type JobStore } from './jobs/index.js';
 import { createSearchRouter, type SearchStore } from './search/index.js';
 import { createRuleRouter, type RuleRunStore, type RuleStore } from './rules/index.js';
+import { createSchemaRouter, dbSchemaStore, type SchemaStore } from './schema-defs/index.js';
 import { createEmbeddingsRouter, type EmbeddingStore } from './embeddings/index.js';
 import {
   createAiPolicyKbRouter,
@@ -171,6 +172,12 @@ export interface AppOptions {
    * valid-time predicates) and records rule runs + inferred results.
    */
   ruleRunStore?: RuleRunStore;
+  /**
+   * Custom schema definition store (US-027). Injectable for unit tests. Defaults
+   * to the PostgreSQL-backed store. Also used by the entity/claim routers to
+   * validate records against active schema versions before save.
+   */
+  schemaStore?: SchemaStore;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -195,13 +202,29 @@ export function createApp(options: AppOptions = {}): Express {
     '/api/knowledge-bases',
     createKnowledgeBaseRouter({ store: options.kbStore, authStore, jobStore: options.jobStore }),
   );
+  const schemaStore = options.schemaStore ?? dbSchemaStore;
+  app.use(
+    '/api/knowledge-bases/:kbId/schema',
+    createSchemaRouter({ store: schemaStore, kbStore: options.kbStore, authStore }),
+  );
   app.use(
     '/api/knowledge-bases/:kbId/entities',
-    createEntityRouter({ store: options.entityStore, kbStore: options.kbStore, authStore }),
+    createEntityRouter({
+      store: options.entityStore,
+      kbStore: options.kbStore,
+      authStore,
+      schemaStore,
+    }),
   );
   app.use(
     '/api/knowledge-bases/:kbId/claims',
-    createClaimRouter({ store: options.claimStore, kbStore: options.kbStore, authStore }),
+    createClaimRouter({
+      store: options.claimStore,
+      kbStore: options.kbStore,
+      authStore,
+      schemaStore,
+      entityStore: options.entityStore,
+    }),
   );
   app.use(
     '/api/knowledge-bases/:kbId/notes',

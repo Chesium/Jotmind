@@ -27,6 +27,8 @@ import {
   ruleRunListSchema,
   ruleRunResultSchema,
   ruleValidationResultSchema,
+  schemaDefinitionListSchema,
+  schemaDefinitionSchema,
   publicJobSchema,
   publicUserSchema,
   setupStatusSchema,
@@ -70,6 +72,8 @@ import {
   type Note,
   type PublicJob,
   type PublicUser,
+  type CreateSchemaDefinition,
+  type SchemaDefinition,
   type SearchQuery,
   type SearchResponse,
   type SetupStatus,
@@ -903,4 +907,29 @@ export async function acceptInferredResult(
   );
   if (!res.ok) throw new Error(await errorMessage(res));
   return acceptInferredResultResultSchema.parse(await res.json());
+}
+
+/** List custom schema definitions in a Knowledge Base (US-027, viewer+). */
+export async function listSchemaDefinitions(knowledgeBaseId: string): Promise<SchemaDefinition[]> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return schemaDefinitionListSchema.parse(await res.json());
+}
+
+/** Create a custom schema definition + its initial active version (US-027, editor+). */
+export async function createSchemaDefinition(
+  knowledgeBaseId: string,
+  body: CreateSchemaDefinition,
+  csrfToken: string,
+): Promise<SchemaDefinition> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return schemaDefinitionSchema.parse(await res.json());
 }

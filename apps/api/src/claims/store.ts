@@ -47,6 +47,8 @@ export interface UpdateClaimFields {
   validStart?: string | null;
   validEnd?: string | null;
   properties?: Record<string, unknown>;
+  /** Active schema version the record was validated against (US-027 AC5). */
+  schemaVersionId?: string | null;
   /** When present, REPLACES the full argument set (lets argument roles change). */
   arguments?: ClaimArgumentInput[];
 }
@@ -230,6 +232,7 @@ export const dbClaimStore: ClaimStore = {
         set.validEnd = fields.validEnd ? new Date(fields.validEnd) : null;
       }
       if (fields.properties !== undefined) set.properties = fields.properties;
+      if (fields.schemaVersionId !== undefined) set.schemaVersionId = fields.schemaVersionId;
 
       const rows = await tx
         .update(claims)

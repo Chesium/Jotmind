@@ -903,6 +903,58 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
     rebuilding-unavailable. AGE persists between test runs — call
     `ageProjector.prepareRebuild()` in setup/teardown to clear it.
 
+## Custom schemas (US-027)
+
+- Advanced users define custom **entity types** (`kind:'entity_type'`) and **claim
+  predicates** (`kind:'claim_predicate'`) so JotMind adapts to new domains. The
+  `schema_definitions` + `schema_versions` tables already existed from US-005 — NO
+  migration. A definition is the stable conceptual type (`name`); concrete
+  validation rules live in a **versioned** `schema_versions` row. Entity types
+  carry a flat `propertySchema` (validated by the existing
+  `validateCustomProperties`); claim predicates carry a `spec` of allowed
+  argument roles + compatible entity types.
+- `apps/api/src/schema-defs/`: `store.ts` (`SchemaStore` + `dbSchemaStore`) and
+  `index.ts` (`createSchemaRouter`). Mounted at
+  **`/api/knowledge-bases/:kbId/schema`** (`mergeParams:true`, AFTER the KB
+  router). `createApp` seam: `schemaStore`. Schemas are **NOT graph projection
+  targets** — `createDefinition` records an `audit_events` (`schema.created`) row
+  only (no `graph_outbox`), mirroring the rules store. Create inserts the
+  definition + a v1 active version in one tx; `(kb, kind, name)` is unique (return
+  `{ok:false,reason:'duplicate_name'}` → 409). Routes: `GET /` + `GET /export` +
+  `GET /:defId` (viewer); `POST /` (editor + CSRF). `GET /export` is the portable
+  JSON export (US-027 AC4; US-032 builds the full KB export).
+- **Validation + stamping (AC3/AC5) happens in the entity/claim ROUTERS, not the
+  stores.** Both routers gained a `schemaStore` seam (the claim router also takes
+  `entityStore` to resolve entity types for compatible-type checks). `createApp`
+  resolves `schemaStore = options.schemaStore ?? dbSchemaStore` and passes it to
+  the entity/claim routers. Use the shared helpers `checkEntityAgainstSchema` /
+  `checkClaimAgainstSchema` (exported from `schema-defs/index.ts`): they look up
+  the active version by `name`/`predicate`, validate (400 + `issues` on failure),
+  and return the `schemaVersionId` to stamp. **No custom schema for that
+  type/predicate ⇒ unconstrained (`schemaVersionId` null).** Validation runs on
+  BOTH create and update; the update path loads the existing record to fill the
+  unchanged half of the type/properties (entities) or predicate/arguments
+  (claims). `UpdateEntityFields`/`UpdateClaimFields` gained `schemaVersionId`.
+- **GOTCHA — keep DB-free unit tests green:** the entity/claim routers do NOT
+  default `schemaStore` (skip validation when absent), but `createApp` always
+  injects `dbSchemaStore`. So unit tests that build the app via `createApp` and
+  POST entities/claims (`entities.test.ts`, `claims.test.ts`) MUST inject a
+  schema store — use the reusable `createMemorySchemaStore()` exported from
+  `schema-defs/schema-defs.test.ts` (returns no constraints by default; seed it
+  with `createDefinition` to test validation).
+- Shared shapes in `@jotmind/schemas` `schema-defs.ts`: `schemaArgumentRoleSchema`,
+  `predicateSpecSchema`, `schemaVersionSchema`, `schemaDefinitionSchema`,
+  `createSchemaDefinitionSchema`, `schemaExportSchema`, and the validation hooks
+  `validateEntityProperties`/`validatePredicateArguments` (shared so API + web
+  run the SAME logic). Reuse `schemaDefinitionKindSchema`/`SchemaDefinitionKind`
+  from `graph.ts` — do NOT redefine them. Web: `apps/web/src/SchemaDefinitions.tsx`
+  (`<SchemaDefinitions>`, rendered after `<Search>` for the selected KB) lists
+  entity types/predicates + an editor-only create form (property schema / spec
+  entered as JSON). API helpers in `api.ts`: `listSchemaDefinitions`/
+  `createSchemaDefinition`. Testids: `schema-definitions`, `schema-create-form`,
+  `schema-kind`, `schema-name`, `schema-display-name`, `schema-spec`,
+  `schema-submit`, `schema-def-<id>`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

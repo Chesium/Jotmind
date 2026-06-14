@@ -12,6 +12,7 @@ import type { EntityRow } from '../db/schema.js';
 import { asyncHandler, requireAuth, requireCsrf, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
 import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
+import { checkEntityAgainstSchema, type SchemaStore } from '../schema-defs/index.js';
 import { dbEntityStore, type EntityStore } from './store.js';
 
 export type { EntityStore } from './store.js';
@@ -38,6 +39,12 @@ export interface EntityRouterOptions {
   store?: EntityStore;
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
+  /**
+   * Custom schema store (US-027). When provided, entity writes are validated
+   * against the active entity-type schema and stamped with its
+   * `schemaVersionId` before save. Omitted in unit tests that have no DB.
+   */
+  schemaStore?: SchemaStore;
 }
 
 /**
@@ -51,6 +58,7 @@ export function createEntityRouter(options: EntityRouterOptions = {}): Router {
   const store = options.store ?? dbEntityStore;
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
+  const schemaStore = options.schemaStore;
   const router = Router({ mergeParams: true });
   const authed = requireAuth(authStore);
 
@@ -102,6 +110,20 @@ export function createEntityRouter(options: EntityRouterOptions = {}): Router {
         res.status(400).json({ error: 'Invalid entity details' });
         return;
       }
+      let schemaVersionId: string | undefined;
+      if (schemaStore) {
+        const check = await checkEntityAgainstSchema(
+          schemaStore,
+          req.params.kbId as string,
+          parsed.data.type,
+          parsed.data.properties ?? {},
+        );
+        if (!check.ok) {
+          res.status(400).json({ error: 'Entity does not match its schema', issues: check.issues });
+          return;
+        }
+        schemaVersionId = check.schemaVersionId;
+      }
       const entity = await store.createEntity({
         knowledgeBaseId: req.params.kbId as string,
         type: parsed.data.type,
@@ -110,6 +132,7 @@ export function createEntityRouter(options: EntityRouterOptions = {}): Router {
         description: parsed.data.description,
         tags: parsed.data.tags,
         properties: parsed.data.properties,
+        schemaVersionId,
         actorUserId: ctx.user.id,
       });
       res.status(201).json(toEntity(entity));
@@ -219,11 +242,38 @@ export function createEntityRouter(options: EntityRouterOptions = {}): Router {
         res.status(400).json({ error: 'Invalid entity details' });
         return;
       }
+      const fields: typeof parsed.data & { schemaVersionId?: string | null } = { ...parsed.data };
+      // Re-validate against the active schema whenever the type or properties
+      // change, using the existing record to fill in the unchanged half.
+      if (schemaStore && (parsed.data.type !== undefined || parsed.data.properties !== undefined)) {
+        const existing = await store.getEntity(
+          req.params.kbId as string,
+          req.params.entityId as string,
+        );
+        if (existing) {
+          const effectiveType = parsed.data.type ?? existing.type;
+          const effectiveProps =
+            parsed.data.properties ?? (existing.properties as Record<string, unknown>);
+          const check = await checkEntityAgainstSchema(
+            schemaStore,
+            req.params.kbId as string,
+            effectiveType,
+            effectiveProps,
+          );
+          if (!check.ok) {
+            res
+              .status(400)
+              .json({ error: 'Entity does not match its schema', issues: check.issues });
+            return;
+          }
+          fields.schemaVersionId = check.schemaVersionId ?? null;
+        }
+      }
       const entity = await store.updateEntity({
         knowledgeBaseId: req.params.kbId as string,
         id: req.params.entityId as string,
         actorUserId: ctx.user.id,
-        fields: parsed.data,
+        fields,
       });
       if (!entity) {
         res.status(404).json({ error: 'Entity not found' });

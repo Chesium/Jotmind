@@ -13,6 +13,7 @@ import type {
   MergeEntitiesInput,
   UpdateEntityInput,
 } from './store.js';
+import { createMemorySchemaStore } from '../schema-defs/schema-defs.test.js';
 
 /** Minimal in-memory AuthStore (mirrors kb/kb.test.ts) for setup/login. */
 function createMemoryAuthStore(): AuthStore {
@@ -275,13 +276,15 @@ describe('entities API', () => {
   let authStore: AuthStore;
   let kbStore: ReturnType<typeof createMemoryKbStore>;
   let entityStore: ReturnType<typeof createMemoryEntityStore>;
+  let schemaStore: ReturnType<typeof createMemorySchemaStore>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     authStore = createMemoryAuthStore();
     kbStore = createMemoryKbStore();
     entityStore = createMemoryEntityStore();
-    app = createApp({ authStore, kbStore, entityStore });
+    schemaStore = createMemorySchemaStore();
+    app = createApp({ authStore, kbStore, entityStore, schemaStore });
   });
 
   it('requires authentication to list', async () => {
@@ -351,6 +354,48 @@ describe('entities API', () => {
       .send({ type: 'Person', name: 'Ada' });
 
     expect(res.status).toBe(403);
+  });
+
+  it('validates against an active entity-type schema and stamps schemaVersionId (US-027 AC3/AC5)', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const def = await schemaStore.createDefinition({
+      knowledgeBaseId: KB_ID,
+      kind: 'entity_type',
+      name: 'Person',
+      displayName: 'Person',
+      propertySchema: { born: { type: 'number', required: true } },
+      actorUserId: userId,
+    });
+    const versionId = def.ok ? def.definition.activeVersion?.id : undefined;
+
+    // Missing the required custom property -> rejected before save.
+    const bad = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities`)
+      .set('x-csrf-token', csrfToken)
+      .send({ type: 'Person', name: 'Ada Lovelace', properties: {} });
+    expect(bad.status).toBe(400);
+    expect(bad.body.issues?.[0]?.field).toBe('born');
+    expect(entityStore.outbox).toHaveLength(0);
+
+    // Valid payload -> saved + schemaVersionId stamped on the record.
+    const ok = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities`)
+      .set('x-csrf-token', csrfToken)
+      .send({ type: 'Person', name: 'Ada Lovelace', properties: { born: 1815 } });
+    expect(ok.status).toBe(201);
+    expect(ok.body.schemaVersionId).toBe(versionId);
+  });
+
+  it('leaves entities without a custom schema unconstrained', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/entities`)
+      .set('x-csrf-token', csrfToken)
+      .send({ type: 'Gadget', name: 'Whatsit', properties: { anything: true } });
+    expect(res.status).toBe(201);
+    expect(res.body.schemaVersionId).toBeNull();
   });
 
   it('forbids viewers from creating entities but allows reads', async () => {

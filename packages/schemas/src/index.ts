@@ -9,5 +9,6 @@ export * from './jobs.js';
 export * from './knowledge-base.js';
 export * from './proposals.js';
 export * from './rules.js';
+export * from './schema-defs.js';
 export * from './search.js';
 export * from './utils.js';

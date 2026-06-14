@@ -52,6 +52,7 @@ import { KbAdmin } from './KbAdmin.js';
 import { AiPolicySettings, KbAiPolicy } from './AiPolicySettings.js';
 import { Proposals } from './Proposals.js';
 import { Rules } from './Rules.js';
+import { SchemaDefinitions } from './SchemaDefinitions.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -320,6 +321,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       {selectedKb && <Answers kb={selectedKb} />}
       {selectedKb && <GraphViews kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Search kb={selectedKb} />}
+      {selectedKb && <SchemaDefinitions kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Claims kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Capture kb={selectedKb} csrfToken={csrfToken} />}

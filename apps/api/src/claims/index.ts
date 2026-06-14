@@ -10,6 +10,8 @@ import {
 import { asyncHandler, requireAuth, requireCsrf, type AuthContext } from '../auth/index.js';
 import { dbAuthStore, type AuthStore } from '../auth/store.js';
 import { dbKnowledgeBaseStore, type KnowledgeBaseStore } from '../kb/store.js';
+import { checkClaimAgainstSchema, type SchemaStore } from '../schema-defs/index.js';
+import type { EntityStore } from '../entities/store.js';
 import { dbClaimStore, type ClaimStore, type ClaimWithArguments } from './store.js';
 
 export type { ClaimStore } from './store.js';
@@ -44,6 +46,14 @@ export interface ClaimRouterOptions {
   store?: ClaimStore;
   kbStore?: KnowledgeBaseStore;
   authStore?: AuthStore;
+  /**
+   * Custom schema store (US-027). When provided (with `entityStore`), claim
+   * writes are validated against the active claim-predicate schema and stamped
+   * with its `schemaVersionId` before save. Omitted in unit tests without a DB.
+   */
+  schemaStore?: SchemaStore;
+  /** Resolves entity types for compatible-entity-type validation (US-027 AC2). */
+  entityStore?: EntityStore;
 }
 
 /**
@@ -57,8 +67,28 @@ export function createClaimRouter(options: ClaimRouterOptions = {}): Router {
   const store = options.store ?? dbClaimStore;
   const kbStore = options.kbStore ?? dbKnowledgeBaseStore;
   const authStore = options.authStore ?? dbAuthStore;
+  const schemaStore = options.schemaStore;
+  const entityStore = options.entityStore;
   const router = Router({ mergeParams: true });
   const authed = requireAuth(authStore);
+
+  /** Resolve a claim's `schemaVersionId` after validating its arguments (US-027). */
+  async function validateClaimArguments(
+    kbId: string,
+    predicate: string,
+    args: Array<{
+      role: string;
+      argumentKind: 'entity' | 'literal';
+      entityId?: string | undefined;
+    }>,
+  ) {
+    if (!schemaStore) return { ok: true as const, schemaVersionId: undefined };
+    return checkClaimAgainstSchema(schemaStore, kbId, predicate, args, async (entityId) => {
+      if (!entityStore) return null;
+      const entity = await entityStore.getEntity(kbId, entityId);
+      return entity?.type ?? null;
+    });
+  }
 
   /** Require the caller to have at least `min` role on the `:kbId` Knowledge Base. */
   function requireKbRole(min: KbRole): RequestHandler {
@@ -108,6 +138,19 @@ export function createClaimRouter(options: ClaimRouterOptions = {}): Router {
         res.status(400).json({ error: 'Invalid claim details' });
         return;
       }
+      const check = await validateClaimArguments(
+        req.params.kbId as string,
+        parsed.data.predicate,
+        parsed.data.arguments.map((arg) => ({
+          role: arg.role,
+          argumentKind: arg.argumentKind,
+          entityId: arg.entityId,
+        })),
+      );
+      if (!check.ok) {
+        res.status(400).json({ error: 'Claim does not match its schema', issues: check.issues });
+        return;
+      }
       const claim = await store.createClaim({
         knowledgeBaseId: req.params.kbId as string,
         predicate: parsed.data.predicate,
@@ -116,6 +159,7 @@ export function createClaimRouter(options: ClaimRouterOptions = {}): Router {
         validStart: parsed.data.validStart,
         validEnd: parsed.data.validEnd,
         properties: parsed.data.properties,
+        schemaVersionId: check.schemaVersionId,
         arguments: parsed.data.arguments.map((arg) => ({
           role: arg.role,
           argumentKind: arg.argumentKind,
@@ -156,12 +200,45 @@ export function createClaimRouter(options: ClaimRouterOptions = {}): Router {
         res.status(400).json({ error: 'Invalid claim details' });
         return;
       }
+      let schemaVersionId: string | undefined | null;
+      // Re-validate against the active schema whenever the predicate or argument
+      // set changes, using the existing claim to fill in the unchanged half.
+      if (
+        schemaStore &&
+        (parsed.data.predicate !== undefined || parsed.data.arguments !== undefined)
+      ) {
+        const existing = await store.getClaim(
+          req.params.kbId as string,
+          req.params.claimId as string,
+        );
+        if (existing) {
+          const effectivePredicate = parsed.data.predicate ?? existing.predicate;
+          const effectiveArgs = (parsed.data.arguments ?? existing.arguments).map((arg) => ({
+            role: arg.role,
+            argumentKind: arg.argumentKind as 'entity' | 'literal',
+            entityId: arg.entityId ?? undefined,
+          }));
+          const check = await validateClaimArguments(
+            req.params.kbId as string,
+            effectivePredicate,
+            effectiveArgs,
+          );
+          if (!check.ok) {
+            res
+              .status(400)
+              .json({ error: 'Claim does not match its schema', issues: check.issues });
+            return;
+          }
+          schemaVersionId = check.schemaVersionId ?? null;
+        }
+      }
       const claim = await store.updateClaim({
         knowledgeBaseId: req.params.kbId as string,
         id: req.params.claimId as string,
         actorUserId: ctx.user.id,
         fields: {
           ...parsed.data,
+          ...(schemaVersionId !== undefined ? { schemaVersionId } : {}),
           arguments: parsed.data.arguments?.map((arg) => ({
             role: arg.role,
             argumentKind: arg.argumentKind,

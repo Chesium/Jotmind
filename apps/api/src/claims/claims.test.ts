@@ -13,6 +13,7 @@ import type {
   DeleteClaimInput,
   UpdateClaimInput,
 } from './store.js';
+import { createMemorySchemaStore } from '../schema-defs/schema-defs.test.js';
 
 /** Minimal in-memory AuthStore (mirrors entities/entities.test.ts) for setup/login. */
 function createMemoryAuthStore(): AuthStore {
@@ -218,13 +219,15 @@ describe('claims API', () => {
   let authStore: AuthStore;
   let kbStore: ReturnType<typeof createMemoryKbStore>;
   let claimStore: ReturnType<typeof createMemoryClaimStore>;
+  let schemaStore: ReturnType<typeof createMemorySchemaStore>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     authStore = createMemoryAuthStore();
     kbStore = createMemoryKbStore();
     claimStore = createMemoryClaimStore();
-    app = createApp({ authStore, kbStore, claimStore });
+    schemaStore = createMemorySchemaStore();
+    app = createApp({ authStore, kbStore, claimStore, schemaStore });
   });
 
   it('requires authentication to list', async () => {
@@ -275,6 +278,79 @@ describe('claims API', () => {
       actorUserId: userId,
       targetId: res.body.id,
     });
+  });
+
+  it('validates against an active claim-predicate schema and stamps schemaVersionId (US-027 AC2/AC3/AC5)', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const def = await schemaStore.createDefinition({
+      knowledgeBaseId: KB_ID,
+      kind: 'claim_predicate',
+      name: 'met',
+      displayName: 'met',
+      spec: {
+        argumentRoles: [
+          { name: 'subject', required: true },
+          { name: 'object', required: true },
+        ],
+      },
+      actorUserId: userId,
+    });
+    const versionId = def.ok ? def.definition.activeVersion?.id : undefined;
+
+    // Missing the required `object` role -> rejected before save.
+    const bad = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/claims`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        predicate: 'met',
+        arguments: [{ role: 'subject', argumentKind: 'entity', entityId: ENTITY_A }],
+      });
+    expect(bad.status).toBe(400);
+    expect(bad.body.issues?.[0]?.field).toBe('object');
+    expect(claimStore.outbox).toHaveLength(0);
+
+    // An undeclared role -> rejected.
+    const undeclared = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/claims`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        predicate: 'met',
+        arguments: [
+          { role: 'subject', argumentKind: 'entity', entityId: ENTITY_A },
+          { role: 'object', argumentKind: 'entity', entityId: ENTITY_B },
+          { role: 'bogus', argumentKind: 'entity', entityId: ENTITY_A },
+        ],
+      });
+    expect(undeclared.status).toBe(400);
+
+    // Valid args -> saved + schemaVersionId stamped.
+    const ok = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/claims`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        predicate: 'met',
+        arguments: [
+          { role: 'subject', argumentKind: 'entity', entityId: ENTITY_A },
+          { role: 'object', argumentKind: 'entity', entityId: ENTITY_B },
+        ],
+      });
+    expect(ok.status).toBe(201);
+    expect(ok.body.schemaVersionId).toBe(versionId);
+  });
+
+  it('leaves claims without a custom predicate schema unconstrained', async () => {
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    kbStore.setRole(KB_ID, userId, 'editor');
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/claims`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        predicate: 'unconstrained',
+        arguments: [{ role: 'whatever', argumentKind: 'entity', entityId: ENTITY_A }],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.schemaVersionId).toBeNull();
   });
 
   it('rejects creation without a predicate', async () => {
