@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express, { type Express } from 'express';
 import cookieParser from 'cookie-parser';
 import {
@@ -42,6 +43,7 @@ import {
   type ProposalStore,
 } from './proposals/index.js';
 import { resolveExtractorFromEnv, type GraphExtractor } from './extraction/index.js';
+import { createCorsMiddleware, parseAllowedOrigins } from './cors.js';
 import {
   createCommandRouter,
   resolveCommandInterpreterFromEnv,
@@ -181,6 +183,20 @@ export interface AppOptions {
    * validate records against active schema versions before save.
    */
   schemaStore?: SchemaStore;
+  /**
+   * Exact-match CORS allowlist (US-033 AC5). Defaults to
+   * `parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS)`. NEVER allows all
+   * origins — an empty list means cross-origin requests are rejected (the
+   * single-origin deployment where the API serves the web assets needs none).
+   */
+  allowedOrigins?: string[];
+  /**
+   * Directory of built web assets to serve for a single-origin deployment
+   * (US-033 AC2). Defaults to `process.env.WEB_DIST_PATH`. When set, the API
+   * serves the static files plus an SPA fallback (non-`/api` routes return
+   * `index.html`); when unset, the API serves JSON only.
+   */
+  webDistPath?: string;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -188,7 +204,13 @@ export function createApp(options: AppOptions = {}): Express {
   const authStore = options.authStore ?? dbAuthStore;
   const projector =
     options.projector ?? (process.env.GRAPH_PROJECTOR === 'stub' ? stubProjector : ageProjector);
+  const allowedOrigins =
+    options.allowedOrigins ?? parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
+  const webDistPath = options.webDistPath ?? process.env.WEB_DIST_PATH;
   const app = express();
+  // Strict, deny-by-default CORS (US-033 AC5). Runs before routes so preflight
+  // requests are answered without hitting auth middleware.
+  app.use(createCorsMiddleware({ allowedOrigins }));
   app.use(express.json());
   app.use(cookieParser());
 
@@ -416,6 +438,25 @@ export function createApp(options: AppOptions = {}): Express {
       }
     })();
   });
+
+  // Unknown /api routes return JSON 404 — this must come BEFORE the static/SPA
+  // fallback below so the fallback never swallows an unmatched API request.
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+
+  // Optionally serve the built web assets for a single-origin deployment
+  // (US-033 AC2). Non-`/api` paths fall back to index.html so client-side
+  // routing works on hard refresh.
+  if (webDistPath) {
+    const resolvedWebDist = path.resolve(webDistPath);
+    app.use(express.static(resolvedWebDist));
+    app.get(/^\/(?!api(?:\/|$)).*/, (_req, res, next) => {
+      res.sendFile('index.html', { root: resolvedWebDist }, (err) => {
+        if (err) next(err);
+      });
+    });
+  }
 
   return app;
 }

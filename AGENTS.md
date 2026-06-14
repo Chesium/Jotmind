@@ -1098,6 +1098,45 @@ knowledge_bases CASCADE` (as in integration tests) WIPES it; `get()` returns a
   text/Markdown form + a CSV→entities form + a recent-imports status list;
   `api.ts` `createImport`/`listImports`.
 
+## Deployment & operations (US-033)
+
+- **The production API runs via `tsx`, NOT `node dist/server.js`.** Because
+  `@jotmind/schemas` exports TS SOURCE (`"import": "./src/index.ts"`), the
+  compiled `apps/api/dist/server.js` fails at runtime with
+  `ERR_UNKNOWN_FILE_EXTENSION ".ts"`. The `start` script is `tsx src/server.ts`
+  (same runtime as `dev`/`worker`/`db:migrate`). Don't "fix" this by changing
+  the schemas exports to dist — Vite/Vitest/tsc/tsx all resolve source with no
+  build step, and switching would destabilize the green `pnpm verify`.
+- **Single-origin serving (AC2):** set `WEB_DIST_PATH` (or `createApp({webDistPath})`)
+  to serve the built `apps/web/dist` from the API. In `app.ts`, AFTER all `/api`
+  routers + `/api/health` there is an explicit `app.use('/api', …404 JSON)` so
+  unknown API routes return `{error:'Not found'}` and are NEVER swallowed by the
+  SPA fallback; THEN `express.static` + a regex SPA fallback
+  `/^\/(?!api(?:\/|$)).*/` → `index.html`. Order matters.
+- **CORS is deny-by-default (AC5)** — `apps/api/src/cors.ts`:
+  `parseAllowedOrigins(env)` never returns `*` (empty by default);
+  `createCorsMiddleware` only echoes `Access-Control-Allow-Origin` for an EXACT
+  allowlisted origin, sets `Allow-Credentials: true` (required for cookie auth;
+  the `*` wildcard is forbidden with credentials), and answers preflight with
+  204 (allowed) / 403 (denied). Wired before routes via `createApp({allowedOrigins})`
+  default `CORS_ALLOWED_ORIGINS`. Same-origin deploys need NO allowlist.
+- **Configurable web API base URL (AC3):** `apps/web/src/api.ts` reads
+  `import.meta.env.VITE_API_BASE_URL` (BUILD-time) into `API_BASE_URL`; all
+  fetches go through `apiFetch(path)`/`apiUrl(path)` which prepend it (empty =
+  relative `/api`, the Vite-proxy/single-origin default). Add new web API calls
+  via `apiFetch`, not bare `fetch`.
+- **Binding (AC4):** API defaults to `HOST=127.0.0.1` (loopback); LAN/public is
+  an explicit opt-in (`HOST=0.0.0.0`, or `API_BIND` for the Compose port map).
+  `server.ts` logs a security warning on non-loopback bind. All data routes
+  already require auth + CSRF (US-014).
+- **Reference container:** `infra/api/Dockerfile` (multi-stage node:18 + corepack
+  pnpm, builds web assets, runs via tsx) + the `api` service in
+  `docker-compose.yml` (depends_on db healthy, runs `db:migrate` then `start`,
+  `WORKER_INLINE=true`, port published to loopback by default). `.dockerignore`
+  keeps host `node_modules`/`dist` out of the build context. Stateless — all
+  state is in PostgreSQL. Docs: `docs/deployment.md` (local/LAN/VPS modes +
+  public-internet hardening checklist), linked from README.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

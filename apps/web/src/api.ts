@@ -100,6 +100,24 @@ import {
   portableImportResultSchema,
 } from '@jotmind/schemas';
 
+/**
+ * Base URL for the API, configurable at build time (US-033 AC3) so the web app
+ * can be deployed as static assets pointing at an API on a different origin.
+ * Empty by default for the single-origin / Vite-proxy setup, where all requests
+ * use relative `/api/...` paths. Trailing slashes are stripped.
+ */
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+
+/** Build a full API URL by prefixing the configured base URL. */
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
+/** `fetch` against the API, honoring the configurable base URL. */
+function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(apiUrl(path), init);
+}
+
 async function errorMessage(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { error?: string };
@@ -111,7 +129,7 @@ async function errorMessage(res: Response): Promise<string> {
 
 /** Current authenticated session, or null when not logged in. */
 export async function getMe(): Promise<AuthState | null> {
-  const res = await fetch('/api/auth/me', { credentials: 'include' });
+  const res = await apiFetch('/api/auth/me', { credentials: 'include' });
   if (res.status === 401) return null;
   if (!res.ok) throw new Error(await errorMessage(res));
   return authStateSchema.parse(await res.json());
@@ -119,13 +137,13 @@ export async function getMe(): Promise<AuthState | null> {
 
 /** Whether the server still needs first-run admin setup. */
 export async function getSetupStatus(): Promise<SetupStatus> {
-  const res = await fetch('/api/auth/setup-status', { credentials: 'include' });
+  const res = await apiFetch('/api/auth/setup-status', { credentials: 'include' });
   if (!res.ok) throw new Error(await errorMessage(res));
   return setupStatusSchema.parse(await res.json());
 }
 
 export async function setupAdmin(email: string, password: string): Promise<AuthState> {
-  const res = await fetch('/api/auth/setup', {
+  const res = await apiFetch('/api/auth/setup', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
@@ -136,7 +154,7 @@ export async function setupAdmin(email: string, password: string): Promise<AuthS
 }
 
 export async function login(email: string, password: string): Promise<AuthState> {
-  const res = await fetch('/api/auth/login', {
+  const res = await apiFetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
@@ -147,7 +165,7 @@ export async function login(email: string, password: string): Promise<AuthState>
 }
 
 export async function logout(csrfToken: string): Promise<void> {
-  const res = await fetch('/api/auth/logout', {
+  const res = await apiFetch('/api/auth/logout', {
     method: 'POST',
     credentials: 'include',
     headers: { 'x-csrf-token': csrfToken },
@@ -159,7 +177,7 @@ export async function createAccount(
   input: { email: string; password: string; role: AccountRole },
   csrfToken: string,
 ): Promise<PublicUser> {
-  const res = await fetch('/api/auth/users', {
+  const res = await apiFetch('/api/auth/users', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -171,7 +189,7 @@ export async function createAccount(
 
 /** List Knowledge Bases the current user is a member of. */
 export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
-  const res = await fetch('/api/knowledge-bases', { credentials: 'include' });
+  const res = await apiFetch('/api/knowledge-bases', { credentials: 'include' });
   if (!res.ok) throw new Error(await errorMessage(res));
   return knowledgeBaseListSchema.parse(await res.json());
 }
@@ -181,7 +199,7 @@ export async function createKnowledgeBase(
   input: { name: string; description?: string },
   csrfToken: string,
 ): Promise<KnowledgeBase> {
-  const res = await fetch('/api/knowledge-bases', {
+  const res = await apiFetch('/api/knowledge-bases', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -193,7 +211,7 @@ export async function createKnowledgeBase(
 
 /** List entities in a Knowledge Base. */
 export async function listEntities(knowledgeBaseId: string): Promise<Entity[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/entities`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -206,7 +224,7 @@ export async function createEntity(
   input: CreateEntity,
   csrfToken: string,
 ): Promise<Entity> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/entities`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -223,7 +241,7 @@ export async function updateEntity(
   input: UpdateEntity,
   csrfToken: string,
 ): Promise<Entity> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -238,9 +256,12 @@ export async function getEntityImpact(
   knowledgeBaseId: string,
   entityId: string,
 ): Promise<EntityImpact> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}/impact`, {
-    credentials: 'include',
-  });
+  const res = await apiFetch(
+    `/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}/impact`,
+    {
+      credentials: 'include',
+    },
+  );
   if (!res.ok) throw new Error(await errorMessage(res));
   return entityImpactSchema.parse(await res.json());
 }
@@ -251,7 +272,7 @@ export async function deleteEntity(
   entityId: string,
   csrfToken: string,
 ): Promise<void> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${entityId}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { 'x-csrf-token': csrfToken },
@@ -266,7 +287,7 @@ export async function mergeEntity(
   targetId: string,
   csrfToken: string,
 ): Promise<Entity> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${sourceId}/merge`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/entities/${sourceId}/merge`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -278,7 +299,7 @@ export async function mergeEntity(
 
 /** List claims in a Knowledge Base. */
 export async function listClaims(knowledgeBaseId: string): Promise<Claim[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/claims`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -291,7 +312,7 @@ export async function createClaim(
   input: CreateClaim,
   csrfToken: string,
 ): Promise<Claim> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/claims`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -307,7 +328,7 @@ export async function deleteClaim(
   claimId: string,
   csrfToken: string,
 ): Promise<void> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims/${claimId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/claims/${claimId}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { 'x-csrf-token': csrfToken },
@@ -322,7 +343,7 @@ export async function updateClaim(
   input: UpdateClaim,
   csrfToken: string,
 ): Promise<Claim> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/claims/${claimId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/claims/${claimId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -336,7 +357,7 @@ export async function updateClaim(
 
 /** List notes in a Knowledge Base. */
 export async function listNotes(knowledgeBaseId: string): Promise<Note[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/notes`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -349,7 +370,7 @@ export async function createNote(
   input: CreateNote,
   csrfToken: string,
 ): Promise<Note> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/notes`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -366,7 +387,7 @@ export async function updateNote(
   input: UpdateNote,
   csrfToken: string,
 ): Promise<Note> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes/${noteId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/notes/${noteId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -382,7 +403,7 @@ export async function deleteNote(
   noteId: string,
   csrfToken: string,
 ): Promise<void> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/notes/${noteId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/notes/${noteId}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { 'x-csrf-token': csrfToken },
@@ -394,7 +415,7 @@ export async function deleteNote(
 
 /** List sources in a Knowledge Base. */
 export async function listSources(knowledgeBaseId: string): Promise<Source[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/sources`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -407,7 +428,7 @@ export async function createSource(
   input: CreateSource,
   csrfToken: string,
 ): Promise<Source> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/sources`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -424,7 +445,7 @@ export async function updateSource(
   input: UpdateSource,
   csrfToken: string,
 ): Promise<Source> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources/${sourceId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/sources/${sourceId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -440,7 +461,7 @@ export async function deleteSource(
   sourceId: string,
   csrfToken: string,
 ): Promise<void> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/sources/${sourceId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/sources/${sourceId}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { 'x-csrf-token': csrfToken },
@@ -460,7 +481,7 @@ export async function listSourceExcerpts(
   if (filter.sourceId) params.set('sourceId', filter.sourceId);
   if (filter.claimId) params.set('claimId', filter.claimId);
   const qs = params.toString();
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/knowledge-bases/${knowledgeBaseId}/source-excerpts${qs ? `?${qs}` : ''}`,
     { credentials: 'include' },
   );
@@ -474,7 +495,7 @@ export async function listSourceExcerpts(
  * visibility.
  */
 export async function getGraphProjectionStatus(): Promise<GraphProjectionStatus> {
-  const res = await fetch('/api/graph/projection/status', { credentials: 'include' });
+  const res = await apiFetch('/api/graph/projection/status', { credentials: 'include' });
   if (!res.ok) throw new Error(await errorMessage(res));
   return graphProjectionStatusSchema.parse(await res.json());
 }
@@ -485,7 +506,7 @@ export async function createSourceExcerpt(
   input: CreateSourceExcerpt,
   csrfToken: string,
 ): Promise<SourceExcerptView> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/source-excerpts`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/source-excerpts`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -501,11 +522,14 @@ export async function deleteSourceExcerpt(
   excerptId: string,
   csrfToken: string,
 ): Promise<void> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/source-excerpts/${excerptId}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: { 'x-csrf-token': csrfToken },
-  });
+  const res = await apiFetch(
+    `/api/knowledge-bases/${knowledgeBaseId}/source-excerpts/${excerptId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'x-csrf-token': csrfToken },
+    },
+  );
   if (!res.ok) throw new Error(await errorMessage(res));
 }
 
@@ -526,9 +550,12 @@ export async function search(
     params.set(key, String(value));
   }
   const qs = params.toString();
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/search${qs ? `?${qs}` : ''}`, {
-    credentials: 'include',
-  });
+  const res = await apiFetch(
+    `/api/knowledge-bases/${knowledgeBaseId}/search${qs ? `?${qs}` : ''}`,
+    {
+      credentials: 'include',
+    },
+  );
   if (!res.ok) throw new Error(await errorMessage(res));
   return searchResponseSchema.parse(await res.json());
 }
@@ -542,7 +569,7 @@ export async function search(
  * its `interpretedResults`. Read-only (no mutation), so no CSRF token needed.
  */
 export async function runCommand(knowledgeBaseId: string, q: string): Promise<CommandResponse> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/command`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/command`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
@@ -553,7 +580,7 @@ export async function runCommand(knowledgeBaseId: string, q: string): Promise<Co
 }
 
 export async function answerQuestion(knowledgeBaseId: string, q: string): Promise<AnswerResponse> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/answers`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/answers`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
@@ -565,7 +592,7 @@ export async function answerQuestion(knowledgeBaseId: string, q: string): Promis
 
 /** Knowledge Base audit summary (admin/owner only). Newest events first. */
 export async function listKbAudit(knowledgeBaseId: string): Promise<AuditEvent[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/audit`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/audit`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -575,7 +602,7 @@ export async function listKbAudit(knowledgeBaseId: string): Promise<AuditEvent[]
 
 /** Background jobs scoped to a Knowledge Base (admin/owner only). */
 export async function listKbJobs(knowledgeBaseId: string): Promise<PublicJob[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/jobs`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/jobs`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -587,17 +614,17 @@ export async function listKbJobs(knowledgeBaseId: string): Promise<PublicJob[]> 
 
 /** URL of the full-fidelity portable JSON export for a Knowledge Base. */
 export function portableJsonExportUrl(knowledgeBaseId: string): string {
-  return `/api/knowledge-bases/${knowledgeBaseId}/export/json`;
+  return apiUrl(`/api/knowledge-bases/${knowledgeBaseId}/export/json`);
 }
 
 /** URL of the human-readable Markdown export (not full-fidelity). */
 export function markdownExportUrl(knowledgeBaseId: string): string {
-  return `/api/knowledge-bases/${knowledgeBaseId}/export/markdown`;
+  return apiUrl(`/api/knowledge-bases/${knowledgeBaseId}/export/markdown`);
 }
 
 /** URL of the structured-subset CSV export (entities only). */
 export function csvExportUrl(knowledgeBaseId: string): string {
-  return `/api/knowledge-bases/${knowledgeBaseId}/export/csv`;
+  return apiUrl(`/api/knowledge-bases/${knowledgeBaseId}/export/csv`);
 }
 
 /** Import a portable export document, creating a NEW Knowledge Base. */
@@ -605,7 +632,7 @@ export async function importPortableKnowledgeBase(
   exported: PortableKnowledgeBaseExport,
   csrfToken: string,
 ): Promise<PortableImportResult> {
-  const res = await fetch('/api/knowledge-bases/import-portable', {
+  const res = await apiFetch('/api/knowledge-bases/import-portable', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -632,7 +659,7 @@ export interface KbAiPolicyView {
 
 /** The caller's effective non-KB AI policy (server + user layers). */
 export async function getAiPolicyOverview(): Promise<AiPolicyOverview> {
-  const res = await fetch('/api/ai/policy', { credentials: 'include' });
+  const res = await apiFetch('/api/ai/policy', { credentials: 'include' });
   if (!res.ok) throw new Error(await errorMessage(res));
   const body = (await res.json()) as Record<string, unknown>;
   return {
@@ -647,7 +674,7 @@ export async function updateServerAiPolicy(
   changes: UpdateAiPolicy,
   csrfToken: string,
 ): Promise<AiPolicy> {
-  const res = await fetch('/api/ai/policy/server', {
+  const res = await apiFetch('/api/ai/policy/server', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -662,7 +689,7 @@ export async function updateMyAiPolicy(
   changes: UpdateAiPolicy,
   csrfToken: string,
 ): Promise<AiPolicy> {
-  const res = await fetch('/api/ai/policy/me', {
+  const res = await apiFetch('/api/ai/policy/me', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -674,7 +701,7 @@ export async function updateMyAiPolicy(
 
 /** Knowledge-Base AI policy + effective policy (server + KB + user). */
 export async function getKbAiPolicy(knowledgeBaseId: string): Promise<KbAiPolicyView> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/ai/policy`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/ai/policy`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -693,7 +720,7 @@ export async function updateKbAiPolicy(
   changes: UpdateAiPolicy,
   csrfToken: string,
 ): Promise<KbAiPolicyView> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/ai/policy`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/ai/policy`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -720,7 +747,7 @@ export async function quickCapture(
   input: CaptureRequest,
   csrfToken: string,
 ): Promise<CaptureResponse> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/capture`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/capture`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -733,7 +760,7 @@ export async function quickCapture(
 /** List AI/import proposals awaiting review in a Knowledge Base (viewer+). */
 export async function listProposals(knowledgeBaseId: string, status?: string): Promise<Proposal[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : '';
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/proposals${query}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/proposals${query}`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -751,7 +778,7 @@ export async function acceptProposal(
   body: { itemIndexes?: number[]; note?: string },
   csrfToken: string,
 ): Promise<AcceptProposalResult> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/knowledge-bases/${knowledgeBaseId}/proposals/${proposalId}/accept`,
     {
       method: 'POST',
@@ -771,7 +798,7 @@ export async function rejectProposal(
   body: { reason?: string; dismiss?: boolean },
   csrfToken: string,
 ): Promise<Proposal> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/knowledge-bases/${knowledgeBaseId}/proposals/${proposalId}/reject`,
     {
       method: 'POST',
@@ -791,7 +818,7 @@ export async function editProposal(
   changes: ProposalChanges,
   csrfToken: string,
 ): Promise<Proposal> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/proposals/${proposalId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/proposals/${proposalId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -810,7 +837,7 @@ export async function createImport(
   request: ImportRequest,
   csrfToken: string,
 ): Promise<ImportEnqueueResponse> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/imports`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/imports`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -822,7 +849,7 @@ export async function createImport(
 
 /** List this Knowledge Base's import jobs + their status/failures (US-031, viewer+). */
 export async function listImports(knowledgeBaseId: string): Promise<PublicJob[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/imports`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/imports`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -832,7 +859,7 @@ export async function listImports(knowledgeBaseId: string): Promise<PublicJob[]>
 
 /** List built-in domain Modules with per-KB installed status (US-029, viewer+). */
 export async function listModules(knowledgeBaseId: string): Promise<ModuleStatus[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/modules`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/modules`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -845,7 +872,7 @@ export async function installModule(
   moduleId: string,
   csrfToken: string,
 ): Promise<InstallModuleResult> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/modules/install`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/modules/install`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -857,7 +884,7 @@ export async function installModule(
 
 /** List the catalog of built-in Module rule packs (US-022, viewer+). */
 export async function listBuiltinRulePacks(knowledgeBaseId: string): Promise<BuiltinRuleModule[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/packs`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/packs`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -866,7 +893,7 @@ export async function listBuiltinRulePacks(knowledgeBaseId: string): Promise<Bui
 
 /** List rules installed in a Knowledge Base (US-022, viewer+). */
 export async function listRules(knowledgeBaseId: string): Promise<RuleDefinition[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -879,7 +906,7 @@ export async function installRulePack(
   body: { moduleId: string; packId: string },
   csrfToken: string,
 ): Promise<InstallRulePackResult> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/install`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/install`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -896,7 +923,7 @@ export async function setRuleStatus(
   status: 'enabled' | 'disabled',
   csrfToken: string,
 ): Promise<RuleDefinition> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -912,7 +939,7 @@ export async function validateRule(
   ruleText: string,
   recursionCap?: number,
 ): Promise<RuleValidationResult> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/validate`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/validate`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json' },
@@ -928,7 +955,7 @@ export async function createRule(
   body: CreateRuleRequest,
   csrfToken: string,
 ): Promise<RuleDefinition> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -945,7 +972,7 @@ export async function updateRule(
   body: UpdateRuleRequest,
   csrfToken: string,
 ): Promise<RuleDefinition> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -961,7 +988,7 @@ export async function runRule(
   ruleId: string,
   csrfToken: string,
 ): Promise<RuleRunResult> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}/run`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}/run`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -973,7 +1000,7 @@ export async function runRule(
 
 /** List recorded rule runs for a Knowledge Base (US-024, viewer+). */
 export async function listRuleRuns(knowledgeBaseId: string): Promise<RuleRun[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/runs`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/runs`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -982,7 +1009,7 @@ export async function listRuleRuns(knowledgeBaseId: string): Promise<RuleRun[]> 
 
 /** Get a single rule run plus its inferred results (US-024, viewer+). */
 export async function getRuleRun(knowledgeBaseId: string, runId: string): Promise<RuleRunResult> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/runs/${runId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/runs/${runId}`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -997,7 +1024,7 @@ export async function acceptInferredResult(
   csrfToken: string,
   confirmationNote?: string,
 ): Promise<AcceptInferredResultResult> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/knowledge-bases/${knowledgeBaseId}/rules/runs/${runId}/results/${resultId}/accept`,
     {
       method: 'POST',
@@ -1012,7 +1039,7 @@ export async function acceptInferredResult(
 
 /** List custom schema definitions in a Knowledge Base (US-027, viewer+). */
 export async function listSchemaDefinitions(knowledgeBaseId: string): Promise<SchemaDefinition[]> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/schema`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));
@@ -1025,7 +1052,7 @@ export async function createSchemaDefinition(
   body: CreateSchemaDefinition,
   csrfToken: string,
 ): Promise<SchemaDefinition> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/schema`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -1042,7 +1069,7 @@ export async function updateSchemaDefinition(
   body: UpdateSchemaDefinition,
   csrfToken: string,
 ): Promise<UpdateSchemaResult> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema/${defId}`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/schema/${defId}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
@@ -1057,7 +1084,7 @@ export async function getSchemaValidation(
   knowledgeBaseId: string,
   defId: string,
 ): Promise<SchemaValidationReport> {
-  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/schema/${defId}/validation`, {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/schema/${defId}/validation`, {
     credentials: 'include',
   });
   if (!res.ok) throw new Error(await errorMessage(res));

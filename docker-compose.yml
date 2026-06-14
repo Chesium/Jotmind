@@ -27,6 +27,38 @@ services:
       timeout: 5s
       retries: 10
 
+  # Stateless Node API container (US-033). It also serves the built web assets
+  # for a simple single-origin deployment (open http://127.0.0.1:3001). All
+  # canonical data lives in the `db` service, so this container holds no state.
+  api:
+    build:
+      context: .
+      dockerfile: infra/api/Dockerfile
+    image: jotmind-api:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-jotmind}
+      # Bind inside the container on all interfaces; host exposure is controlled
+      # by the port mapping below (loopback by default).
+      HOST: 0.0.0.0
+      PORT: 3001
+      # Serve the built web assets for single-origin deployment.
+      WEB_DIST_PATH: /app/apps/web/dist
+      # Run the durable-jobs worker in-process (no separate worker container).
+      WORKER_INLINE: ${WORKER_INLINE:-true}
+      # Mark cookies Secure only behind HTTPS/a TLS reverse proxy.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # Exact-match CORS allowlist; empty = same-origin only (never `*`).
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      # Optional AI provider config (JSON); unset = No-AI install.
+      AI_PROVIDER_CONFIG: ${AI_PROVIDER_CONFIG:-}
+    # Publish to localhost by default; expose on the LAN only via explicit
+    # opt-in (e.g. `API_BIND=0.0.0.0 docker compose up`).
+    ports:
+      - '${API_BIND:-127.0.0.1}:${API_PORT:-3001}:3001'
+
 volumes:
   jotmind-db:
     # Canonical, durable storage. Back this volume up to preserve your data.

@@ -1,0 +1,23 @@
+# Keep the Docker build context small and avoid clobbering the image's freshly
+# installed dependencies / build outputs with host artifacts.
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+**/playwright-report
+**/test-results
+.git
+.venv
+*.log
+
+# Ralph / agent scaffolding (not needed in the image).
+.agents
+ideas
+tasks
+flowchart
+prompts
+progress.txt
+prompt.md
+prd.json
+ralph.sh
+.last-branch

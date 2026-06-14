@@ -83,6 +83,18 @@ and stays `ok` (useful for unit tests and AI-disabled local runs).
 API integration tests that need a live database (migrations + extension checks) run only when
 `DATABASE_URL` is set; otherwise they are skipped so the default `pnpm test:api` stays green.
 
+## Deployment
+
+The reference `docker compose up -d --build` starts a **stateless Node API
+container** (which also serves the built web assets for a simple single-origin
+deployment at `http://127.0.0.1:3001`) alongside the PostgreSQL container. The
+API binds to **localhost by default**; LAN/public exposure is an explicit opt-in,
+and **CORS is deny-by-default** (never `*`). See
+[docs/deployment.md](docs/deployment.md) for local development, local/LAN
+production-style use, VPS/cloud self-hosting, separately-deployed static
+frontends (`VITE_API_BASE_URL`), and the public-internet hardening checklist
+(HTTPS/TLS reverse proxy, allowed origins, strong auth).
+
 ## Authentication & accounts
 
 JotMind uses **local/server accounts** — no mandatory cloud account.
