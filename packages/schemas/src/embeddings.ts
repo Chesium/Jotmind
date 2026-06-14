@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { jobStatusSchema } from './graph.js';
 
 /**
  * Embedding indexing & vector search (US-021).
@@ -88,6 +89,13 @@ export const reindexEmbeddingsSchema = z.object({
   targetTypes: z.array(embeddingTargetTypeSchema).min(1).optional(),
 });
 export type ReindexEmbeddings = z.infer<typeof reindexEmbeddingsSchema>;
+
+/** Response returned after enqueueing a durable embedding reindex job. */
+export const reindexEmbeddingsResponseSchema = z.object({
+  jobId: z.string().uuid(),
+  status: jobStatusSchema,
+});
+export type ReindexEmbeddingsResponse = z.infer<typeof reindexEmbeddingsResponseSchema>;
 
 /** Job type for the durable embedding indexing job (US-007 registry key). */
 export const EMBEDDING_INDEX_JOB_TYPE = 'embeddings.index';

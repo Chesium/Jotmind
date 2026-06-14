@@ -5,6 +5,7 @@ import {
   embeddingIndexJobPayloadSchema,
   embeddingIndexResultSchema,
   embeddingStatusSchema,
+  reindexEmbeddingsResponseSchema,
   reindexEmbeddingsSchema,
 } from './embeddings.js';
 
@@ -33,6 +34,20 @@ describe('reindexEmbeddingsSchema', () => {
 
   it('rejects an unknown target type', () => {
     expect(reindexEmbeddingsSchema.safeParse({ targetTypes: ['rule'] }).success).toBe(false);
+  });
+});
+
+describe('reindexEmbeddingsResponseSchema', () => {
+  it('parses the queued job id and status', () => {
+    expect(
+      reindexEmbeddingsResponseSchema.parse({
+        jobId: '00000000-0000-0000-0000-000000000049',
+        status: 'queued',
+      }),
+    ).toEqual({
+      jobId: '00000000-0000-0000-0000-000000000049',
+      status: 'queued',
+    });
   });
 });
 

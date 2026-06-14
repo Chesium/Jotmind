@@ -878,8 +878,8 @@
         "Typecheck passes"
       ],
       "priority": 49,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented web reindex controls in EmbeddingsPanel: editor-only Reindex embeddings form with target type checkboxes (entity/claim/note/source), CSRF-backed reindexEmbeddings() API helper for POST /api/knowledge-bases/:kbId/embeddings/reindex, parsed response schema, queued job id/status display, jobs invalidation, and separate remote-embedding consent messaging. Viewers see read-only notice. Verified with pnpm verify plus Playwright browser flow using mocked API routes."
     },
     {
       "id": "US-050",

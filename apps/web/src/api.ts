@@ -9,6 +9,7 @@ import {
   claimSchema,
   commandResponseSchema,
   embeddingStatusSchema,
+  reindexEmbeddingsResponseSchema,
   entityImpactSchema,
   entityListSchema,
   entitySchema,
@@ -53,6 +54,8 @@ import {
   type CaptureResponse,
   type CommandResponse,
   type EmbeddingStatus,
+  type ReindexEmbeddings,
+  type ReindexEmbeddingsResponse,
   type Proposal,
   type ProposalChanges,
   type BuiltinRuleModule,
@@ -878,6 +881,22 @@ export async function getEmbeddingStatus(knowledgeBaseId: string): Promise<Embed
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return embeddingStatusSchema.parse(await res.json());
+}
+
+/** Enqueue a durable embedding reindex job (editor+). */
+export async function reindexEmbeddings(
+  knowledgeBaseId: string,
+  request: ReindexEmbeddings,
+  csrfToken: string,
+): Promise<ReindexEmbeddingsResponse> {
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/embeddings/reindex`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return reindexEmbeddingsResponseSchema.parse(await res.json());
 }
 
 /** List built-in domain Modules with per-KB installed status (US-029, viewer+). */

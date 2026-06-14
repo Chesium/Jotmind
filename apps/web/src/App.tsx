@@ -469,7 +469,7 @@ function KnowledgeBases({
                     <Proposals kb={selectedKb} csrfToken={csrfToken} />
                     <Rules kb={selectedKb} csrfToken={csrfToken} />
                     <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />
-                    <EmbeddingsPanel kb={selectedKb} />
+                    <EmbeddingsPanel kb={selectedKb} csrfToken={csrfToken} />
                     {/*
                       US-044: a portable JSON import creates a NEW Knowledge
                       Base, which lives in this `KnowledgeBases` parent's list —

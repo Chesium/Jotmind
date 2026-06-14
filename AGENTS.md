@@ -699,13 +699,17 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   likewise now checks `EXISTS(SELECT 1 FROM embeddings)` rows. NOTE: query-time
   vector search (embedding the query at search time) is deferred — it needs a
   live provider; only the stored-embedding availability/data is implemented.
-- Shared shapes in `@jotmind/schemas` `embeddings.ts`. US-021 itself had no UI,
-  but selected-KB embedding status now lives in `apps/web/src/EmbeddingsPanel.tsx`
-  (US-048), rendered in App.tsx's automation column near `<KbAiPolicy>`/admin
-  tooling. The panel reads `getEmbeddingStatus()` from `api.ts`, shows
-  vector-search availability separately from generation availability, and
+- Shared shapes in `@jotmind/schemas` `embeddings.ts`. Selected-KB embedding
+  status + reindex controls live in `apps/web/src/EmbeddingsPanel.tsx` (rendered
+  in App.tsx's automation column near `<KbAiPolicy>`/admin tooling). Web API
+  calls go through `getEmbeddingStatus()` and `reindexEmbeddings()` in
+  `apps/web/src/api.ts`; keep the response parsed with
+  `reindexEmbeddingsResponseSchema`. The panel shows vector-search availability
+  separately from generation availability, gates `Reindex embeddings` controls
+  with `kbRoleSatisfies(kb.role,'editor')`, lets editors choose target types
+  (`entity`/`claim`/`note`/`source`), publishes `jobs` after enqueue, and
   subscribes to `['aiPolicy','jobs']` so provider/policy changes and indexing-job
-  completion can refresh the displayed status.
+  completion refresh status.
 
 ## Built-in rule packs (US-022)
 

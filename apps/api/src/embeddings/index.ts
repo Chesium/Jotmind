@@ -4,6 +4,7 @@ import {
   embeddingStatusSchema,
   kbRoleSatisfies,
   reindexEmbeddingsSchema,
+  reindexEmbeddingsResponseSchema,
   resolveAiPolicy,
   type EmbeddingStatus,
   type KbRole,
@@ -153,7 +154,9 @@ export function createEmbeddingsRouter(options: EmbeddingsRouterOptions = {}): R
           ...(parsed.data.targetTypes ? { targetTypes: parsed.data.targetTypes } : {}),
         },
       });
-      res.status(202).json({ jobId: job.id, status: job.status });
+      res
+        .status(202)
+        .json(reindexEmbeddingsResponseSchema.parse({ jobId: job.id, status: job.status }));
     }),
   );
 

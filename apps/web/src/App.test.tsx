@@ -8,12 +8,14 @@ import { Modules } from './Modules.js';
 import { InvalidationProvider, useInvalidationEffect } from './invalidation.js';
 import type { KnowledgeBase } from '@jotmind/schemas';
 
-function mockFetch(handler: (url: string) => { status?: number; body?: unknown }) {
+function mockFetch(
+  handler: (url: string, init?: RequestInit) => { status?: number; body?: unknown },
+) {
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: RequestInfo | URL) => {
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
-      const { status = 200, body = {} } = handler(url);
+      const { status = 200, body = {} } = handler(url, init);
       return Promise.resolve({
         ok: status >= 200 && status < 300,
         status,
@@ -1930,6 +1932,12 @@ describe('EmbeddingsPanel (US-048)', () => {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  const editorKb: KnowledgeBase = {
+    ...viewerKb,
+    id: '00000000-0000-0000-0000-000000000049',
+    name: 'Editor KB',
+    role: 'editor',
+  };
 
   it('shows distinct unavailable vector and generation states with backend reason', async () => {
     mockFetch((url) => {
@@ -1951,7 +1959,7 @@ describe('EmbeddingsPanel (US-048)', () => {
       return { status: 404 };
     });
 
-    render(<EmbeddingsPanel kb={viewerKb} />);
+    render(<EmbeddingsPanel kb={viewerKb} csrfToken="tok" />);
 
     await waitFor(() =>
       expect(screen.getByTestId('embeddings-vector-status')).toHaveTextContent(
@@ -1990,7 +1998,7 @@ describe('EmbeddingsPanel (US-048)', () => {
       return { status: 404 };
     });
 
-    render(<EmbeddingsPanel kb={viewerKb} />);
+    render(<EmbeddingsPanel kb={viewerKb} csrfToken="tok" />);
 
     await waitFor(() =>
       expect(screen.getByTestId('embeddings-vector-status')).toHaveTextContent(
@@ -2007,5 +2015,118 @@ describe('EmbeddingsPanel (US-048)', () => {
     expect(screen.getByTestId('embeddings-dimensions')).toHaveTextContent('768');
     expect(screen.getByTestId('embeddings-last-indexed')).toHaveTextContent('Last indexed:');
     expect(screen.getByTestId('embeddings-provider-kind')).toHaveTextContent('ollama');
+  });
+
+  it('keeps reindex controls read-only for viewers', async () => {
+    mockFetch((url) => {
+      if (url.includes(`/api/knowledge-bases/${viewerKb.id}/embeddings`)) {
+        return {
+          body: {
+            vectorSearchAvailable: false,
+            generationAvailable: true,
+            reason: null,
+            total: 0,
+            counts: { entity: 0, claim: 0, note: 0, source: 0 },
+            model: null,
+            dimensions: null,
+            lastIndexedAt: null,
+            providerKind: 'mock',
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(<EmbeddingsPanel kb={viewerKb} csrfToken="tok" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('embeddings-readonly')).toHaveTextContent('You need editor access'),
+    );
+    expect(screen.queryByTestId('embeddings-reindex-submit')).not.toBeInTheDocument();
+  });
+
+  it('lets editors choose target types and enqueue a reindex job', async () => {
+    const posts: Array<{ body: unknown; csrf: string | undefined }> = [];
+    mockFetch((url, init) => {
+      if (url.includes(`/api/knowledge-bases/${editorKb.id}/embeddings/reindex`)) {
+        posts.push({
+          body: JSON.parse(String(init?.body ?? '{}')) as unknown,
+          csrf:
+            init?.headers && !Array.isArray(init.headers)
+              ? (init.headers as Record<string, string>)['x-csrf-token']
+              : undefined,
+        });
+        return {
+          status: 202,
+          body: {
+            jobId: '00000000-0000-0000-0000-000000000099',
+            status: 'queued',
+          },
+        };
+      }
+      if (url.includes(`/api/knowledge-bases/${editorKb.id}/embeddings`)) {
+        return {
+          body: {
+            vectorSearchAvailable: false,
+            generationAvailable: true,
+            reason: null,
+            total: 0,
+            counts: { entity: 0, claim: 0, note: 0, source: 0 },
+            model: null,
+            dimensions: null,
+            lastIndexedAt: null,
+            providerKind: 'mock',
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(
+      <InvalidationProvider>
+        <EmbeddingsPanel kb={editorKb} csrfToken="tok" />
+      </InvalidationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('embeddings-reindex-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('embeddings-target-claim'));
+    fireEvent.click(screen.getByTestId('embeddings-target-source'));
+    fireEvent.click(screen.getByTestId('embeddings-reindex-submit'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('embeddings-reindex-job')).toHaveTextContent(
+        'Reindex job 00000000 queued with status queued',
+      ),
+    );
+    expect(posts).toEqual([{ body: { targetTypes: ['entity', 'note'] }, csrf: 'tok' }]);
+  });
+
+  it('surfaces remote embedding consent separately when policy blocks indexing', async () => {
+    mockFetch((url) => {
+      if (url.includes(`/api/knowledge-bases/${editorKb.id}/embeddings`)) {
+        return {
+          body: {
+            vectorSearchAvailable: false,
+            generationAvailable: false,
+            reason: 'Remote embeddings are not permitted by policy',
+            total: 0,
+            counts: { entity: 0, claim: 0, note: 0, source: 0 },
+            model: null,
+            dimensions: null,
+            lastIndexedAt: null,
+            providerKind: 'openai',
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(<EmbeddingsPanel kb={editorKb} csrfToken="tok" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('embeddings-remote-consent')).toHaveTextContent(
+        'Remote embedding consent is separate from remote LLM consent.',
+      ),
+    );
   });
 });
