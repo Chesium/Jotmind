@@ -6,6 +6,7 @@ import {
   type AuthState,
   type Claim,
   type ClaimArgumentKind,
+  type CommandResponse,
   type CreateClaimArgument,
   type Entity,
   type KnowledgeBase,
@@ -39,6 +40,7 @@ import {
   login,
   logout,
   mergeEntity,
+  runCommand,
   search,
   setupAdmin,
   updateClaim,
@@ -312,6 +314,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
         </button>
       </form>
       {error && <p data-testid="kb-error">{error}</p>}
+      {selectedKb && <CommandBox kb={selectedKb} />}
       {selectedKb && <GraphViews kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Search kb={selectedKb} />}
       {selectedKb && <Entities kb={selectedKb} csrfToken={csrfToken} />}
@@ -320,6 +323,128 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       {selectedKb && <Proposals kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <KbAdmin kb={selectedKb} />}
+    </section>
+  );
+}
+
+/**
+ * Universal command/search box (US-019). One box accepts a natural-language
+ * query. Manual token search always runs (works with AI disabled — AC1). When
+ * AI is configured and permitted the server also returns a structured
+ * interpretation; the structured interpretation and the fallback search results
+ * are shown in clearly separated sections (AC6). Low-confidence/invalid AI
+ * output is discarded server-side, leaving only the fallback (AC3/AC5).
+ */
+function CommandBox({ kb }: { kb: KnowledgeBase }) {
+  const [q, setQ] = useState('');
+  const [response, setResponse] = useState<CommandResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!q.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setResponse(await runCommand(kb.id, q.trim()));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Command failed');
+      setResponse(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const interp = response?.interpretation ?? null;
+
+  return (
+    <section data-testid="command">
+      <h3>Command</h3>
+      <form onSubmit={submit}>
+        <label>
+          Ask or search
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="e.g. find people, type:Person ada"
+            data-testid="command-query"
+          />
+        </label>
+        <button type="submit" disabled={busy} data-testid="command-submit">
+          Run
+        </button>
+      </form>
+      {error && <p data-testid="command-error">{error}</p>}
+      {response && (
+        <div data-testid="command-results">
+          <p data-testid="command-ai-status">
+            {response.ai.available
+              ? `AI interpretation: ${response.ai.attempted ? 'on' : 'idle'}`
+              : `AI unavailable${response.ai.reason ? ` — ${response.ai.reason}` : ''}`}
+            {response.ai.label && ` (${response.ai.label})`}
+            {response.ai.repaired && ' [repaired]'}
+            {response.ai.lowConfidence && ' [low confidence → fell back to search]'}
+          </p>
+
+          {interp ? (
+            <div data-testid="command-interpretation">
+              <h4>Structured interpretation</h4>
+              <p data-testid="command-intent">
+                Intent: <strong>{interp.intent}</strong> (confidence {String(interp.confidence)})
+              </p>
+              {interp.explanation && <p>{interp.explanation}</p>}
+              {interp.intent === 'search' ? (
+                <>
+                  <p>Filters: {JSON.stringify(interp.filters)}</p>
+                  <p data-testid="command-interpreted-count">
+                    {(response.interpretedResults ?? []).length} interpreted result(s)
+                  </p>
+                  <ul>
+                    {(response.interpretedResults ?? []).map((r) => (
+                      <li
+                        key={`i:${r.kind}:${r.id}`}
+                        data-testid={`command-interpreted-result-${r.kind}`}
+                      >
+                        <strong>[{r.kind}]</strong> {r.title}
+                        {r.type && ` — ${r.type}`}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <div data-testid="command-create-preview">
+                  <p>AI suggests creating these records (review via Capture / Proposals):</p>
+                  <pre>{JSON.stringify(interp.changes, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p data-testid="command-no-interpretation">
+              No structured interpretation — showing search results.
+            </p>
+          )}
+
+          <div data-testid="command-fallback">
+            <h4>Search results</h4>
+            {!response.fallback.vectorSearch.available && (
+              <p data-testid="command-vector-unavailable">
+                Semantic (vector) search unavailable: {response.fallback.vectorSearch.reason}
+              </p>
+            )}
+            <p data-testid="command-fallback-count">{response.fallback.results.length} result(s)</p>
+            <ul>
+              {response.fallback.results.map((r) => (
+                <li key={`f:${r.kind}:${r.id}`} data-testid={`command-fallback-result-${r.kind}`}>
+                  <strong>[{r.kind}]</strong> {r.title}
+                  {r.type && ` — ${r.type}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

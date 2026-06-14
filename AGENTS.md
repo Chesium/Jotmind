@@ -575,6 +575,41 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   `acceptProposal`/`rejectProposal`/`editProposal`; `<ProposalItem>` renders
   per-item checkboxes + Accept all / Accept selected / Reject / Edit (JSON).
 
+## Universal command/search box (US-019)
+
+- One command box (`apps/api/src/command/`) accepts a natural-language query.
+  `interpreter.ts` defines the `CommandInterpreter` interface +
+  `MockCommandInterpreter` (deterministic demo, parses `type:`/`predicate:`/
+  `tag:`/`kind:` hints into search filters) + `LlmCommandInterpreter` (wraps an
+  `LlmProvider`, strict-JSON prompt validated by `commandInterpretationSchema`).
+  `resolveCommandInterpreterFromEnv` mirrors `resolveExtractorFromEnv` exactly
+  (reads `AI_PROVIDER_CONFIG`; mock gated by `AI_DEMO_EXTRACTION`/non-prod).
+- `index.ts` `createCommandRouter` is mounted at
+  `/api/knowledge-bases/:kbId/command` (`mergeParams`, AFTER the KB router).
+  Single `POST /` is **read-only** (no mutation) → requires `viewer`, **no
+  CSRF**; non-members get 404. `createApp` seam is `commandInterpreter`
+  (default `resolveCommandInterpreterFromEnv()`); it also reuses the
+  `searchStore` + `aiPolicyStore` seams.
+- Endpoint always runs manual token search (`fallback`, works with AI off —
+  AC1). When AI is available (interpreter present + `resolveAiPolicy` over
+  server+user+KB is not `off`, remote needs `remoteAllowed`) it interprets the
+  query: invalid output is discarded after ONE repair retry done _inside_
+  `LlmCommandInterpreter.interpret` (AC3/AC4), and confidence <
+  `COMMAND_CONFIDENCE_THRESHOLD` (0.4) is discarded → fallback (AC5). A `search`
+  interpretation is executed against the search store to produce
+  `interpretedResults`; `create` interpretations are returned as a constrained
+  proposal preview only (no mutation — use capture/proposals to apply).
+  Structured interpretation and fallback results are SEPARATE response fields
+  (AC6). Shared shapes in `@jotmind/schemas` `command.ts`.
+- **Repair retry lives in the interpreter, not the router** — when adding new
+  structured-output AI flows, do the parse/validate + single repair inside the
+  adapter and return `{ interpretation: null }` on failure so callers fall back.
+- Web: `<CommandBox>` in `App.tsx` (rendered FIRST when a KB is selected) +
+  `runCommand()` in `api.ts`. Testids: `command`, `command-query`,
+  `command-submit`, `command-ai-status`, `command-interpretation`/`-intent`/
+  `-interpreted-result-<kind>`, `command-no-interpretation`,
+  `command-fallback`/`-fallback-result-<kind>`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

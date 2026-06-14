@@ -5,6 +5,7 @@ import {
   authStateSchema,
   claimListSchema,
   claimSchema,
+  commandResponseSchema,
   entityImpactSchema,
   entityListSchema,
   entitySchema,
@@ -29,6 +30,7 @@ import {
   type AcceptProposalResult,
   type CaptureRequest,
   type CaptureResponse,
+  type CommandResponse,
   type Proposal,
   type ProposalChanges,
   type ResolvedAiPolicy,
@@ -478,6 +480,25 @@ export async function search(
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return searchResponseSchema.parse(await res.json());
+}
+
+// --- Universal command / search box (US-019) ------------------------------
+
+/**
+ * Run the command box: a natural-language query. Manual token search always
+ * runs (`fallback`), so this works with AI disabled. When AI is configured and
+ * permitted, the server additionally returns a structured `interpretation` and
+ * its `interpretedResults`. Read-only (no mutation), so no CSRF token needed.
+ */
+export async function runCommand(knowledgeBaseId: string, q: string): Promise<CommandResponse> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/command`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ q }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return commandResponseSchema.parse(await res.json());
 }
 
 /** Knowledge Base audit summary (admin/owner only). Newest events first. */

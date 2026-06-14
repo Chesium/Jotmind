@@ -1,5 +1,6 @@
 export * from './ai.js';
 export * from './auth.js';
+export * from './command.js';
 export * from './graph.js';
 export * from './health.js';
 export * from './jobs.js';

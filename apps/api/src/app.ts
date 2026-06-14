@@ -34,6 +34,11 @@ import {
   type ProposalStore,
 } from './proposals/index.js';
 import { resolveExtractorFromEnv, type GraphExtractor } from './extraction/index.js';
+import {
+  createCommandRouter,
+  resolveCommandInterpreterFromEnv,
+  type CommandInterpreter,
+} from './command/index.js';
 
 export const SERVICE_NAME = 'jotmind-api';
 export const SERVICE_VERSION = '0.0.0';
@@ -118,6 +123,12 @@ export interface AppOptions {
    * Defaults to the env-configured extractor, or `null` for a No-AI install.
    */
   extractor?: GraphExtractor | null;
+  /**
+   * Command interpreter for the universal command box (US-019). Injectable for
+   * unit tests. Defaults to the env-configured interpreter, or `null` for a
+   * No-AI install (manual search still works).
+   */
+  commandInterpreter?: CommandInterpreter | null;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -168,6 +179,20 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(
     '/api/knowledge-bases/:kbId/search',
     createSearchRouter({ store: options.searchStore, kbStore: options.kbStore, authStore }),
+  );
+  const commandInterpreter =
+    options.commandInterpreter !== undefined
+      ? options.commandInterpreter
+      : resolveCommandInterpreterFromEnv();
+  app.use(
+    '/api/knowledge-bases/:kbId/command',
+    createCommandRouter({
+      searchStore: options.searchStore,
+      kbStore: options.kbStore,
+      authStore,
+      aiPolicyStore: options.aiPolicyStore,
+      interpreter: commandInterpreter,
+    }),
   );
   app.use(
     '/api/knowledge-bases/:kbId/ai/policy',

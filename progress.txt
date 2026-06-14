@@ -345,3 +345,19 @@ Thread: https://ampcode.com/threads/T-019ec41a-9677-76a9-b9ba-085c384aa746
   - Proposal review is pending-only: updateProposalChanges/reviewProposal return undefined for non-pending rows (router maps to 404/409), which is how double-accept/double-review is prevented. Accept re-parses the stored changes with proposalChangesSchema before applying (defense-in-depth for AC4).
   - The CredentialFields setup/login inputs have NO data-testids (only the submit buttons do); use Playwright getByLabel('Email')/getByLabel('Password'). KB rows are kb-select-<id>; AI policy testids are <prefix>-mode/-save where prefix is ai-policy-server / ai-policy-user / kb-ai-policy.
 ---
+
+## Sun 14 Jun 2026 - US-019
+Thread: https://ampcode.com/threads/T-019ec428-73c9-7710-9f5f-06ea0327044d
+- Implemented the universal command/search box (one NL box → manual search always + structured AI interpretation when permitted).
+- New apps/api/src/command/: interpreter.ts (CommandInterpreter interface; MockCommandInterpreter deterministic demo parsing type:/predicate:/tag:/kind: hints; LlmCommandInterpreter strict-JSON + ONE repair retry inside interpret(); resolveCommandInterpreterFromEnv mirrors resolveExtractorFromEnv) and index.ts (createCommandRouter, POST / read-only viewer, no CSRF, always-fallback search + AI interpretation gated by resolveAiPolicy, low-confidence<0.4 → fallback).
+- packages/schemas/src/command.ts (+ index export): commandRequest/commandSearchFilters/commandInterpretation (discriminatedUnion search|create)/commandAiInfo/commandResponse, COMMAND_CONFIDENCE_THRESHOLD.
+- app.ts: new commandInterpreter seam + mount; reuses searchStore + aiPolicyStore seams.
+- Web: api.ts runCommand() + <CommandBox> in App.tsx (rendered first per KB) — separate "Structured interpretation" vs "Search results" sections (AC6).
+- Tests: 8 schema + 13 interpreter + 11 command-API unit (all green). pnpm verify fully green. Browser-verified with Playwright+Chromium against live compose DB w/ mock AI (no-AI fallback → enable local_only on all 3 layers → structured interpretation w/ Mock label, separate from fallback) + screenshot.
+- **Learnings for future iterations:**
+  - Structured-output AI flows: keep the parse/validate + single repair retry INSIDE the adapter (LlmCommandInterpreter.interpret), return null on failure, let the router fall back. Mirrors the extraction layer; do the same for US-020/US-019-like flows.
+  - Mock LLM provider (MockLlmProvider) echoes "mock-response: ..." which is NOT valid JSON → an LLM-backed structured flow with the mock provider always falls back. For deterministic demo *success* output (browser/tests), add a dedicated Mock<Thing> adapter (MockCommandInterpreter, like MockGraphExtractor) gated by AI_DEMO_EXTRACTION/non-prod, NOT the MockLlmProvider.
+  - createInterpreterFromConfig/createExtractorFromConfig take an ALREADY-PARSED AiProviderConfig; the mock variant requires `dimensions` (parseProviderConfig adds the default, raw literals in tests must include it).
+  - Read-only POST endpoints (interpret/search) use viewer + NO requireCsrf (CSRF only guards mutations). Non-members still 404 to hide existence.
+  - Browser verification: a prior iteration may leave a `tsx watch` API running on :3001 with the right env (DATABASE_URL + AI_PROVIDER_CONFIG mock + AI_DEMO_EXTRACTION). tsx watch auto-reloads your edits, so REUSE it (playwright webServer reuseExistingServer for web only) instead of killing a possibly-concurrent process. Check /proc/<pid>/environ to confirm its config.
+---
