@@ -620,6 +620,359 @@
       "priority": 34,
       "passes": true,
       "notes": "V1 verification & hardening. AC1: `pnpm verify` already chained format:check/typecheck/lint/test/test:api/test:e2e (root package.json) — kept as the authoritative NO-INFRA gate (stays green w/o DB/API/Ollama). AC2: `test:api` now runs with JOTMIND_VERIFY=true, loading new Vitest setupFile apps/api/src/test/verify-env.ts (registered in apps/api/vitest.config.ts) which ALWAYS strips real provider key env (OPENAI/ANTHROPIC/OPENAI_COMPATIBLE/AI_API_KEY) and, under JOTMIND_VERIFY, rejects any non-`mock` AI_PROVIDER_CONFIG or leaked apiKey — so every AI/embedding assertion uses the deterministic mock only (7 verify-env unit tests). Guard checks the STARTING env at file load, so tests that set AI_PROVIDER_CONFIG=mock dynamically are unaffected. AC3: `pnpm verify:local-ai` (root -> apps/api `vitest run --config vitest.local-ai.config.ts`) runs new apps/api/src/ai/ollama.local-ai.test.ts (skipIf !OLLAMA_BASE_URL); the default vitest.config.ts EXCLUDES `**/*.local-ai.test.ts` (vitest exclude blocks even an explicit CLI path -> needed the separate config) so Ollama checks never run in `pnpm verify`. AC4: new apps/web/e2e/v1-flows.real.spec.ts (Playwright `real-chromium` project, gated by E2E_REAL_API=1 in apps/web/playwright.config.ts) covers login/setup, logout/login, KB create+select, entity CRUD, claim CRUD (2 entity args), search + table/timeline views, AI proposal review w/ mock provider (set server+user+kb AI policy local_only -> capture -> mock proposal -> accept), rule authoring+enable+run (status completed), and portable JSON export+import. webServer array boots `@jotmind/api start` (mock AI injected via webServer env block — NOT inline shell, JSON braces/commas break env assignment) + vite dev; e2e/global-setup.ts runs db:migrate + db:reset:test first. GOTCHA fixed: per-KB sibling components fetch once per kb.id & don't live-sync, so the spec reloads+reselects the KB after creating entities before the Claims form reads them. AC5: `pnpm test:api:db` (compose DB) applies migrations then runs the FULL API suite incl all 18 integration files (verified 505 pass, 0 skipped). AC6: fix_plan.md documents the gates + records dev-browser unavailability as deferred manual checks (Playwright substitutes; doesn't block V1 while green). AC7: fix_plan.md documents remaining stubs (stubProjector non-default + now surfaced in GraphViews UI via new `graph-projector-stubbed` banner; mock AI labeled in capture UI; deferred query-time vector search shows *-vector-unavailable notices; AI schema-migration not implemented) — none on a critical promised path. New root scripts: test:api:db, test:e2e:real, verify:db, verify:local-ai; apps/api scripts db:reset:test + verify:local-ai; apps/web script test:e2e:real. Verified: `pnpm verify` FULLY GREEN (format/typecheck/lint/test schemas+web10/test:api 429pass+76skip/test:e2e smoke); `pnpm verify:local-ai` skips cleanly w/o Ollama; `pnpm test:api:db` 505/505 pass against compose DB (AC5); `pnpm test:e2e:real` the full v1-flows.real spec PASSES against compose DB + real API + mock AI (AC4). No DB migration (verification-only). dev-browser skill unavailable -> Playwright per prior convention."
+    },
+    {
+      "id": "US-035",
+      "title": "Establish selected-KB invalidation model",
+      "description": "As a developer, I want a shared selected-KB invalidation mechanism so sibling panels can refresh consistently after mutations.",
+      "acceptanceCriteria": [
+        "Introduce one selected-KB invalidation approach such as a lightweight domain-keyed invalidation bus, selected-KB data context, or query/cache invalidation pattern.",
+        "Invalidation domains include entities, claims, notes, sources, source excerpts, graph views, proposals, jobs, audit, schemas, rules, modules, AI policy, search results, command results, and answers.",
+        "Avoid ad hoc parent refs for individual sibling panels unless a localized escape hatch is documented in code comments.",
+        "Existing panel-local refresh behavior still works when a panel is used in isolation.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "Refresh claim entity dropdowns after entity mutations",
+      "description": "As a KB editor, I want entities created or changed in the Entities panel to be available immediately in claim argument controls so that I can keep building the graph without reloading.",
+      "acceptanceCriteria": [
+        "Creating an entity in `Entities` invalidates the entity data used by `Claims`.",
+        "Editing, deleting, or merging an entity invalidates entity and claim-dependent data because merges can retarget claim arguments server-side.",
+        "The claim argument entity dropdown shows newly created entities without page reload or KB reselect.",
+        "Add a regression test for add entity -> claim argument dropdown updates.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "Refresh graph views after graph record mutations",
+      "description": "As a KB user, I want graph views to reflect entity, claim, note, source, and citation changes immediately so that table, network, detail, source/note, and timeline views stay trustworthy.",
+      "acceptanceCriteria": [
+        "Entity create/update/delete/merge invalidates `GraphViews` data.",
+        "Claim create/update/delete invalidates `GraphViews` data.",
+        "Note, source, and source excerpt create/update/delete invalidates `GraphViews` data.",
+        "GraphViews preserves existing projection-status banners and AGE fallback behavior while refreshing relational data.",
+        "Add regression coverage for add entity/claim -> graph table or network updates.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "Refresh capture citation controls after claim mutations",
+      "description": "As a KB editor, I want newly created claims to appear immediately in capture citation controls so that I can cite notes and sources without reloading.",
+      "acceptanceCriteria": [
+        "Claim create/update/delete invalidates the claims list used by `Capture` citation forms.",
+        "New claims appear in citation dropdowns without page reload or KB reselect.",
+        "Deleted claims no longer appear as selectable citation targets after refresh.",
+        "Add a regression test for add claim -> capture citation dropdown updates.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-039",
+      "title": "Refresh graph panels after proposal acceptance",
+      "description": "As a KB editor, I want accepted proposals to update graph panels immediately so that AI capture and import review feel connected to the canonical graph.",
+      "acceptanceCriteria": [
+        "Accepting a proposal invalidates proposals, entities, claims, notes, sources, source excerpts, graph views, search results, answers, and audit data as applicable.",
+        "Entities created by an accepted proposal appear in the Entities panel without reload.",
+        "Claims created by an accepted proposal appear in Claims and GraphViews without reload.",
+        "Notes or sources created by an accepted proposal appear in Capture/GraphViews without reload.",
+        "Add regression coverage for accept proposal -> entities/claims/graph views update.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-040",
+      "title": "Keep import jobs, proposal queue, and job status in sync",
+      "description": "As a KB editor, I want import job completion to update related job and proposal UI so that I know when imported candidates are ready for review.",
+      "acceptanceCriteria": [
+        "Import enqueue invalidates jobs and audit data.",
+        "Import job completion either polls or provides a clear refresh path that updates both import status and the proposal queue.",
+        "When an import creates a pending proposal, the Proposals panel can show it without page reload or KB reselect.",
+        "`KbAdmin` job status does not remain permanently stale after selected-KB jobs change.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-041",
+      "title": "Refresh claims and graph views after accepting inferred rule results",
+      "description": "As a KB editor, I want claims created from rule inferences to appear in Claims and GraphViews immediately so that accepted reasoning results become visible canonical graph data.",
+      "acceptanceCriteria": [
+        "Accepting an inferred result invalidates claims, graph views, search results, answers, and audit data.",
+        "The new inferred claim appears in the Claims panel without reload.",
+        "The new inferred claim appears in GraphViews without reload.",
+        "The Rules panel continues to mark the accepted inferred result as accepted.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-042",
+      "title": "Refresh schema and rule panels after module installation",
+      "description": "As a KB editor, I want installed modules to update schema and rule sibling panels immediately so that newly installed module content is discoverable.",
+      "acceptanceCriteria": [
+        "Installing a module invalidates modules, schemas, rules, and audit data.",
+        "New module-provided schema definitions appear in `SchemaDefinitions` without reload or KB reselect.",
+        "New module-provided rule packs or installed rules appear in `Rules` without reload or KB reselect.",
+        "The Modules panel still shows accurate installed/skipped status for idempotent installs.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-043",
+      "title": "Mark search, command, and answer results stale after graph changes",
+      "description": "As a KB user, I want previous search, command, and answer results to be marked stale or rerun after graph data changes so that I do not mistake old results for current state.",
+      "acceptanceCriteria": [
+        "Entity, claim, note, source, source excerpt, proposal-accept, and inferred-claim mutations invalidate search, command, and answer result freshness.",
+        "`Search`, `CommandBox`, and `Answers` either visibly mark existing results as stale or automatically rerun the last query when relevant data changes.",
+        "If auto-rerun is used, it avoids repeated network loops and keeps user-entered drafts intact.",
+        "Stale-state messaging tells the user what action to take, for example `Graph data changed. Rerun this search for current results.`",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-044",
+      "title": "Refresh Knowledge Base list after portable import",
+      "description": "As a user importing a portable JSON backup, I want the imported Knowledge Base to become selectable immediately so that backup restore feels complete.",
+      "acceptanceCriteria": [
+        "Successful portable JSON import in `KbAdmin` invalidates the parent Knowledge Base list.",
+        "The newly imported Knowledge Base appears in the Knowledge Base selector/list without page reload.",
+        "Import success messaging identifies the imported Knowledge Base name or id when available.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "Refresh AI policy availability surfaces after policy changes",
+      "description": "As a KB user, I want server, user, and KB AI policy changes to update every visible effective-policy and AI-availability indicator so that privacy controls are clear and current.",
+      "acceptanceCriteria": [
+        "Updating server AI policy invalidates global policy state, selected-KB effective policy, and AI availability surfaces.",
+        "Updating user AI policy invalidates global policy state, selected-KB effective policy, and AI availability surfaces.",
+        "Updating KB AI policy invalidates selected-KB effective policy and AI availability surfaces.",
+        "`CommandBox`, `Answers`, quick capture/proposals, and embeddings UI reflect current effective policy without reload.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-046",
+      "title": "Show AI provider configuration and readiness in the UI",
+      "description": "As an admin/operator, I want to understand which AI provider is active and whether it is usable so that I can diagnose AI availability without reading environment variables.",
+      "acceptanceCriteria": [
+        "The UI shows the active provider kind when backend configuration exposes it: `ollama`, `openai-compatible`, `openai`, `anthropic`, or `mock`.",
+        "The UI shows provider label/name, LLM model, embedding model, base URL, verification/readiness state, and local-vs-remote classification when available.",
+        "If provider configuration remains environment-only, the UI clearly states that provider config is managed by server environment and cannot be edited in the browser.",
+        "API keys and other secrets are never displayed, returned unnecessarily to the browser, logged in client metadata, or included in portable KB exports.",
+        "Mock providers are visibly labeled as deterministic demo output when exposed.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-047",
+      "title": "Handle provider configuration editing affordances safely",
+      "description": "As an admin/operator, I want provider setup controls to be either safely editable or clearly marked environment-only so that I do not enter secrets into non-functional UI.",
+      "acceptanceCriteria": [
+        "If in-browser provider editing is implemented, only system admins can create/update server-level provider configuration.",
+        "If provider editing is implemented, the form supports provider kind, display name/label, base URL where applicable, LLM model, embedding model, and API key where applicable.",
+        "Existing API keys are treated as write-only secrets; the UI must not reveal stored secret values.",
+        "Saving provider configuration validates required fields for the selected provider kind when editing is supported.",
+        "If persisted provider config is deferred, the UI shows no non-functional edit controls and points to environment-only setup guidance.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 47,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-048",
+      "title": "Show embedding status for the selected Knowledge Base",
+      "description": "As a KB user, I want to see embedding index status for the selected Knowledge Base so that I understand whether vector search and embedding generation are available.",
+      "acceptanceCriteria": [
+        "Add API helpers in `apps/web/src/api.ts` for `GET /api/knowledge-bases/:kbId/embeddings`.",
+        "Add an `EmbeddingsPanel` or equivalent selected-KB UI surface near KB AI policy/admin automation tooling.",
+        "The panel shows vector search available/unavailable and generation available/unavailable as distinct states.",
+        "The panel shows unavailable reasons when provided by the backend.",
+        "The panel shows total embeddings, counts by target type, model, dimensions, last indexed time, and provider kind when present in the response.",
+        "Viewer-role users can read embedding status if the backend permits the route.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 48,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-049",
+      "title": "Enqueue embedding reindex jobs from the UI",
+      "description": "As a KB editor, I want to enqueue embedding reindex jobs from the web UI so that I can rebuild vector search after graph changes or provider changes.",
+      "acceptanceCriteria": [
+        "Add API helper in `apps/web/src/api.ts` for `POST /api/knowledge-bases/:kbId/embeddings/reindex`.",
+        "KB editors can trigger `Reindex embeddings`; viewers cannot trigger it.",
+        "Editors can optionally choose target types: entity, claim, note, and source.",
+        "If remote embeddings would be used, the UI preserves remote embedding consent as separate from remote LLM consent.",
+        "After enqueueing, the UI shows the returned job id/status and points users to the selected-KB job status panel or displays a direct status link/summary.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 49,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-050",
+      "title": "Confirm remote AI calls when policy requires per-request consent",
+      "description": "As a privacy-conscious user, I want explicit confirmation before each remote AI call when effective policy is `remote_per_request` so that remote data sharing is intentional.",
+      "acceptanceCriteria": [
+        "Command interpretation asks for confirmation before a remote provider call under `remote_per_request`.",
+        "AI answer generation asks for confirmation before a remote provider call under `remote_per_request`.",
+        "Quick capture extraction asks for confirmation before a remote provider call under `remote_per_request`.",
+        "Embedding reindex asks for confirmation before remote embedding generation under `remote_per_request` and treats remote embeddings as a distinct consent category.",
+        "Confirmation discloses provider, model, feature name, and categories of content being sent.",
+        "Confirmation does not display raw prompts, API keys, or hidden system metadata.",
+        "Remote-call audit metadata uses allowlisted fields only and does not include raw prompts or secrets.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 50,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-051",
+      "title": "Promote command create suggestions into proposal flow",
+      "description": "As a KB editor, I want command `create` suggestions to become reviewable proposals so that useful AI-created structure can be accepted through the normal safe workflow.",
+      "acceptanceCriteria": [
+        "When `CommandBox` receives a `create` interpretation and the user is an editor, it offers a `Create proposal from suggestion` action if backend support exists.",
+        "The action stores structured candidate changes as a pending proposal and never writes directly to canonical graph records.",
+        "Provider, model, provenance, and confirmation metadata are preserved when available and safe to store.",
+        "The new proposal appears in the Proposals panel without reload.",
+        "If backend proposal creation from command interpretation is deferred, the create preview is clearly labeled as non-actionable preview-only and the UI does not imply it has been queued.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 51,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-052",
+      "title": "Improve proposal editing beyond raw JSON",
+      "description": "As a KB editor reviewing AI or import proposals, I want structured editing controls for common proposal item types so that I do not need to hand-edit JSON for routine corrections.",
+      "acceptanceCriteria": [
+        "Pending proposal items for create entity can be edited through structured fields for type, name, aliases/tags where supported, description, and properties.",
+        "Pending proposal items for create claim can be edited through structured fields for predicate, arguments, confidence, timestamps/properties where supported, and provenance-safe metadata.",
+        "Pending proposal items for create note and create source can be edited through structured title/content/source fields where supported by the proposal schema.",
+        "Raw JSON editing remains available as an advanced escape hatch.",
+        "Structured edits are validated against the same proposal change schema before saving.",
+        "Invalid edits cannot be accepted or executed.",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 52,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-053",
+      "title": "Add frontend coverage for existing AI policy and AI workflow states",
+      "description": "As a developer, I want focused frontend tests for AI-related UI states so regressions in privacy and review workflows are caught early.",
+      "acceptanceCriteria": [
+        "Add or extend tests for server/user AI policy display and editing role gates.",
+        "Add or extend tests for KB AI policy display and editing role gates.",
+        "Add or extend tests for command interpretation states: unavailable, interpreted search, low-confidence/fallback, and create preview.",
+        "Add or extend tests for quick capture extraction states: created, empty, unavailable, and error.",
+        "Add or extend tests for proposal accept/reject/edit visible behavior.",
+        "Tests use deterministic mock providers and do not require remote provider credentials or network calls.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 53,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-054",
+      "title": "Add frontend coverage for new embedding and provider UI",
+      "description": "As a developer, I want tests for embedding and provider UI so operators can trust setup and indexing screens.",
+      "acceptanceCriteria": [
+        "Add tests for embedding status available/unavailable states.",
+        "Add tests for embedding generation unavailable reasons.",
+        "Add tests for reindex action visibility by role.",
+        "Add tests for reindex enqueue success showing job id/status.",
+        "Add tests for provider configuration/readiness display, including local/remote/mock labels.",
+        "Tests assert that API keys or secret values are not rendered.",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 54,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
