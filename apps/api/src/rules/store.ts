@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { BuiltinRuleModule, BuiltinRulePack } from '@jotmind/schemas';
+import { parseRule, type BuiltinRuleModule, type BuiltinRulePack } from '@jotmind/schemas';
 import { getDb } from '../db/client.js';
 import { auditEvents, ruleDefinitions, type RuleDefinitionRow } from '../db/schema.js';
 
@@ -25,6 +25,54 @@ export function readBuiltinMeta(compiled: unknown): BuiltinRuleMeta | null {
     };
   }
   return null;
+}
+
+/** Authored-rule provenance stashed in `rule_definitions.compiled` (US-023). */
+export function readAuthoredCap(compiled: unknown): number | null {
+  if (!compiled || typeof compiled !== 'object') return null;
+  const authored = (compiled as { authored?: unknown }).authored;
+  if (!authored || typeof authored !== 'object') return null;
+  const cap = (authored as { recursionCap?: unknown }).recursionCap;
+  return typeof cap === 'number' ? cap : null;
+}
+
+export interface CreateRuleInput {
+  knowledgeBaseId: string;
+  name: string;
+  description?: string | null;
+  ruleText: string;
+  recursionCap?: number;
+  actorUserId: string;
+}
+
+export interface UpdateRuleInput {
+  knowledgeBaseId: string;
+  id: string;
+  name?: string;
+  description?: string | null;
+  ruleText?: string;
+  recursionCap?: number;
+  actorUserId: string;
+}
+
+export type CreateRuleResult =
+  | { ok: true; rule: RuleDefinitionRow }
+  | { ok: false; reason: 'duplicate_name' };
+
+export type UpdateRuleResult =
+  | { ok: true; rule: RuleDefinitionRow }
+  | { ok: false; reason: 'not_found' | 'duplicate_name' };
+
+/** Build the `compiled` JSONB for an authored rule from its parsed analysis. */
+function buildAuthoredCompiled(ruleText: string, recursionCap?: number): Record<string, unknown> {
+  const analysis = parseRule(ruleText, recursionCap === undefined ? undefined : { recursionCap });
+  return {
+    authored: {
+      ast: analysis.rule,
+      validation: { valid: analysis.valid, errors: analysis.errors },
+      recursionCap: analysis.recursionCap,
+    },
+  };
 }
 
 export interface InstallRulePackInput {
@@ -66,6 +114,11 @@ export interface RuleStore {
   getRule(knowledgeBaseId: string, id: string): Promise<RuleDefinitionRow | undefined>;
   installRulePack(input: InstallRulePackInput): Promise<InstallRulePackStoreResult>;
   setRuleStatus(input: SetRuleStatusInput): Promise<RuleDefinitionRow | undefined>;
+  /** Author a custom rule (US-023). Always created as a `draft`. */
+  createRule(input: CreateRuleInput): Promise<CreateRuleResult>;
+  /** Edit an authored rule (US-023). Re-validates; an enabled rule that becomes
+   * invalid is demoted to `draft` so invalid rules cannot stay enabled. */
+  updateRule(input: UpdateRuleInput): Promise<UpdateRuleResult>;
 }
 
 /** PostgreSQL-backed RuleStore. Resolves the Drizzle client per call. */
@@ -208,6 +261,122 @@ export const dbRuleStore: RuleStore = {
       });
 
       return row;
+    });
+  },
+
+  async createRule(input) {
+    return getDb().transaction(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(ruleDefinitions)
+        .where(
+          and(
+            eq(ruleDefinitions.knowledgeBaseId, input.knowledgeBaseId),
+            eq(ruleDefinitions.name, input.name),
+            isNull(ruleDefinitions.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (existing[0]) return { ok: false as const, reason: 'duplicate_name' as const };
+
+      const rows = await tx
+        .insert(ruleDefinitions)
+        .values({
+          knowledgeBaseId: input.knowledgeBaseId,
+          name: input.name,
+          description: input.description ?? null,
+          ruleText: input.ruleText,
+          compiled: buildAuthoredCompiled(input.ruleText, input.recursionCap),
+          status: 'draft',
+          version: 1,
+          createdBy: input.actorUserId,
+        })
+        .returning();
+      const row = rows[0];
+      if (!row) throw new Error('Failed to create rule');
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: input.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'rule.created',
+        targetType: 'rule',
+        targetId: row.id,
+        metadata: { name: row.name, version: row.version },
+      });
+
+      return { ok: true as const, rule: row };
+    });
+  },
+
+  async updateRule(input) {
+    return getDb().transaction(async (tx) => {
+      const existingRows = await tx
+        .select()
+        .from(ruleDefinitions)
+        .where(
+          and(
+            eq(ruleDefinitions.id, input.id),
+            eq(ruleDefinitions.knowledgeBaseId, input.knowledgeBaseId),
+            isNull(ruleDefinitions.deletedAt),
+          ),
+        )
+        .limit(1);
+      const current = existingRows[0];
+      if (!current) return { ok: false as const, reason: 'not_found' as const };
+
+      if (input.name !== undefined && input.name !== current.name) {
+        const dup = await tx
+          .select()
+          .from(ruleDefinitions)
+          .where(
+            and(
+              eq(ruleDefinitions.knowledgeBaseId, input.knowledgeBaseId),
+              eq(ruleDefinitions.name, input.name),
+              isNull(ruleDefinitions.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (dup[0]) return { ok: false as const, reason: 'duplicate_name' as const };
+      }
+
+      const nextText = input.ruleText ?? current.ruleText;
+      const nextCap = input.recursionCap ?? readAuthoredCap(current.compiled) ?? undefined;
+      const compiled = buildAuthoredCompiled(nextText, nextCap);
+      const valid = (compiled.authored as { validation: { valid: boolean } }).validation.valid;
+      // An enabled rule that becomes invalid cannot stay enabled (AC6).
+      const nextStatus = current.status === 'enabled' && !valid ? 'draft' : current.status;
+
+      const now = new Date();
+      const rows = await tx
+        .update(ruleDefinitions)
+        .set({
+          name: input.name ?? current.name,
+          description: input.description === undefined ? current.description : input.description,
+          ruleText: nextText,
+          compiled,
+          status: nextStatus,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(ruleDefinitions.id, input.id),
+            eq(ruleDefinitions.knowledgeBaseId, input.knowledgeBaseId),
+          ),
+        )
+        .returning();
+      const row = rows[0];
+      if (!row) throw new Error('Failed to update rule');
+
+      await tx.insert(auditEvents).values({
+        knowledgeBaseId: input.knowledgeBaseId,
+        actorUserId: input.actorUserId,
+        action: 'rule.updated',
+        targetType: 'rule',
+        targetId: row.id,
+        metadata: { name: row.name, version: row.version },
+      });
+
+      return { ok: true as const, rule: row };
     });
   },
 };

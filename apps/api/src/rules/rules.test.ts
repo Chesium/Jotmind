@@ -6,7 +6,13 @@ import { createApp } from '../app.js';
 import type { RuleDefinitionRow, SessionRow, UserRow } from '../db/schema.js';
 import { type AuthStore } from '../auth/index.js';
 import type { KnowledgeBaseStore } from '../kb/store.js';
-import type { InstallRulePackInput, RuleStore, SetRuleStatusInput } from './store.js';
+import type {
+  CreateRuleInput,
+  InstallRulePackInput,
+  RuleStore,
+  SetRuleStatusInput,
+  UpdateRuleInput,
+} from './store.js';
 
 function createMemoryAuthStore(): AuthStore {
   const usersById = new Map<string, UserRow>();
@@ -141,6 +147,54 @@ function createMemoryRuleStore(): RuleStore & { audits: SideEffect[] } {
         targetId: row.id,
       });
       return Promise.resolve(row);
+    },
+    createRule: (input: CreateRuleInput) => {
+      const dup = [...byId.values()].find(
+        (r) =>
+          r.knowledgeBaseId === input.knowledgeBaseId &&
+          r.name === input.name &&
+          r.deletedAt === null,
+      );
+      if (dup) return Promise.resolve({ ok: false as const, reason: 'duplicate_name' as const });
+      const now = new Date();
+      const row: RuleDefinitionRow = {
+        id: randomUUID(),
+        knowledgeBaseId: input.knowledgeBaseId,
+        name: input.name,
+        description: input.description ?? null,
+        ruleText: input.ruleText,
+        compiled: { authored: { recursionCap: input.recursionCap ?? null } },
+        status: 'draft',
+        version: 1,
+        createdBy: input.actorUserId,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+      byId.set(row.id, row);
+      audits.push({ action: 'rule.created', targetId: row.id });
+      return Promise.resolve({ ok: true as const, rule: row });
+    },
+    updateRule: (input: UpdateRuleInput) => {
+      const row = byId.get(input.id);
+      if (!row || row.knowledgeBaseId !== input.knowledgeBaseId || row.deletedAt !== null) {
+        return Promise.resolve({ ok: false as const, reason: 'not_found' as const });
+      }
+      if (input.name !== undefined && input.name !== row.name) {
+        const dup = [...byId.values()].find(
+          (r) =>
+            r.knowledgeBaseId === input.knowledgeBaseId &&
+            r.name === input.name &&
+            r.deletedAt === null,
+        );
+        if (dup) return Promise.resolve({ ok: false as const, reason: 'duplicate_name' as const });
+      }
+      if (input.name !== undefined) row.name = input.name;
+      if (input.description !== undefined) row.description = input.description;
+      if (input.ruleText !== undefined) row.ruleText = input.ruleText;
+      row.updatedAt = new Date();
+      audits.push({ action: 'rule.updated', targetId: row.id });
+      return Promise.resolve({ ok: true as const, rule: row });
     },
   };
 }
@@ -291,5 +345,145 @@ describe('rules router (US-022)', () => {
 
   it('returns 404 for non-members', async () => {
     await ctx.agent.get(`/api/knowledge-bases/${KB}/rules`).expect(404);
+  });
+});
+
+const VALID_RULE =
+  'knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).';
+const INVALID_RULE = 'knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a).';
+
+describe('custom rule authoring (US-023)', () => {
+  let ctx: Awaited<ReturnType<typeof setup>>;
+  beforeEach(async () => {
+    ctx = await setup();
+  });
+
+  it('validates rule text without saving (viewer+, read-only)', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'viewer');
+    const ok = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/validate`)
+      .send({ ruleText: VALID_RULE })
+      .expect(200);
+    expect(ok.body.valid).toBe(true);
+    expect(ok.body.errors).toEqual([]);
+
+    const bad = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules/validate`)
+      .send({ ruleText: INVALID_RULE })
+      .expect(200);
+    expect(bad.body.valid).toBe(false);
+    expect(bad.body.errors.length).toBeGreaterThan(0);
+  });
+
+  it('creates an authored rule as a draft with audit (editor, AC5/AC6)', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    const res = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'knows', ruleText: VALID_RULE })
+      .expect(201);
+    expect(res.body.status).toBe('draft');
+    expect(res.body.valid).toBe(true);
+    expect(res.body.moduleId).toBeNull();
+    expect(ctx.ruleStore.audits.some((a) => a.action === 'rule.created')).toBe(true);
+  });
+
+  it('saves an invalid rule as a draft (AC6) but refuses to enable it (AC5)', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    const created = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'broken', ruleText: INVALID_RULE })
+      .expect(201);
+    expect(created.body.status).toBe('draft');
+    expect(created.body.valid).toBe(false);
+    expect(created.body.validationErrors.length).toBeGreaterThan(0);
+
+    await ctx.agent
+      .patch(`/api/knowledge-bases/${KB}/rules/${created.body.id}`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ status: 'enabled' })
+      .expect(422);
+  });
+
+  it('enables a valid authored rule (AC5)', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    const created = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'knows', ruleText: VALID_RULE })
+      .expect(201);
+    const enabled = await ctx.agent
+      .patch(`/api/knowledge-bases/${KB}/rules/${created.body.id}`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ status: 'enabled' })
+      .expect(200);
+    expect(enabled.body.status).toBe('enabled');
+  });
+
+  it('rejects a duplicate rule name with 409', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'knows', ruleText: VALID_RULE })
+      .expect(201);
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'knows', ruleText: VALID_RULE })
+      .expect(409);
+  });
+
+  it('edits an authored rule via PUT (editor, AC5)', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    const created = await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'knows', ruleText: INVALID_RULE })
+      .expect(201);
+    expect(created.body.valid).toBe(false);
+    const edited = await ctx.agent
+      .put(`/api/knowledge-bases/${KB}/rules/${created.body.id}`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ ruleText: VALID_RULE })
+      .expect(200);
+    expect(edited.body.valid).toBe(true);
+    expect(ctx.ruleStore.audits.some((a) => a.action === 'rule.updated')).toBe(true);
+  });
+
+  it('returns 404 when editing a missing rule', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    await ctx.agent
+      .put(`/api/knowledge-bases/${KB}/rules/${randomUUID()}`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ ruleText: VALID_RULE })
+      .expect(404);
+  });
+
+  it('forbids viewers from creating rules (read-only)', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'viewer');
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'knows', ruleText: VALID_RULE })
+      .expect(403);
+  });
+
+  it('requires CSRF to create a rule', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .send({ name: 'knows', ruleText: VALID_RULE })
+      .expect(403);
+  });
+
+  it('rejects an empty rule text with 400', async () => {
+    ctx.kbStore.setRole(KB, ctx.userId, 'editor');
+    await ctx.agent
+      .post(`/api/knowledge-bases/${KB}/rules`)
+      .set('x-csrf-token', ctx.csrf)
+      .send({ name: 'knows', ruleText: '' })
+      .expect(400);
   });
 });

@@ -125,3 +125,87 @@ describe.skipIf(!hasDatabase)('rule pack install integration', () => {
     expect(actions).toContain('rule.disabled');
   });
 });
+
+describe.skipIf(!hasDatabase)('custom rule authoring integration (US-023)', () => {
+  let kbId: string;
+  let userId: string;
+
+  beforeAll(async () => {
+    await runMigrations();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    const [owner] = await getDb()
+      .insert(users)
+      .values({ email: 'authoring@integration.test', passwordHash: 'x' })
+      .returning();
+    userId = owner!.id;
+    const [kb] = await getDb()
+      .insert(knowledgeBases)
+      .values({ name: 'Authoring KB', createdBy: userId })
+      .returning();
+    kbId = kb!.id;
+  });
+
+  afterAll(async () => {
+    await truncateAll();
+    await closeDb();
+  });
+
+  it('creates an authored rule as a draft, persists the compiled AST + validation, and audits', async () => {
+    const result = await dbRuleStore.createRule({
+      knowledgeBaseId: kbId,
+      name: 'knows',
+      ruleText:
+        'knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).',
+      actorUserId: userId,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rule.status).toBe('draft');
+    const compiled = result.rule.compiled as {
+      authored: { ast: unknown; validation: { valid: boolean }; recursionCap: number };
+    };
+    expect(compiled.authored.validation.valid).toBe(true);
+    expect(compiled.authored.ast).toBeTruthy();
+    expect(compiled.authored.recursionCap).toBe(16);
+
+    const audits = await getDb()
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.targetId, result.rule.id), eq(auditEvents.action, 'rule.created')));
+    expect(audits.length).toBe(1);
+  });
+
+  it('rejects a duplicate name and updates a rule (re-validating the text)', async () => {
+    const first = await dbRuleStore.createRule({
+      knowledgeBaseId: kbId,
+      name: 'dup',
+      ruleText: 'p(?a) <- claim(?a, "x").',
+      actorUserId: userId,
+    });
+    expect(first.ok).toBe(true);
+    const dup = await dbRuleStore.createRule({
+      knowledgeBaseId: kbId,
+      name: 'dup',
+      ruleText: 'p(?a) <- claim(?a, "x").',
+      actorUserId: userId,
+    });
+    expect(dup.ok).toBe(false);
+    if (dup.ok) return;
+    expect(dup.reason).toBe('duplicate_name');
+
+    if (!first.ok) return;
+    const updated = await dbRuleStore.updateRule({
+      knowledgeBaseId: kbId,
+      id: first.rule.id,
+      ruleText: 'p(?a) <- entity(?a, ?t, ?n).',
+      actorUserId: userId,
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    const compiled = updated.rule.compiled as { authored: { validation: { valid: boolean } } };
+    expect(compiled.authored.validation.valid).toBe(true);
+  });
+});

@@ -728,6 +728,43 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   `rules`, `rules-pack-<mod>-<pack>`, `rules-install-<mod>-<pack>`,
   `rules-rule-<id>`, `rules-rule-status-<id>`, `rules-toggle-<id>`.
 
+## Restricted Datalog rule authoring (US-023)
+
+- Custom rules are a tiny **restricted Datalog** dialect parsed into a structured
+  AST by `parseRule(text, { recursionCap? })` in `@jotmind/schemas` `rules.ts`.
+  Rules are NEVER `eval`'d — the parser only produces data, so there is no
+  filesystem/network/process/JS/provider access (AC7). Execution is US-024.
+- Syntax (AC1): `head(?a, ?b) <- atom1, atom2, ... .` Terms are explicit
+  `?variables` or `"string literals"` only. Built-in low-level predicates (AC2):
+  `entity(?id, ?type, ?name)` (3), `claim(?id, ?predicate)` (2),
+  `arg(?claimId, ?role, ?entityId)` (3) — see `RULE_BUILTIN_PREDICATES`.
+- The validator enforces: built-in arity; **range-restriction safety** (every
+  head var must appear in a positive, non-negated body atom — AC3); rejection of
+  skolem/function terms, blank nodes (`_:x`), anonymous/existential vars (`?_`),
+  and quantifier keywords (`exists`/`∃`…) (AC4); a head cannot redefine a
+  built-in predicate; body atoms must be a built-in OR the rule's own head
+  (bounded **direct recursion** only — AC7/AC8); restricted negation (negated-atom
+  vars must also be bound positively). Recursion cap is configurable and clamped
+  to `[RULE_RECURSION_CAP_MIN..MAX]` (default 16) via `clampRecursionCap`.
+- Store (`rules/store.ts`): `createRule` (always `status:'draft'`, version 1,
+  duplicate name → `{ok:false,reason:'duplicate_name'}`) and `updateRule`
+  (re-validates; an **enabled** rule that becomes invalid is demoted to `draft`).
+  Both stash `{ authored: { ast, validation, recursionCap } }` in the
+  `rule_definitions.compiled` JSONB (parallel to the `builtin` key from US-022);
+  `readAuthoredCap` reads the stored cap. No migration — `rule_definitions`
+  existed from US-005.
+- Router (`rules/index.ts`): `POST /validate` (viewer+, read-only, no CSRF — live
+  UI preview), `POST /` create + `PUT /:ruleId` edit (editor + CSRF). The
+  existing `PATCH /:ruleId` status toggle now **gates enable on validity**:
+  enabling an invalid rule → **422** with `validationErrors` (AC5/AC6). `toRule`
+  re-parses `ruleText` as the single source of truth so `valid`/`validationErrors`/
+  `recursionCap` are surfaced consistently for built-in AND authored rules.
+- Web: `Rules.tsx` gained an "Author a Custom Rule" form (Validate +
+  Save-as-draft, editor-only) and a `✓ valid`/`✗ invalid` badge per installed
+  rule. API helpers in `api.ts`: `validateRule`/`createRule`/`updateRule`.
+  Testids: `rules-author-form`/`-name`/`-text`/`-cap`/`-validate`/`-submit`/
+  `-validation`/`-valid`/`-invalid`, `rules-rule-valid-<id>`/`rules-rule-errors-<id>`.
+
 ## Validation
 
 - Run `pnpm verify:quick` for fast feedback; `pnpm verify` for the full suite (adds API + e2e).

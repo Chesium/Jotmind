@@ -22,6 +22,7 @@ import {
   installRulePackResultSchema,
   ruleDefinitionListSchema,
   ruleDefinitionSchema,
+  ruleValidationResultSchema,
   publicJobSchema,
   publicUserSchema,
   setupStatusSchema,
@@ -40,8 +41,11 @@ import {
   type Proposal,
   type ProposalChanges,
   type BuiltinRuleModule,
+  type CreateRuleRequest,
   type InstallRulePackResult,
   type RuleDefinition,
+  type RuleValidationResult,
+  type UpdateRuleRequest,
   type ResolvedAiPolicy,
   type UpdateAiPolicy,
   type AuditEvent,
@@ -773,6 +777,55 @@ export async function setRuleStatus(
     credentials: 'include',
     headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
     body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleDefinitionSchema.parse(await res.json());
+}
+
+/** Validate rule text without saving (US-023, viewer+; live preview). */
+export async function validateRule(
+  knowledgeBaseId: string,
+  ruleText: string,
+  recursionCap?: number,
+): Promise<RuleValidationResult> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/validate`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ruleText, recursionCap }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleValidationResultSchema.parse(await res.json());
+}
+
+/** Author a custom rule (US-023, editor+). Saved as a draft. */
+export async function createRule(
+  knowledgeBaseId: string,
+  body: CreateRuleRequest,
+  csrfToken: string,
+): Promise<RuleDefinition> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return ruleDefinitionSchema.parse(await res.json());
+}
+
+/** Edit an authored rule (US-023, editor+). */
+export async function updateRule(
+  knowledgeBaseId: string,
+  ruleId: string,
+  body: UpdateRuleRequest,
+  csrfToken: string,
+): Promise<RuleDefinition> {
+  const res = await fetch(`/api/knowledge-bases/${knowledgeBaseId}/rules/${ruleId}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return ruleDefinitionSchema.parse(await res.json());

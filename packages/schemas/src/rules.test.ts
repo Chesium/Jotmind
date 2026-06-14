@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_RULE_MODULES,
   builtinRuleModuleListSchema,
+  clampRecursionCap,
   findBuiltinRulePack,
   installRulePackSchema,
+  parseRule,
+  RULE_RECURSION_CAP_DEFAULT,
+  RULE_RECURSION_CAP_MAX,
+  RULE_RECURSION_CAP_MIN,
   updateRuleStatusSchema,
 } from './rules.js';
 
@@ -54,5 +59,103 @@ describe('built-in rule packs (US-022)', () => {
     expect(updateRuleStatusSchema.safeParse({ status: 'enabled' }).success).toBe(true);
     expect(updateRuleStatusSchema.safeParse({ status: 'disabled' }).success).toBe(true);
     expect(updateRuleStatusSchema.safeParse({ status: 'draft' }).success).toBe(false);
+  });
+});
+
+describe('restricted Datalog rule parser (US-023)', () => {
+  it('parses the canonical example with explicit variables (AC1/AC2)', () => {
+    const r = parseRule(
+      'knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a), arg(?c, "object", ?b).',
+    );
+    expect(r.valid).toBe(true);
+    expect(r.errors).toEqual([]);
+    expect(r.rule).toBeTruthy();
+    expect(r.rule!.head.predicate).toBe('knows');
+    expect(r.rule!.head.args).toEqual([
+      { kind: 'var', name: 'a' },
+      { kind: 'var', name: 'b' },
+    ]);
+    expect(r.rule!.body).toHaveLength(3);
+    expect(r.rule!.body[0]).toMatchObject({ predicate: 'claim', negated: false });
+    expect(r.rule!.recursive).toBe(false);
+  });
+
+  it('accepts all three built-in low-level predicates with correct arity (AC2)', () => {
+    const r = parseRule('p(?id) <- entity(?id, ?t, ?n), claim(?cid, "x"), arg(?cid, "r", ?id).');
+    expect(r.valid).toBe(true);
+  });
+
+  it('rejects wrong built-in arity', () => {
+    const r = parseRule('p(?a) <- entity(?a, ?b).');
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(' ')).toContain('takes 3 arguments');
+  });
+
+  it('enforces range-restriction safety: head var must be in a positive atom (AC3)', () => {
+    const r = parseRule('knows(?a, ?b) <- claim(?c, "knows"), arg(?c, "subject", ?a).');
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(' ')).toContain('range restriction');
+    expect(r.errors.join(' ')).toContain('?b');
+  });
+
+  it('rejects skolem / function terms (AC4)', () => {
+    const r = parseRule('p(?a) <- entity(?a, f(?a), ?n).');
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(' ')).toContain('Skolem/function terms');
+  });
+
+  it('rejects blank nodes and anonymous/existential variables (AC4)', () => {
+    expect(parseRule('p(?a) <- claim(?a, _:x).').valid).toBe(false);
+    expect(parseRule('p(?a) <- claim(?a, ?_).').valid).toBe(false);
+    const ex = parseRule('p(?a) <- exists(?a), claim(?a, "x").');
+    expect(ex.valid).toBe(false);
+    expect(ex.errors.join(' ')).toContain('Existential');
+  });
+
+  it('rejects a head that redefines a built-in predicate (AC4)', () => {
+    const r = parseRule('entity(?a, ?t, ?n) <- claim(?a, "x").');
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(' ')).toContain('redefine the built-in predicate');
+  });
+
+  it('rejects unknown predicates (only built-ins or self-recursion allowed, AC7/AC8)', () => {
+    const r = parseRule('p(?a) <- mystery(?a).');
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(' ')).toContain('Unknown predicate');
+  });
+
+  it('allows bounded direct recursion and reports it with a cap (AC8)', () => {
+    const r = parseRule(
+      'ancestor(?a, ?b) <- claim(?c, "parent_of"), arg(?c, "parent", ?a), arg(?c, "child", ?b).\n',
+    );
+    expect(r.valid).toBe(true);
+    const rec = parseRule(
+      'reach(?a, ?b) <- claim(?c, "parent_of"), arg(?c, "parent", ?a), arg(?c, "child", ?b), reach(?b, ?a).',
+      { recursionCap: 8 },
+    );
+    expect(rec.valid).toBe(true);
+    expect(rec.recursive).toBe(true);
+    expect(rec.recursionCap).toBe(8);
+    expect(rec.rule!.recursionCap).toBe(8);
+  });
+
+  it('clamps the recursion cap to the configured bounds', () => {
+    expect(clampRecursionCap(undefined)).toBe(RULE_RECURSION_CAP_DEFAULT);
+    expect(clampRecursionCap(0)).toBe(RULE_RECURSION_CAP_MIN);
+    expect(clampRecursionCap(1000)).toBe(RULE_RECURSION_CAP_MAX);
+    const r = parseRule('p(?a) <- claim(?a, "x").', { recursionCap: 9999 });
+    expect(r.errors.join(' ')).toContain('recursionCap must be');
+  });
+
+  it('requires a non-empty body and a trailing dot', () => {
+    expect(parseRule('p(?a) <- .').valid).toBe(false);
+    expect(parseRule('p(?a) <- claim(?a, "x")').valid).toBe(false);
+  });
+
+  it('supports restricted negation but rejects unsafe negation (AC7)', () => {
+    const safe = parseRule('lonely(?a) <- entity(?a, "Person", ?n), not arg(?c, "person", ?a).');
+    // ?c is only in a negated atom and ?a is positive; negation var ?c is unsafe
+    expect(safe.valid).toBe(false);
+    expect(safe.errors.join(' ')).toContain('Unsafe negation');
   });
 });
