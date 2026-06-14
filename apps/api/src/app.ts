@@ -28,6 +28,7 @@ import { createSearchRouter, type SearchStore } from './search/index.js';
 import { createRuleRouter, type RuleRunStore, type RuleStore } from './rules/index.js';
 import { createSchemaRouter, dbSchemaStore, type SchemaStore } from './schema-defs/index.js';
 import { createModuleRouter } from './modules/index.js';
+import { createKbExportRouter, createPortableImportRouter } from './exports/index.js';
 import { createEmbeddingsRouter, type EmbeddingStore } from './embeddings/index.js';
 import { createImportRouter } from './imports/index.js';
 import {
@@ -281,6 +282,37 @@ export function createApp(options: AppOptions = {}): Express {
       ruleStore: options.ruleStore,
       kbStore: options.kbStore,
       authStore,
+    }),
+  );
+  // Portable JSON/Markdown/CSV export + import (US-032). The import router is
+  // mounted at a sibling path; the KB router has no matching POST route so the
+  // request falls through to it.
+  app.use(
+    '/api/knowledge-bases/import-portable',
+    createPortableImportRouter({
+      kbStore: options.kbStore,
+      authStore,
+      entityStore: options.entityStore,
+      claimStore: options.claimStore,
+      noteStore: options.noteStore,
+      sourceStore: options.sourceStore,
+      sourceExcerptStore: options.sourceExcerptStore,
+      schemaStore,
+      ruleStore: options.ruleStore,
+    }),
+  );
+  app.use(
+    '/api/knowledge-bases/:kbId/export',
+    createKbExportRouter({
+      kbStore: options.kbStore,
+      authStore,
+      entityStore: options.entityStore,
+      claimStore: options.claimStore,
+      noteStore: options.noteStore,
+      sourceStore: options.sourceStore,
+      sourceExcerptStore: options.sourceExcerptStore,
+      schemaStore,
+      ruleStore: options.ruleStore,
     }),
   );
   const commandInterpreter =

@@ -109,6 +109,18 @@ export function createMemorySchemaStore(): SchemaStore & {
           .filter((d) => d.knowledgeBaseId === kb && d.deletedAt === null)
           .map((d) => ({ ...d, activeVersion: activeVersionFor(d.id) })),
       ),
+    listDefinitionsWithVersions: (kb) =>
+      Promise.resolve(
+        [...defs.values()]
+          .filter((d) => d.knowledgeBaseId === kb && d.deletedAt === null)
+          .map((d) => ({
+            ...d,
+            activeVersion: activeVersionFor(d.id),
+            versions: [...versions.values()]
+              .filter((v) => v.schemaDefinitionId === d.id && v.deletedAt === null)
+              .sort((a, b) => a.version - b.version),
+          })),
+      ),
     getDefinition: (kb, id) => {
       const d = defs.get(id);
       if (!d || d.knowledgeBaseId !== kb || d.deletedAt !== null) return Promise.resolve(undefined);

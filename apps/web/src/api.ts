@@ -95,6 +95,9 @@ import {
   type UpdateEntity,
   type UpdateNote,
   type UpdateSource,
+  type PortableKnowledgeBaseExport,
+  type PortableImportResult,
+  portableImportResultSchema,
 } from '@jotmind/schemas';
 
 async function errorMessage(res: Response): Promise<string> {
@@ -578,6 +581,38 @@ export async function listKbJobs(knowledgeBaseId: string): Promise<PublicJob[]> 
   if (!res.ok) throw new Error(await errorMessage(res));
   const body = (await res.json()) as { jobs: unknown[] };
   return body.jobs.map((j) => publicJobSchema.parse(j));
+}
+
+// --- Portable export / import (US-032) -------------------------------------
+
+/** URL of the full-fidelity portable JSON export for a Knowledge Base. */
+export function portableJsonExportUrl(knowledgeBaseId: string): string {
+  return `/api/knowledge-bases/${knowledgeBaseId}/export/json`;
+}
+
+/** URL of the human-readable Markdown export (not full-fidelity). */
+export function markdownExportUrl(knowledgeBaseId: string): string {
+  return `/api/knowledge-bases/${knowledgeBaseId}/export/markdown`;
+}
+
+/** URL of the structured-subset CSV export (entities only). */
+export function csvExportUrl(knowledgeBaseId: string): string {
+  return `/api/knowledge-bases/${knowledgeBaseId}/export/csv`;
+}
+
+/** Import a portable export document, creating a NEW Knowledge Base. */
+export async function importPortableKnowledgeBase(
+  exported: PortableKnowledgeBaseExport,
+  csrfToken: string,
+): Promise<PortableImportResult> {
+  const res = await fetch('/api/knowledge-bases/import-portable', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(exported),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return portableImportResultSchema.parse(await res.json());
 }
 
 // --- Layered AI privacy policy (US-016) ------------------------------------

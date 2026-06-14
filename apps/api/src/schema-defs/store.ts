@@ -22,6 +22,13 @@ export interface SchemaDefinitionWithVersion extends SchemaDefinitionRow {
   activeVersion: SchemaVersionRow | null;
 }
 
+/** A schema definition together with its FULL version history (US-032 export). */
+export interface SchemaDefinitionWithVersions extends SchemaDefinitionRow {
+  activeVersion: SchemaVersionRow | null;
+  /** All non-deleted versions, ascending by version number. */
+  versions: SchemaVersionRow[];
+}
+
 export interface CreateSchemaDefinitionInput {
   knowledgeBaseId: string;
   kind: SchemaDefinitionKind;
@@ -71,6 +78,11 @@ export type UpdateSchemaDefinitionResult =
  */
 export interface SchemaStore {
   listDefinitions(knowledgeBaseId: string): Promise<SchemaDefinitionWithVersion[]>;
+  /**
+   * List schema definitions WITH their full version history (US-032 portable
+   * export). Versions are ascending by version number.
+   */
+  listDefinitionsWithVersions(knowledgeBaseId: string): Promise<SchemaDefinitionWithVersions[]>;
   getDefinition(
     knowledgeBaseId: string,
     id: string,
@@ -129,6 +141,33 @@ export const dbSchemaStore: SchemaStore = {
       .orderBy(desc(schemaDefinitions.createdAt));
     return Promise.all(
       defs.map(async (def) => ({ ...def, activeVersion: await loadActiveVersion(db, def.id) })),
+    );
+  },
+
+  async listDefinitionsWithVersions(knowledgeBaseId) {
+    const db = getDb();
+    const defs = await db
+      .select()
+      .from(schemaDefinitions)
+      .where(
+        and(
+          eq(schemaDefinitions.knowledgeBaseId, knowledgeBaseId),
+          isNull(schemaDefinitions.deletedAt),
+        ),
+      )
+      .orderBy(desc(schemaDefinitions.createdAt));
+    return Promise.all(
+      defs.map(async (def) => {
+        const versions = await db
+          .select()
+          .from(schemaVersions)
+          .where(
+            and(eq(schemaVersions.schemaDefinitionId, def.id), isNull(schemaVersions.deletedAt)),
+          )
+          .orderBy(schemaVersions.version);
+        const activeVersion = versions.find((v) => v.isActive) ?? null;
+        return { ...def, activeVersion, versions };
+      }),
     );
   },
 

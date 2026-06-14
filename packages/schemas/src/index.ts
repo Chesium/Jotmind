@@ -3,6 +3,7 @@ export * from './answers.js';
 export * from './auth.js';
 export * from './command.js';
 export * from './embeddings.js';
+export * from './exports.js';
 export * from './graph.js';
 export * from './health.js';
 export * from './imports.js';

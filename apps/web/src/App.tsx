@@ -332,7 +332,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
       {selectedKb && <Proposals kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <Rules kb={selectedKb} csrfToken={csrfToken} />}
       {selectedKb && <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />}
-      {selectedKb && <KbAdmin kb={selectedKb} />}
+      {selectedKb && <KbAdmin kb={selectedKb} csrfToken={csrfToken} />}
     </section>
   );
 }

@@ -108,3 +108,11 @@ volume** (or use `pg_dump`) to preserve your data — losing it loses your Knowl
 Browser storage is **non-canonical**: it is only a cache/working copy and must never be treated as
 the source of truth. Clearing browser data does not lose canonical content; deleting the database
 volume does.
+
+### Export & backup
+
+A Knowledge Base owner/admin can export a KB from the in-app administration panel as **portable JSON**
+(full-fidelity backup/restore), **Markdown** (human-readable, not full-fidelity), or **CSV** (structured
+subset). Importing a portable JSON always creates a new Knowledge Base. Provider secrets such as API keys
+are excluded from portable exports. Whole-instance PostgreSQL dump/restore is an operator maintenance
+task. See [docs/backup-restore.md](docs/backup-restore.md) for details.
