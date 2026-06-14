@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   aiProviderConfigSchema,
+  aiProviderStatusSchema,
+  buildAiProviderStatus,
   buildRemoteAiAuditMetadata,
   DEFAULT_AI_POLICY,
   embeddingResultSchema,
@@ -80,6 +82,74 @@ describe('secret separation (AC4)', () => {
     const config = aiProviderConfigSchema.parse({ kind: 'mock', name: 'Mock' });
     expect(providerConfigHasSecrets(config)).toBe(false);
     expect('apiKey' in toPortableProviderConfig(config)).toBe(false);
+  });
+});
+
+describe('buildAiProviderStatus (US-046)', () => {
+  it('reports not-configured when no provider is set', () => {
+    const status = buildAiProviderStatus(null);
+    expect(status).toEqual({
+      configured: false,
+      editable: false,
+      configSource: 'environment',
+    });
+    expect(aiProviderStatusSchema.parse(status)).toEqual(status);
+  });
+
+  it('classifies a local ollama provider and exposes models + base url (AC1/AC2)', () => {
+    const config = aiProviderConfigSchema.parse({
+      kind: 'ollama',
+      name: 'Local Ollama',
+      llmModel: 'llama3',
+      embeddingModel: 'nomic-embed-text',
+    });
+    const status = buildAiProviderStatus(config);
+    expect(status.configured).toBe(true);
+    expect(status.kind).toBe('ollama');
+    expect(status.name).toBe('Local Ollama');
+    expect(status.classification).toBe('local');
+    expect(status.remote).toBe(false);
+    expect(status.verified).toBe(true);
+    expect(status.llmModel).toBe('llama3');
+    expect(status.embeddingModel).toBe('nomic-embed-text');
+    expect(status.embeddingsSupported).toBe(true);
+    expect(status.baseUrl).toBe('http://localhost:11434');
+    expect(aiProviderStatusSchema.parse(status)).toEqual(status);
+  });
+
+  it('classifies a remote provider as unverified and never leaks the api key (AC2/AC4)', () => {
+    const config = aiProviderConfigSchema.parse({
+      kind: 'openai',
+      name: 'OpenAI',
+      apiKey: 'sk-secret',
+    });
+    const status = buildAiProviderStatus(config);
+    expect(status.classification).toBe('remote');
+    expect(status.remote).toBe(true);
+    expect(status.verified).toBe(false);
+    expect(status.embeddingsSupported).toBe(true);
+    expect(JSON.stringify(status)).not.toContain('sk-secret');
+    expect('apiKey' in status).toBe(false);
+  });
+
+  it('marks a mock provider as demo (AC5)', () => {
+    const config = aiProviderConfigSchema.parse({ kind: 'mock', name: 'Mock' });
+    const status = buildAiProviderStatus(config);
+    expect(status.classification).toBe('demo');
+    expect(status.demo).toBe(true);
+    expect(status.remote).toBe(false);
+  });
+
+  it('flags anthropic as not supporting embeddings', () => {
+    const config = aiProviderConfigSchema.parse({
+      kind: 'anthropic',
+      name: 'Claude',
+      apiKey: 'sk-ant',
+    });
+    const status = buildAiProviderStatus(config);
+    expect(status.classification).toBe('remote');
+    expect(status.embeddingsSupported).toBe(false);
+    expect(status.embeddingModel).toBeNull();
   });
 });
 

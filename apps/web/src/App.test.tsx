@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
+import { AiProviderStatusPanel } from './AiPolicySettings.js';
 import { Rules } from './Rules.js';
 import { Modules } from './Modules.js';
 import { InvalidationProvider, useInvalidationEffect } from './invalidation.js';
@@ -1762,5 +1763,115 @@ describe('App', () => {
     await waitFor(() =>
       expect(screen.getByTestId('kb-ai-policy-effective')).toHaveTextContent('Local only'),
     );
+  });
+});
+
+describe('AiProviderStatusPanel (US-046)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('states provider config is environment-only when no provider is configured (AC3)', async () => {
+    mockFetch((url) => {
+      if (url.includes('/api/ai/provider'))
+        return { body: { configured: false, editable: false, configSource: 'environment' } };
+      return { status: 404 };
+    });
+    render(<AiProviderStatusPanel />);
+    await waitFor(() =>
+      expect(screen.getByTestId('ai-provider-not-configured')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('ai-provider-env-only')).toHaveTextContent(
+      /managed by the server environment and cannot be edited in the browser/i,
+    );
+  });
+
+  it('shows kind, models, base URL, readiness, and local classification (AC1/AC2)', async () => {
+    mockFetch((url) => {
+      if (url.includes('/api/ai/provider'))
+        return {
+          body: {
+            configured: true,
+            editable: false,
+            configSource: 'environment',
+            kind: 'ollama',
+            name: 'Local Ollama',
+            classification: 'local',
+            remote: false,
+            demo: false,
+            verified: true,
+            llmModel: 'llama3',
+            embeddingModel: 'nomic-embed-text',
+            embeddingsSupported: true,
+            baseUrl: 'http://localhost:11434',
+          },
+        };
+      return { status: 404 };
+    });
+    render(<AiProviderStatusPanel />);
+    await waitFor(() => expect(screen.getByTestId('ai-provider-kind')).toHaveTextContent('Ollama'));
+    expect(screen.getByTestId('ai-provider-name')).toHaveTextContent('Local Ollama');
+    expect(screen.getByTestId('ai-provider-classification')).toHaveTextContent('Local');
+    expect(screen.getByTestId('ai-provider-readiness')).toHaveTextContent('Ready');
+    expect(screen.getByTestId('ai-provider-llm-model')).toHaveTextContent('llama3');
+    expect(screen.getByTestId('ai-provider-embedding-model')).toHaveTextContent('nomic-embed-text');
+    expect(screen.getByTestId('ai-provider-base-url')).toHaveTextContent('localhost:11434');
+    expect(screen.queryByTestId('ai-provider-demo')).not.toBeInTheDocument();
+  });
+
+  it('labels a mock provider as deterministic demo output (AC5)', async () => {
+    mockFetch((url) => {
+      if (url.includes('/api/ai/provider'))
+        return {
+          body: {
+            configured: true,
+            editable: false,
+            configSource: 'environment',
+            kind: 'mock',
+            name: 'Demo Mock',
+            classification: 'demo',
+            remote: false,
+            demo: true,
+            verified: true,
+            llmModel: null,
+            embeddingModel: null,
+            embeddingsSupported: true,
+          },
+        };
+      return { status: 404 };
+    });
+    render(<AiProviderStatusPanel />);
+    await waitFor(() => expect(screen.getByTestId('ai-provider-demo')).toBeInTheDocument());
+    expect(screen.getByTestId('ai-provider-demo')).toHaveTextContent(/deterministic demo output/i);
+  });
+
+  it('marks a remote provider unverified and never renders a secret (AC2/AC4)', async () => {
+    mockFetch((url) => {
+      if (url.includes('/api/ai/provider'))
+        return {
+          body: {
+            configured: true,
+            editable: false,
+            configSource: 'environment',
+            kind: 'openai',
+            name: 'OpenAI',
+            classification: 'remote',
+            remote: true,
+            demo: false,
+            verified: false,
+            llmModel: 'gpt-4o-mini',
+            embeddingModel: 'text-embedding-3-small',
+            embeddingsSupported: true,
+            baseUrl: 'https://api.openai.com/v1',
+          },
+        };
+      return { status: 404 };
+    });
+    const { container } = render(<AiProviderStatusPanel />);
+    await waitFor(() =>
+      expect(screen.getByTestId('ai-provider-readiness')).toHaveTextContent(/unverified/i),
+    );
+    expect(screen.getByTestId('ai-provider-classification')).toHaveTextContent('Remote');
+    expect(container.textContent ?? '').not.toMatch(/apiKey|sk-/);
   });
 });

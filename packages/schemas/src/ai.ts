@@ -218,6 +218,91 @@ export function providerConfigHasSecrets(config: AiProviderConfig): boolean {
   );
 }
 
+// --- Provider status (US-046) ----------------------------------------------
+//
+// A *sanitized* view of the active provider configuration that is safe to send
+// to the browser so operators can see which provider is active and whether it
+// is usable — WITHOUT ever exposing API keys or other secrets (AC4).
+
+/**
+ * Local-vs-remote classification of a provider (AC2):
+ * - `local`  — runs against a self-hosted endpoint (ollama, openai-compatible).
+ * - `remote` — calls a third-party cloud API (openai, anthropic).
+ * - `demo`   — deterministic mock provider; output is not real (AC5).
+ */
+export const AI_PROVIDER_CLASSIFICATIONS = ['local', 'remote', 'demo'] as const;
+export const aiProviderClassificationSchema = z.enum(AI_PROVIDER_CLASSIFICATIONS);
+export type AiProviderClassification = (typeof AI_PROVIDER_CLASSIFICATIONS)[number];
+
+/**
+ * Sanitized provider status returned by the backend to the UI (US-046). It
+ * carries only non-secret, display-safe fields. `configured: false` means no
+ * provider is set up (AI features are off). Provider configuration is currently
+ * environment-only (`editable: false`, `configSource: 'environment'`, AC3).
+ */
+export const aiProviderStatusSchema = z.object({
+  /** Whether any AI provider is configured at all. */
+  configured: z.boolean(),
+  /** Provider config is managed by server environment, not the browser (AC3). */
+  editable: z.literal(false),
+  configSource: z.literal('environment'),
+  /** The active provider kind, when configured (AC1). */
+  kind: aiProviderKindSchema.optional(),
+  /** Human-readable provider label/name (AC2). */
+  name: z.string().optional(),
+  /** Local / remote / demo classification (AC2, AC5). */
+  classification: aiProviderClassificationSchema.optional(),
+  /** True for cloud providers (openai/anthropic) that send data off-box (AC2). */
+  remote: z.boolean().optional(),
+  /** True for the deterministic mock provider; output is demo only (AC5). */
+  demo: z.boolean().optional(),
+  /**
+   * Readiness/verification state (AC2). Remote providers ship as
+   * configured-but-untested skeletons in V1, so they report `verified: false`.
+   */
+  verified: z.boolean().optional(),
+  /** Configured LLM model, when known (AC2). */
+  llmModel: z.string().nullable().optional(),
+  /** Configured embedding model, when known (AC2). */
+  embeddingModel: z.string().nullable().optional(),
+  /** Whether this provider kind offers embeddings (anthropic does not). */
+  embeddingsSupported: z.boolean().optional(),
+  /** Base URL of the provider endpoint, when applicable (AC2). */
+  baseUrl: z.string().optional(),
+});
+export type AiProviderStatus = z.infer<typeof aiProviderStatusSchema>;
+
+/**
+ * Build a sanitized {@link AiProviderStatus} from a parsed provider config (or
+ * `null` when none is configured). Only display-safe fields are read — secret
+ * fields like `apiKey` are NEVER copied through, so the result is always safe to
+ * return to the browser (AC4).
+ */
+export function buildAiProviderStatus(config: AiProviderConfig | null): AiProviderStatus {
+  if (!config) {
+    return { configured: false, editable: false, configSource: 'environment' };
+  }
+  const remote = config.kind === 'openai' || config.kind === 'anthropic';
+  const demo = config.kind === 'mock';
+  const classification: AiProviderClassification = demo ? 'demo' : remote ? 'remote' : 'local';
+  return {
+    configured: true,
+    editable: false,
+    configSource: 'environment',
+    kind: config.kind,
+    name: config.name,
+    classification,
+    remote,
+    demo,
+    // Remote providers are configured-but-untested skeletons in V1.
+    verified: !remote,
+    llmModel: 'llmModel' in config ? (config.llmModel ?? null) : null,
+    embeddingModel: 'embeddingModel' in config ? (config.embeddingModel ?? null) : null,
+    embeddingsSupported: config.kind !== 'anthropic',
+    baseUrl: 'baseUrl' in config ? config.baseUrl : undefined,
+  };
+}
+
 // ===========================================================================
 // Layered AI privacy policy (US-016)
 //

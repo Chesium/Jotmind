@@ -4,12 +4,16 @@ import {
   kbRoleSatisfies,
   type AiPolicy,
   type AiPolicyMode,
+  type AiProviderClassification,
+  type AiProviderKind,
+  type AiProviderStatus,
   type KnowledgeBase,
   type ResolvedAiPolicy,
 } from '@jotmind/schemas';
 import { useInvalidate, useInvalidationEffect } from './invalidation.js';
 import {
   getAiPolicyOverview,
+  getAiProviderStatus,
   getKbAiPolicy,
   updateKbAiPolicy,
   updateMyAiPolicy,
@@ -129,6 +133,104 @@ function PolicyEditor({
   );
 }
 
+/** Human-readable labels for each provider kind. */
+const PROVIDER_KIND_LABELS: Record<AiProviderKind, string> = {
+  ollama: 'Ollama',
+  'openai-compatible': 'OpenAI-compatible',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  mock: 'Mock',
+};
+
+/** Human-readable labels for the local/remote/demo classification. */
+const PROVIDER_CLASSIFICATION_LABELS: Record<AiProviderClassification, string> = {
+  local: 'Local',
+  remote: 'Remote (sends data off-box)',
+  demo: 'Demo (deterministic)',
+};
+
+/**
+ * Read-only AI provider configuration + readiness (US-046). Shows operators
+ * which provider is active and whether it is usable WITHOUT exposing any
+ * secrets (the backend strips API keys, AC4). Provider configuration is managed
+ * by the server environment and cannot be edited in the browser (AC3).
+ */
+export function AiProviderStatusPanel() {
+  const [status, setStatus] = useState<AiProviderStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    getAiProviderStatus()
+      .then((s) => {
+        if (active) setStatus(s);
+      })
+      .catch((err: unknown) => {
+        if (active) setError(err instanceof Error ? err.message : 'Could not load AI provider');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section aria-label="ai-provider" data-testid="ai-provider">
+      <h4>AI provider</h4>
+      {error && <p data-testid="ai-provider-error">{error}</p>}
+      {loading && <p data-testid="ai-provider-loading">Loading…</p>}
+      {status && !status.configured && (
+        <p data-testid="ai-provider-not-configured">
+          No AI provider is configured. AI features are unavailable until a provider is set in the
+          server environment.
+        </p>
+      )}
+      {status && status.configured && (
+        <ul>
+          <li data-testid="ai-provider-kind">
+            Provider: <strong>{PROVIDER_KIND_LABELS[status.kind ?? 'mock']}</strong>
+          </li>
+          {status.name && <li data-testid="ai-provider-name">Name: {status.name}</li>}
+          {status.classification && (
+            <li data-testid="ai-provider-classification">
+              Classification: {PROVIDER_CLASSIFICATION_LABELS[status.classification]}
+            </li>
+          )}
+          <li data-testid="ai-provider-readiness">
+            Readiness:{' '}
+            {status.verified ? 'Ready (verified)' : 'Configured but unverified (untested in V1)'}
+          </li>
+          <li data-testid="ai-provider-llm-model">LLM model: {status.llmModel ?? '—'}</li>
+          <li data-testid="ai-provider-embedding-model">
+            Embedding model:{' '}
+            {status.embeddingsSupported === false
+              ? 'Not supported by this provider'
+              : (status.embeddingModel ?? '—')}
+          </li>
+          {status.baseUrl && <li data-testid="ai-provider-base-url">Base URL: {status.baseUrl}</li>}
+          {status.demo && (
+            <li data-testid="ai-provider-demo">
+              <strong>Deterministic demo output</strong> — this mock provider does not produce real
+              AI results.
+            </li>
+          )}
+        </ul>
+      )}
+      {status && (
+        <p data-testid="ai-provider-env-only">
+          Provider configuration is managed by the server environment and cannot be edited in the
+          browser.
+        </p>
+      )}
+    </section>
+  );
+}
+
 /**
  * Server + user AI privacy policy settings (US-016). Rendered for any signed-in
  * user. The user layer is always editable; the server layer is editable only by
@@ -171,6 +273,7 @@ export function AiPolicySettings({
   return (
     <section aria-label="ai-policy" data-testid="ai-policy">
       <h3>AI privacy</h3>
+      <AiProviderStatusPanel />
       {error && <p data-testid="ai-policy-error">{error}</p>}
       {loading && <p data-testid="ai-policy-loading">Loading…</p>}
       {overview && (

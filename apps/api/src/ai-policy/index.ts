@@ -3,8 +3,10 @@ import {
   kbRoleSatisfies,
   resolveAiPolicy,
   updateAiPolicySchema,
+  type AiProviderStatus,
   type KbRole,
 } from '@jotmind/schemas';
+import { resolveAiProviderStatusFromEnv } from '../ai/status.js';
 import {
   asyncHandler,
   requireAdmin,
@@ -22,11 +24,17 @@ export { dbAiPolicyStore } from './store.js';
 export interface AiPolicyRouterOptions {
   store?: AiPolicyStore;
   authStore?: AuthStore;
+  /**
+   * Resolve the sanitized AI provider status (US-046). Defaults to reading
+   * `AI_PROVIDER_CONFIG` from the environment; injectable for tests.
+   */
+  resolveProviderStatus?: () => AiProviderStatus;
 }
 
 /**
  * Build the `/api/ai` router for the layered AI privacy policy (US-016).
  *
+ * - `GET /provider`       — sanitized AI provider status + readiness (US-046).
  * - `GET /policy/server`  — read the server-layer policy (any authed user).
  * - `PUT /policy/server`  — set the server-layer policy (system admin + CSRF).
  * - `GET /policy/me`      — read the caller's user-layer policy.
@@ -38,8 +46,20 @@ export interface AiPolicyRouterOptions {
 export function createAiPolicyRouter(options: AiPolicyRouterOptions = {}): Router {
   const store = options.store ?? dbAiPolicyStore;
   const authStore = options.authStore ?? dbAuthStore;
+  const resolveProviderStatus = options.resolveProviderStatus ?? resolveAiProviderStatusFromEnv;
   const router = Router();
   const authed = requireAuth(authStore);
+
+  // Sanitized AI provider configuration + readiness (US-046). Any authed user
+  // may read it; it carries NO secrets (the builder only copies display-safe
+  // fields, AC4). Provider config is environment-only, so it is read-only here.
+  router.get(
+    '/provider',
+    authed,
+    asyncHandler(async (_req, res) => {
+      res.json(resolveProviderStatus());
+    }),
+  );
 
   router.get(
     '/policy/server',

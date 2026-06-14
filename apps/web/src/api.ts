@@ -1,5 +1,6 @@
 import {
   aiPolicySchema,
+  aiProviderStatusSchema,
   answerResponseSchema,
   resolvedAiPolicySchema,
   auditEventSchema,
@@ -44,6 +45,7 @@ import {
   sourceSchema,
   type AccountRole,
   type AiPolicy,
+  type AiProviderStatus,
   type AcceptProposalResult,
   type AnswerResponse,
   type CaptureRequest,
@@ -655,6 +657,16 @@ export interface KbAiPolicyView {
   server: AiPolicy;
   user: AiPolicy;
   effective: ResolvedAiPolicy;
+}
+
+/**
+ * Sanitized AI provider configuration + readiness (US-046). Never includes
+ * secrets; provider config is environment-only (read-only in the UI).
+ */
+export async function getAiProviderStatus(): Promise<AiProviderStatus> {
+  const res = await apiFetch('/api/ai/provider', { credentials: 'include' });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return aiProviderStatusSchema.parse(await res.json());
 }
 
 /** The caller's effective non-KB AI policy (server + user layers). */

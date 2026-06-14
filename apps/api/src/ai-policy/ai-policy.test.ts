@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { DEFAULT_AI_POLICY, type AiPolicy, type KbRole } from '@jotmind/schemas';
 import { createApp } from '../app.js';
@@ -305,5 +305,64 @@ describe('AI policy: Knowledge-Base scope (US-016)', () => {
       .put(`/api/knowledge-bases/${kbId}/ai/policy`)
       .send({ mode: 'local_only' });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('AI provider status (US-046)', () => {
+  let h: Harness;
+  const prevEnv = process.env.AI_PROVIDER_CONFIG;
+
+  beforeEach(() => {
+    h = makeHarness();
+    delete process.env.AI_PROVIDER_CONFIG;
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.AI_PROVIDER_CONFIG;
+    else process.env.AI_PROVIDER_CONFIG = prevEnv;
+  });
+
+  it('requires authentication', async () => {
+    expect((await request(h.app).get('/api/ai/provider')).status).toBe(401);
+  });
+
+  it('reports not-configured (environment-only) when no provider is set (AC3)', async () => {
+    const { agent } = await setupAdminAgent(h.app);
+    const res = await agent.get('/api/ai/provider');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      configured: false,
+      editable: false,
+      configSource: 'environment',
+    });
+  });
+
+  it('exposes the active mock provider labeled as demo (AC1/AC5)', async () => {
+    process.env.AI_PROVIDER_CONFIG = JSON.stringify({ kind: 'mock', name: 'Demo Mock' });
+    const { agent } = await setupAdminAgent(h.app);
+    const res = await agent.get('/api/ai/provider');
+    expect(res.status).toBe(200);
+    expect(res.body.configured).toBe(true);
+    expect(res.body.kind).toBe('mock');
+    expect(res.body.name).toBe('Demo Mock');
+    expect(res.body.classification).toBe('demo');
+    expect(res.body.demo).toBe(true);
+    expect(res.body.editable).toBe(false);
+  });
+
+  it('never returns the api key for a remote provider (AC2/AC4)', async () => {
+    process.env.AI_PROVIDER_CONFIG = JSON.stringify({
+      kind: 'openai',
+      name: 'OpenAI',
+      apiKey: 'sk-secret-value',
+    });
+    const { agent } = await setupAdminAgent(h.app);
+    const res = await agent.get('/api/ai/provider');
+    expect(res.status).toBe(200);
+    expect(res.body.classification).toBe('remote');
+    expect(res.body.remote).toBe(true);
+    expect(res.body.verified).toBe(false);
+    expect('apiKey' in res.body).toBe(false);
+    expect(JSON.stringify(res.body)).not.toContain('sk-secret-value');
   });
 });
