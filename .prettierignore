@@ -9,6 +9,7 @@ ideas
 prompts
 tasks
 .agents
+plugin-source
 playwright-report
 test-results
 prd.json

@@ -55,6 +55,7 @@ import { Imports } from './Imports.js';
 import { Modules } from './Modules.js';
 import { Rules } from './Rules.js';
 import { SchemaDefinitions } from './SchemaDefinitions.js';
+import { InvalidationProvider } from './invalidation.js';
 
 type Phase = 'loading' | 'setup' | 'login' | 'authed';
 
@@ -316,8 +317,8 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
           <p className="eyebrow">Knowledge Base scope</p>
           <h2>Knowledge Bases</h2>
           <p>
-            Select a graph scope, then capture notes, model entities and claims, review AI work,
-            and inspect reasoning output.
+            Select a graph scope, then capture notes, model entities and claims, review AI work, and
+            inspect reasoning output.
           </p>
         </div>
         {selectedKb && (
@@ -345,8 +346,7 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
                   >
                     <span>{kb.name} </span>
                     <small>
-                      ({kb.role})
-                      {selectedId === kb.id ? ' — selected' : ''}
+                      ({kb.role}){selectedId === kb.id ? ' — selected' : ''}
                     </small>
                   </button>
                 </li>
@@ -397,28 +397,35 @@ function KnowledgeBases({ csrfToken }: { csrfToken: string }) {
                   <a href="#automation">Automation</a>
                 </div>
               </div>
-              <div className="workflow-grid">
-                <div className="workflow-column primary-flow">
-                  <CommandBox kb={selectedKb} />
-                  <Answers kb={selectedKb} />
-                  <GraphViews kb={selectedKb} csrfToken={csrfToken} />
-                  <Search kb={selectedKb} />
+              {/*
+                Scope a fresh selected-KB invalidation bus per KB (key on id) so
+                sibling panels can refresh consistently after mutations and
+                listeners reset on KB switch (US-035).
+              */}
+              <InvalidationProvider key={selectedKb.id}>
+                <div className="workflow-grid">
+                  <div className="workflow-column primary-flow">
+                    <CommandBox kb={selectedKb} />
+                    <Answers kb={selectedKb} />
+                    <GraphViews kb={selectedKb} csrfToken={csrfToken} />
+                    <Search kb={selectedKb} />
+                  </div>
+                  <div className="workflow-column" id="manual-graph">
+                    <Entities kb={selectedKb} csrfToken={csrfToken} />
+                    <Claims kb={selectedKb} csrfToken={csrfToken} />
+                    <Capture kb={selectedKb} csrfToken={csrfToken} />
+                  </div>
+                  <div className="workflow-column" id="automation">
+                    <Modules kb={selectedKb} csrfToken={csrfToken} />
+                    <SchemaDefinitions kb={selectedKb} csrfToken={csrfToken} />
+                    <Imports kb={selectedKb} csrfToken={csrfToken} />
+                    <Proposals kb={selectedKb} csrfToken={csrfToken} />
+                    <Rules kb={selectedKb} csrfToken={csrfToken} />
+                    <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />
+                    <KbAdmin kb={selectedKb} csrfToken={csrfToken} />
+                  </div>
                 </div>
-                <div className="workflow-column" id="manual-graph">
-                  <Entities kb={selectedKb} csrfToken={csrfToken} />
-                  <Claims kb={selectedKb} csrfToken={csrfToken} />
-                  <Capture kb={selectedKb} csrfToken={csrfToken} />
-                </div>
-                <div className="workflow-column" id="automation">
-                  <Modules kb={selectedKb} csrfToken={csrfToken} />
-                  <SchemaDefinitions kb={selectedKb} csrfToken={csrfToken} />
-                  <Imports kb={selectedKb} csrfToken={csrfToken} />
-                  <Proposals kb={selectedKb} csrfToken={csrfToken} />
-                  <Rules kb={selectedKb} csrfToken={csrfToken} />
-                  <KbAiPolicy kb={selectedKb} csrfToken={csrfToken} />
-                  <KbAdmin kb={selectedKb} csrfToken={csrfToken} />
-                </div>
-              </div>
+              </InvalidationProvider>
             </>
           ) : (
             <div className="empty-state">

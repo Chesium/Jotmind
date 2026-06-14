@@ -646,3 +646,18 @@ Thread: https://ampcode.com/threads/T-019ec57c-8732-708c-8873-bd245d9c1496
   - Real-flow e2e: per-KB sibling components fetch once per kb.id with no live-sync, so `page.reload()` + reselect the KB after creating records in one section before another reads them (Claims reads the entity list).
   - ALL stories now have passes:true — V1 complete.
 ---
+
+## Sun 14 Jun 2026 - US-035
+Thread: https://ampcode.com/threads/T-019ec67f-7377-7684-a0ac-882e6983cbb2
+- Established the selected-KB invalidation model: a single lightweight domain-keyed pub/sub bus that later stories (US-036..US-045) wire into individual panels.
+- Files changed:
+  - NEW apps/web/src/invalidation.tsx: InvalidationDomain union + INVALIDATION_DOMAINS list (all 16 AC2 domains), createInvalidationBus() (Map<domain,Set<listener>>; dedupes a multi-domain listener to one fire per invalidate() call), InvalidationProvider (context, one useMemo bus per mount), useInvalidate() (stable publisher), useInvalidationEffect(domains, cb) (subscribe; latest cb via ref, resubscribe only on domains-key change). Default context = NOOP_BUS so panels work in isolation (AC4).
+  - NEW apps/web/src/invalidation.test.tsx: 8 unit tests (bus + hooks).
+  - apps/web/src/App.tsx: wrap the selected-KB workflow-grid in <InvalidationProvider key={selectedKb.id}> so the bus resets per KB; import added.
+  - .prettierignore: added plugin-source (non-source scaffolding).
+  - prettier --write on apps/web/src/{app.css,App.tsx,GraphViews.tsx} to fix pre-existing format failures.
+- **Learnings for future iterations:**
+  - Invalidation bus (US-035): mutating panel calls `useInvalidate()(domains)` after a successful write; reading panel calls `useInvalidationEffect([domains], reloadFn)` to re-run its loader. The bus does NOT cache data — each panel keeps its own fetch/refresh; the bus only signals "this domain changed". Default NOOP_BUS means hooks are safe no-ops without a provider (panels still work in isolation / in unit tests). Provider is keyed on selectedKb.id so listeners reset on KB switch. This is the mechanism US-036..US-045 must use (prefer it over ad hoc parent refs).
+  - GOTCHA: HEAD already had format:check failures from the non-Ralph "open-design ui redo" commits (apps/web/src/app.css, App.tsx, GraphViews.tsx, plugin-source/*.json) — `pnpm verify` was red before this story. Fixed via prettier --write on the 3 source files + .prettierignore for plugin-source scaffolding. Watch for this on future stories.
+  - GOTCHA: the eslint config has NO `react-hooks/exhaustive-deps` rule registered, so an `// eslint-disable-next-line react-hooks/exhaustive-deps` comment itself ERRORS ("Definition for rule ... was not found"). Don't add that disable; instead use a ref + a stable join-key dep array.
+---

@@ -21,9 +21,8 @@
   --ok: #147a3f;
   --ok-soft: #e6f7ed;
   --shadow: 0 18px 50px rgb(22 32 42 / 0.08);
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'SF Pro Text', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 * {
@@ -311,7 +310,7 @@ a:hover {
   text-align: left;
 }
 
-.kb-list button[aria-pressed="true"] {
+.kb-list button[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
@@ -332,9 +331,7 @@ a:hover {
   gap: 24px;
   margin-bottom: 18px;
   padding: 22px;
-  background:
-    linear-gradient(135deg, rgb(15 159 143 / 0.08), transparent 44%),
-    var(--surface);
+  background: linear-gradient(135deg, rgb(15 159 143 / 0.08), transparent 44%), var(--surface);
 }
 
 .kb-hero h3 {
@@ -487,13 +484,13 @@ button:hover:not(:disabled) {
   color: var(--accent-strong);
 }
 
-button[type="submit"] {
+button[type='submit'] {
   border-color: var(--accent);
   background: var(--accent);
   color: white;
 }
 
-button[type="submit"]:hover:not(:disabled) {
+button[type='submit']:hover:not(:disabled) {
   border-color: var(--accent-strong);
   background: var(--accent-strong);
   color: white;
@@ -504,16 +501,16 @@ button:disabled {
   opacity: 0.58;
 }
 
-button[aria-pressed="true"],
-button[aria-selected="true"],
-[role="tab"][aria-selected="true"] {
+button[aria-pressed='true'],
+button[aria-selected='true'],
+[role='tab'][aria-selected='true'] {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
-[role="alert"],
-[data-testid$="-error"] {
+[role='alert'],
+[data-testid$='-error'] {
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--danger) 32%, white);
   border-radius: 10px;
@@ -522,11 +519,11 @@ button[aria-selected="true"],
   font-weight: 700;
 }
 
-[role="status"],
-[data-testid$="unavailable"],
-[data-testid$="stubbed"],
-[data-testid$="lag"],
-[data-testid$="indexing"] {
+[role='status'],
+[data-testid$='unavailable'],
+[data-testid$='stubbed'],
+[data-testid$='lag'],
+[data-testid$='indexing'] {
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--warn) 28%, white);
   border-radius: 10px;
@@ -542,13 +539,13 @@ li {
   margin: 6px 0;
 }
 
-[data-testid="command-results"],
-[data-testid="search-results"],
-[data-testid="table-view"],
-[data-testid="network-view"],
-[data-testid="timeline-container"],
-[data-testid="sources-view"],
-[data-testid="detail-view"] {
+[data-testid='command-results'],
+[data-testid='search-results'],
+[data-testid='table-view'],
+[data-testid='network-view'],
+[data-testid='timeline-container'],
+[data-testid='sources-view'],
+[data-testid='detail-view'] {
   display: grid;
   gap: 14px;
   margin-top: 14px;
@@ -568,7 +565,7 @@ li {
 }
 
 .segmented-tabs,
-[role="tablist"] {
+[role='tablist'] {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -587,7 +584,7 @@ li {
   background: transparent;
 }
 
-svg[aria-label="entity network"] {
+svg[aria-label='entity network'] {
   display: block;
   width: min(100%, 560px);
   height: auto;
@@ -596,8 +593,7 @@ svg[aria-label="entity network"] {
   border-radius: 16px;
   background:
     linear-gradient(var(--border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border) 1px, transparent 1px),
-    var(--surface);
+    linear-gradient(90deg, var(--border) 1px, transparent 1px), var(--surface);
   background-size: 34px 34px;
 }
 
@@ -645,31 +641,31 @@ pre {
   font-size: 12px;
 }
 
-[data-testid="entities-list"],
-[data-testid="claims-list"],
-[data-testid="search-results"] ul,
-[data-testid="command-results"] ul,
-[data-testid="timeline-view"] {
+[data-testid='entities-list'],
+[data-testid='claims-list'],
+[data-testid='search-results'] ul,
+[data-testid='command-results'] ul,
+[data-testid='timeline-view'] {
   display: grid;
   gap: 10px;
   padding-left: 0;
   list-style: none;
 }
 
-[data-testid^="entity-"],
-[data-testid^="claim-"],
-[data-testid^="timeline-item-"],
-[data-testid^="search-result-"],
-[data-testid^="command-fallback-result-"],
-[data-testid^="command-interpreted-result-"] {
+[data-testid^='entity-'],
+[data-testid^='claim-'],
+[data-testid^='timeline-item-'],
+[data-testid^='search-result-'],
+[data-testid^='command-fallback-result-'],
+[data-testid^='command-interpreted-result-'] {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
 }
 
-[data-testid^="timeline-item-"] button,
-[data-testid^="table-row-"] button {
+[data-testid^='timeline-item-'] button,
+[data-testid^='table-row-'] button {
   width: 100%;
   justify-content: flex-start;
   text-align: left;

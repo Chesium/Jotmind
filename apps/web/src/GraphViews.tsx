@@ -336,12 +336,7 @@ function NetworkView({
                   stroke="var(--graph-edge)"
                   strokeWidth={1}
                 />
-                <text
-                  x={(a.x + b.x) / 2}
-                  y={(a.y + b.y) / 2}
-                  fontSize={9}
-                  fill="var(--muted)"
-                >
+                <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} fontSize={9} fill="var(--muted)">
                   {edge.predicate}
                 </text>
               </g>
