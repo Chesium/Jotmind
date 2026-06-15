@@ -3,6 +3,7 @@ Started: Sat 13 Jun 2026 08:14:49 PM +08
 ---
 
 ## Codebase Patterns
+- Frontend provider/embedding UI coverage (US-054): keep `apps/web/src/App.test.tsx` as the focused home for `<AiProviderStatusPanel/>` and `<EmbeddingsPanel/>` regression tests. Mock schema-valid status responses for vector-search available/unavailable, generation-blocked reasons, viewer/editor reindex gates, queued job status, and local/remote/mock provider labels. When asserting secret safety, include unexpected fields such as `apiKey`/secret-like strings in the mocked provider response and assert they do not render; do not depend on real provider credentials.
 - Frontend AI workflow coverage (US-053): keep deterministic, credential-free UI tests split by surface. `apps/web/src/App.test.tsx` covers `AiPolicySettings`/`KbAiPolicy` role gates and `<CommandBox>` states (AI unavailable, interpreted search, low-confidence fallback, create preview) with schema-valid mocked API responses. `apps/web/src/Proposals.test.tsx` covers quick-capture extraction outcomes (`created|empty|unavailable|error`) and proposal review controls. Use mock/demo provider labels; do not require remote credentials or network calls.
 - Proposal editing (US-052): `proposalChangesSchema` is the single source of truth for pending proposal edits. When adding fields/ops, update `packages/schemas/src/proposals.ts`, thread executable fields through `apps/api/src/proposals/index.ts applyProposalChanges`, update the structured editor in `apps/web/src/Proposals.tsx`, and cover it in `apps/web/src/Proposals.test.tsx`. Keep Advanced JSON available, but client-validate structured edits with `proposalChangesSchema` before `editProposal()`.
 - Command-created proposals (US-051): a command `create` interpretation is promoted through `POST /api/knowledge-bases/:kbId/proposals` with `createCommandProposalSchema` (editor+CSRF), creating a pending `kind:'command'` proposal only. Store structured `changes` plus allowlisted metadata (`query`/`explanation`/`confidence`/`demo`/`label`/`remoteConfirmation`) and provider/model; never write canonical graph rows or graph_outbox until proposal accept. Web uses `createCommandProposal()` from `CommandBox`, then publishes `['proposals','audit']` so `<Proposals>` refreshes without reload. `MockCommandInterpreter` emits deterministic create-entity suggestions for `create`/`add`/`new` commands so browser verification does not need a remote model.
@@ -927,4 +928,17 @@ Thread: https://ampcode.com/threads/T-019ec6db-7bb1-77b5-b261-b477f45ef059
   - Split coverage by surface: policy and command states in `App.test.tsx`; quick capture and proposal review controls in `Proposals.test.tsx`.
   - Quick-capture `empty` and `error` states can still show the mock/demo label when extraction was available; only `unavailable` lacks a provider/demo label.
   - Full `pnpm verify` is enough browser verification for this coverage-only frontend story because it runs the Playwright smoke test; `dev-browser` remains unavailable in this environment.
+---
+
+## Mon 15 Jun 2026 11:17 +0800 - US-054
+- Added/tightened focused frontend coverage for the embedding status/reindex panel and AI provider status panel.
+- `apps/web/src/App.test.tsx`: labeled the existing provider and embedding coverage for US-054, and strengthened the remote-provider secret-safety test by including unexpected `apiKey`/secret-like fields in the mocked `/api/ai/provider` response and asserting they do not render.
+- Existing US-054 coverage in `App.test.tsx` now covers embedding vector-search available/unavailable states, generation-unavailable backend reasons, viewer read-only vs editor reindex controls, queued reindex job id/status, local Ollama labels/readiness, remote unverified labels, and mock deterministic-demo labels.
+- Marked `US-054` passing in `prd.json`.
+- Verified: `pnpm verify` passed (format:check, typecheck, lint, web/schema tests, API tests, and Playwright browser smoke). The E2E smoke passed despite expected Vite proxy warnings while the mocked smoke page rendered.
+- Files changed: `apps/web/src/App.test.tsx`, `prd.json`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Provider secret-safety tests should include unexpected secret-bearing fields in mocked provider responses; otherwise "does not render secrets" can accidentally be a vacuous assertion.
+  - Coverage-only frontend stories can use the full `pnpm verify` Playwright smoke as browser verification when no UI behavior changes; `dev-browser` remains unavailable in this environment.
+  - Keep embedding/provider UI coverage deterministic and credential-free: mock schema-valid API responses in `App.test.tsx` and never require a real AI provider or remote network.
 ---

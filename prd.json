@@ -971,8 +971,8 @@
         "Typecheck passes"
       ],
       "priority": 54,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added focused frontend coverage for the embedding status/reindex panel and provider status UI. App.test.tsx now explicitly covers embedding unavailable/available states, backend generation-unavailable reasons, viewer read-only vs editor reindex controls, successful reindex enqueue with job id/status, provider local/remote/mock labels and readiness, and secret-safety assertions using unexpected apiKey/secret fields in the mocked provider response. Full pnpm verify passed, including Playwright browser smoke; no remote provider credentials or network AI calls were required."
     }
   ]
 }

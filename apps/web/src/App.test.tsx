@@ -2231,7 +2231,7 @@ describe('App', () => {
   });
 });
 
-describe('AiProviderStatusPanel (US-046)', () => {
+describe('AiProviderStatusPanel (US-046/US-054)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -2349,7 +2349,7 @@ describe('AiProviderStatusPanel (US-046)', () => {
     expect(screen.getByTestId('ai-provider-demo')).toHaveTextContent(/deterministic demo output/i);
   });
 
-  it('marks a remote provider unverified and never renders a secret (AC2/AC4)', async () => {
+  it('marks a remote provider unverified and never renders unexpected secrets (AC2/AC4)', async () => {
     mockFetch((url) => {
       if (url.includes('/api/ai/provider'))
         return {
@@ -2367,6 +2367,8 @@ describe('AiProviderStatusPanel (US-046)', () => {
             embeddingModel: 'text-embedding-3-small',
             embeddingsSupported: true,
             baseUrl: 'https://api.openai.com/v1',
+            apiKey: 'sk-live-secret-from-misconfigured-test',
+            secretValue: 'operator-token-should-not-render',
           },
         };
       return { status: 404 };
@@ -2376,7 +2378,9 @@ describe('AiProviderStatusPanel (US-046)', () => {
       expect(screen.getByTestId('ai-provider-readiness')).toHaveTextContent(/unverified/i),
     );
     expect(screen.getByTestId('ai-provider-classification')).toHaveTextContent('Remote');
-    expect(container.textContent ?? '').not.toMatch(/apiKey|sk-/);
+    expect(container.textContent ?? '').not.toMatch(
+      /apiKey|sk-live-secret|operator-token-should-not-render/,
+    );
   });
 });
 
@@ -2537,7 +2541,7 @@ describe('AI policy frontend states (US-053)', () => {
   });
 });
 
-describe('EmbeddingsPanel (US-048)', () => {
+describe('EmbeddingsPanel (US-048/US-054)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
