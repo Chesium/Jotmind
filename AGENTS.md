@@ -550,11 +550,11 @@ source-excerpts}` (`mergeParams:true`, AFTER the KB router). `createApp` seams
   without `remoteAllowed`. Demo output carries `MOCK_EXTRACTION_LABEL`
   (`'Mock AI / deterministic demo output'`) which the UI must show (AC6).
 - Shared shapes in `@jotmind/schemas` `proposals.ts`: `proposalChangesSchema`
-  (`{items:[create_entity|create_claim]}` discriminated union; claim args
-  reference candidate entities by a temporary local `ref` key or an existing
-  entity id), `proposalSchema`/`proposalListSchema`, `captureRequestSchema`,
-  `captureResponseSchema`, `extractionAvailabilitySchema`. Exported from
-  `index.ts`.
+  (`{items:[create_entity|create_claim|create_note|create_source]}`
+  discriminated union; claim args reference candidate entities by a temporary
+  local `ref` key or an existing entity id), `proposalSchema`/
+  `proposalListSchema`, `captureRequestSchema`, `captureResponseSchema`,
+  `extractionAvailabilitySchema`. Exported from `index.ts`.
 - Web: `apps/web/src/Proposals.tsx` (`<Proposals>`, rendered after `<Capture>`
   for the selected KB) — quick-capture form + pending-proposal list showing each
   candidate change, the demo label, and (for editors) review controls. API
@@ -595,7 +595,13 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   `acceptProposalResultSchema` (the accept response = updated proposal +
   `createdEntityIds`/`createdClaimIds`). Web helpers in `api.ts`:
   `acceptProposal`/`rejectProposal`/`editProposal`; `<ProposalItem>` renders
-  per-item checkboxes + Accept all / Accept selected / Reject / Edit (JSON).
+  per-item checkboxes + Accept all / Accept selected / Reject / Edit. The web
+  edit flow in `apps/web/src/Proposals.tsx` uses structured controls for common
+  create-entity/create-claim/create-note/create-source fields, client-validates
+  the edited `ProposalChanges` with `proposalChangesSchema` before PATCH, and
+  keeps Advanced JSON as the escape hatch. When adding fields to a proposal
+  change schema, update `ProposalChangeEditor`, `applyProposalChanges`, and the
+  focused `apps/web/src/Proposals.test.tsx` coverage together.
 - **Command-created proposals (US-051):** `POST /api/knowledge-bases/:kbId/proposals`
   creates a pending `kind:'command'` proposal from `createCommandProposalSchema`
   (editor+CSRF). It stores structured candidate `changes` plus allowlisted

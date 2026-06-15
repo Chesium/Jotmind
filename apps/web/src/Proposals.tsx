@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   MOCK_EXTRACTION_LABEL,
   kbRoleSatisfies,
+  proposalChangesSchema,
   type CaptureResponse,
   type KnowledgeBase,
   type Proposal,
   type ProposalChange,
+  type ProposalChanges,
 } from '@jotmind/schemas';
 import {
   RemoteAiConfirmationRequiredError,
@@ -233,8 +235,12 @@ function ProposalItem({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [draftChanges, setDraftChanges] = useState<ProposalChanges>(proposal.changes);
   const [draft, setDraft] = useState('');
+  const [rawJsonOpen, setRawJsonOpen] = useState(false);
+  const [propertyDrafts, setPropertyDrafts] = useState<Record<string, string>>({});
   const invalidate = useInvalidate();
+  const visibleItems = editing ? draftChanges.items : items;
 
   function toggle(i: number) {
     setSelected((prev) => {
@@ -284,21 +290,60 @@ function ProposalItem({
   }
 
   function startEdit() {
-    setDraft(JSON.stringify(proposal.changes, null, 2));
+    const changes = cloneProposalChanges(proposal.changes);
+    setDraftChanges(changes);
+    setDraft(JSON.stringify(changes, null, 2));
+    setPropertyDrafts(initialPropertyDrafts(changes));
+    setRawJsonOpen(false);
     setEditing(true);
     setError(null);
   }
 
+  function updateDraftItem(index: number, change: ProposalChange) {
+    setDraftChanges((prev) => ({
+      items: prev.items.map((item, i) => (i === index ? change : item)),
+    }));
+  }
+
+  function updatePropertyDraft(index: number, value: string) {
+    setPropertyDrafts((prev) => ({ ...prev, [propertyDraftKey(index)]: value }));
+  }
+
+  function toggleRawJson() {
+    if (!rawJsonOpen) {
+      setDraft(
+        JSON.stringify(applyPropertyDrafts(draftChanges, propertyDrafts) ?? draftChanges, null, 2),
+      );
+    }
+    setRawJsonOpen((open) => !open);
+  }
+
   async function saveEdit() {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(draft);
-    } catch {
-      setError('Changes must be valid JSON.');
+    let candidate: unknown;
+    if (rawJsonOpen) {
+      try {
+        candidate = JSON.parse(draft);
+      } catch {
+        setError('Changes must be valid JSON.');
+        return;
+      }
+    } else {
+      candidate = applyPropertyDrafts(draftChanges, propertyDrafts);
+      if (!candidate) {
+        setError('Properties must be valid JSON objects.');
+        return;
+      }
+    }
+
+    const parsed = proposalChangesSchema.safeParse(candidate);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue?.path.length ? `${issue.path.join('.')}: ` : '';
+      setError(`Invalid proposal changes: ${path}${issue?.message ?? 'Check the edited fields.'}`);
       return;
     }
     await run(async () => {
-      await editProposal(kbId, proposal.id, parsed as never, csrfToken);
+      await editProposal(kbId, proposal.id, parsed.data, csrfToken);
       setEditing(false);
     });
   }
@@ -317,9 +362,9 @@ function ProposalItem({
         </div>
       )}
       <ul>
-        {items.map((change, i) => (
+        {visibleItems.map((change, i) => (
           <li key={i} data-testid={`proposal-change-${proposal.id}-${i}`}>
-            {canEdit && (
+            {canEdit && !editing && (
               <input
                 type="checkbox"
                 checked={selected.has(i)}
@@ -375,28 +420,470 @@ function ProposalItem({
       )}
       {canEdit && editing && (
         <div data-testid={`proposal-edit-form-${proposal.id}`}>
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={8}
-            style={{ width: '100%', fontFamily: 'monospace' }}
-            data-testid={`proposal-edit-json-${proposal.id}`}
-          />
+          <fieldset>
+            <legend>Structured changes</legend>
+            {draftChanges.items.length === 0 ? (
+              <p>No proposal items.</p>
+            ) : (
+              draftChanges.items.map((change, i) => (
+                <ProposalChangeEditor
+                  key={i}
+                  proposalId={proposal.id}
+                  index={i}
+                  change={change}
+                  propertyDraft={propertyDrafts[propertyDraftKey(i)] ?? '{}'}
+                  onChange={(next) => updateDraftItem(i, next)}
+                  onPropertyDraftChange={(value) => updatePropertyDraft(i, value)}
+                />
+              ))
+            )}
+          </fieldset>
           <button
             type="button"
             disabled={busy}
-            onClick={() => void saveEdit()}
-            data-testid={`proposal-edit-save-${proposal.id}`}
+            onClick={toggleRawJson}
+            data-testid={`proposal-edit-advanced-${proposal.id}`}
           >
-            Save changes
-          </button>{' '}
-          <button type="button" disabled={busy} onClick={() => setEditing(false)}>
-            Cancel
+            {rawJsonOpen ? 'Hide advanced JSON' : 'Advanced JSON'}
           </button>
+          {rawJsonOpen && (
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={8}
+              style={{ width: '100%', fontFamily: 'monospace' }}
+              data-testid={`proposal-edit-json-${proposal.id}`}
+            />
+          )}
+          <div
+            style={{ marginTop: '0.5rem' }}
+            data-testid={`proposal-edit-controls-${proposal.id}`}
+          >
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void saveEdit()}
+              data-testid={`proposal-edit-save-${proposal.id}`}
+            >
+              Save changes
+            </button>{' '}
+            <button type="button" disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </li>
   );
+}
+
+function ProposalChangeEditor({
+  proposalId,
+  index,
+  change,
+  propertyDraft,
+  onChange,
+  onPropertyDraftChange,
+}: {
+  proposalId: string;
+  index: number;
+  change: ProposalChange;
+  propertyDraft: string;
+  onChange: (change: ProposalChange) => void;
+  onPropertyDraftChange: (value: string) => void;
+}) {
+  const prefix = `proposal-edit-${proposalId}-${index}`;
+  return (
+    <fieldset data-testid={`${prefix}-structured`} style={{ marginTop: '0.75rem' }}>
+      <legend>{change.op.replace('create_', 'Create ')}</legend>
+      {change.op === 'create_entity' && (
+        <>
+          <label>
+            Ref{' '}
+            <input
+              value={change.ref}
+              onChange={(e) => onChange({ ...change, ref: e.target.value })}
+              data-testid={`${prefix}-entity-ref`}
+            />
+          </label>{' '}
+          <label>
+            Type{' '}
+            <input
+              value={change.type}
+              onChange={(e) => onChange({ ...change, type: e.target.value })}
+              data-testid={`${prefix}-entity-type`}
+            />
+          </label>{' '}
+          <label>
+            Name{' '}
+            <input
+              value={change.name}
+              onChange={(e) => onChange({ ...change, name: e.target.value })}
+              data-testid={`${prefix}-entity-name`}
+            />
+          </label>
+          <div>
+            <label>
+              Aliases{' '}
+              <input
+                value={(change.aliases ?? []).join(', ')}
+                onChange={(e) => onChange({ ...change, aliases: splitCsv(e.target.value) })}
+                data-testid={`${prefix}-entity-aliases`}
+              />
+            </label>
+          </div>
+          <div>
+            <label>
+              Tags{' '}
+              <input
+                value={(change.tags ?? []).join(', ')}
+                onChange={(e) => onChange({ ...change, tags: splitCsv(e.target.value) })}
+                data-testid={`${prefix}-entity-tags`}
+              />
+            </label>
+          </div>
+          <div>
+            <label>
+              Description{' '}
+              <textarea
+                value={change.description ?? ''}
+                onChange={(e) =>
+                  onChange({ ...change, description: optionalString(e.target.value) })
+                }
+                data-testid={`${prefix}-entity-description`}
+              />
+            </label>
+          </div>
+          <PropertiesTextarea
+            testId={`${prefix}-entity-properties`}
+            value={propertyDraft}
+            onChange={onPropertyDraftChange}
+          />
+        </>
+      )}
+      {change.op === 'create_claim' && (
+        <>
+          <label>
+            Predicate{' '}
+            <input
+              value={change.predicate}
+              onChange={(e) => onChange({ ...change, predicate: e.target.value })}
+              data-testid={`${prefix}-claim-predicate`}
+            />
+          </label>{' '}
+          <label>
+            Confidence{' '}
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value={change.confidence ?? ''}
+              onChange={(e) =>
+                onChange({
+                  ...change,
+                  confidence: e.target.value === '' ? undefined : Number(e.target.value),
+                })
+              }
+              data-testid={`${prefix}-claim-confidence`}
+            />
+          </label>
+          <div>
+            <label>
+              Valid start{' '}
+              <input
+                value={change.validStart ?? ''}
+                placeholder="2020-01-01T00:00:00.000Z"
+                onChange={(e) =>
+                  onChange({ ...change, validStart: optionalString(e.target.value) })
+                }
+                data-testid={`${prefix}-claim-valid-start`}
+              />
+            </label>{' '}
+            <label>
+              Valid end{' '}
+              <input
+                value={change.validEnd ?? ''}
+                placeholder="2020-12-31T00:00:00.000Z"
+                onChange={(e) => onChange({ ...change, validEnd: optionalString(e.target.value) })}
+                data-testid={`${prefix}-claim-valid-end`}
+              />
+            </label>
+          </div>
+          <div>
+            <label>
+              Description{' '}
+              <textarea
+                value={change.description ?? ''}
+                onChange={(e) =>
+                  onChange({ ...change, description: optionalString(e.target.value) })
+                }
+                data-testid={`${prefix}-claim-description`}
+              />
+            </label>
+          </div>
+          <fieldset>
+            <legend>Arguments</legend>
+            {change.arguments.map((arg, argIndex) => (
+              <div key={argIndex} data-testid={`${prefix}-claim-arg-${argIndex}`}>
+                <input
+                  value={arg.role}
+                  placeholder="role"
+                  onChange={(e) =>
+                    onChange({
+                      ...change,
+                      arguments: change.arguments.map((a, i) =>
+                        i === argIndex ? { ...a, role: e.target.value } : a,
+                      ),
+                    })
+                  }
+                  data-testid={`${prefix}-claim-arg-role-${argIndex}`}
+                />{' '}
+                <select
+                  value={arg.kind}
+                  onChange={(e) => {
+                    const nextArg =
+                      e.target.value === 'literal'
+                        ? { role: arg.role, kind: 'literal' as const, value: '' }
+                        : { role: arg.role, kind: 'entity' as const, ref: '' };
+                    onChange({
+                      ...change,
+                      arguments: change.arguments.map((a, i) => (i === argIndex ? nextArg : a)),
+                    });
+                  }}
+                  data-testid={`${prefix}-claim-arg-kind-${argIndex}`}
+                >
+                  <option value="entity">Entity</option>
+                  <option value="literal">Literal</option>
+                </select>{' '}
+                {arg.kind === 'literal' ? (
+                  <input
+                    value={String(arg.value ?? '')}
+                    placeholder="literal value"
+                    onChange={(e) =>
+                      onChange({
+                        ...change,
+                        arguments: change.arguments.map((a, i) =>
+                          i === argIndex ? { ...a, value: e.target.value } : a,
+                        ),
+                      })
+                    }
+                    data-testid={`${prefix}-claim-arg-value-${argIndex}`}
+                  />
+                ) : (
+                  <input
+                    value={arg.ref ?? ''}
+                    placeholder="entity ref or id"
+                    onChange={(e) =>
+                      onChange({
+                        ...change,
+                        arguments: change.arguments.map((a, i) =>
+                          i === argIndex ? { ...a, ref: e.target.value } : a,
+                        ),
+                      })
+                    }
+                    data-testid={`${prefix}-claim-arg-ref-${argIndex}`}
+                  />
+                )}{' '}
+                <button
+                  type="button"
+                  disabled={change.arguments.length <= 1}
+                  onClick={() =>
+                    onChange({
+                      ...change,
+                      arguments: change.arguments.filter((_, i) => i !== argIndex),
+                    })
+                  }
+                  data-testid={`${prefix}-claim-arg-remove-${argIndex}`}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...change,
+                  arguments: [
+                    ...change.arguments,
+                    { role: 'object', kind: 'entity' as const, ref: '' },
+                  ],
+                })
+              }
+              data-testid={`${prefix}-claim-arg-add`}
+            >
+              Add argument
+            </button>
+          </fieldset>
+          <PropertiesTextarea
+            testId={`${prefix}-claim-properties`}
+            value={propertyDraft}
+            onChange={onPropertyDraftChange}
+          />
+        </>
+      )}
+      {change.op === 'create_note' && (
+        <>
+          <label>
+            Title{' '}
+            <input
+              value={change.title ?? ''}
+              onChange={(e) => onChange({ ...change, title: optionalString(e.target.value) })}
+              data-testid={`${prefix}-note-title`}
+            />
+          </label>
+          <div>
+            <label>
+              Content{' '}
+              <textarea
+                value={change.content}
+                onChange={(e) => onChange({ ...change, content: e.target.value })}
+                data-testid={`${prefix}-note-content`}
+              />
+            </label>
+          </div>
+          <PropertiesTextarea
+            testId={`${prefix}-note-properties`}
+            value={propertyDraft}
+            onChange={onPropertyDraftChange}
+          />
+        </>
+      )}
+      {change.op === 'create_source' && (
+        <>
+          <label>
+            Title{' '}
+            <input
+              value={change.title}
+              onChange={(e) => onChange({ ...change, title: e.target.value })}
+              data-testid={`${prefix}-source-title`}
+            />
+          </label>{' '}
+          <label>
+            Type{' '}
+            <input
+              value={change.sourceType ?? ''}
+              onChange={(e) => onChange({ ...change, sourceType: optionalString(e.target.value) })}
+              data-testid={`${prefix}-source-type`}
+            />
+          </label>
+          <div>
+            <label>
+              URI{' '}
+              <input
+                value={change.uri ?? ''}
+                onChange={(e) => onChange({ ...change, uri: optionalString(e.target.value) })}
+                data-testid={`${prefix}-source-uri`}
+              />
+            </label>
+          </div>
+          <div>
+            <label>
+              Content{' '}
+              <textarea
+                value={change.content ?? ''}
+                onChange={(e) => onChange({ ...change, content: optionalString(e.target.value) })}
+                data-testid={`${prefix}-source-content`}
+              />
+            </label>
+          </div>
+          <PropertiesTextarea
+            testId={`${prefix}-source-properties`}
+            value={propertyDraft}
+            onChange={onPropertyDraftChange}
+          />
+        </>
+      )}
+    </fieldset>
+  );
+}
+
+function PropertiesTextarea({
+  testId,
+  value,
+  onChange,
+}: {
+  testId: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label>
+        Properties JSON{' '}
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={3}
+          style={{ width: '100%', fontFamily: 'monospace' }}
+          data-testid={testId}
+        />
+      </label>
+    </div>
+  );
+}
+
+function optionalString(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function splitCsv(value: string): string[] | undefined {
+  const items = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+function propertyDraftKey(index: number): string {
+  return String(index);
+}
+
+function cloneProposalChanges(changes: ProposalChanges): ProposalChanges {
+  return proposalChangesSchema.parse(JSON.parse(JSON.stringify(changes)));
+}
+
+function initialPropertyDrafts(changes: ProposalChanges): Record<string, string> {
+  return Object.fromEntries(
+    changes.items.map((change, index) => [
+      propertyDraftKey(index),
+      JSON.stringify(change.properties ?? {}, null, 2),
+    ]),
+  );
+}
+
+function parseProperties(value: string): Record<string, unknown> | undefined | null {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function withProperties(change: ProposalChange, properties: Record<string, unknown> | undefined) {
+  const next = { ...change };
+  if (properties === undefined) delete next.properties;
+  else next.properties = properties;
+  return next;
+}
+
+function applyPropertyDrafts(
+  changes: ProposalChanges,
+  drafts: Record<string, string>,
+): ProposalChanges | null {
+  const items: ProposalChange[] = [];
+  for (const [index, change] of changes.items.entries()) {
+    const parsed = parseProperties(drafts[propertyDraftKey(index)] ?? '{}');
+    if (parsed === null) return null;
+    items.push(withProperties(change, parsed) as ProposalChange);
+  }
+  return { items };
 }
 
 function describeChange(change: ProposalChange): string {

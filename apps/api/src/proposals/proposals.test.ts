@@ -698,6 +698,9 @@ describe('proposals + capture API', () => {
           op: 'create_claim' as const,
           predicate: 'knows',
           confidence: 0.9,
+          validStart: '1840-01-01T00:00:00.000Z',
+          validEnd: '1843-12-31T00:00:00.000Z',
+          properties: { method: 'letters' },
           arguments: [
             { role: 'subject', kind: 'entity' as const, ref: 'ada' },
             { role: 'topic', kind: 'literal' as const, value: 'mathematics' },
@@ -738,6 +741,9 @@ describe('proposals + capture API', () => {
 
     const claim = h.claimStore.created[0];
     expect(claim?.confidence).toBe(0.9);
+    expect(claim?.validStart).toBe('1840-01-01T00:00:00.000Z');
+    expect(claim?.validEnd).toBe('1843-12-31T00:00:00.000Z');
+    expect(claim?.properties).toEqual({ method: 'letters' });
     expect(claim?.provenance?.origin).toBe('ai_proposal');
     expect(claim?.provenance?.provider).toBe('mock');
     expect(claim?.provenance?.sourceNoteId).toBe('22222222-2222-2222-2222-222222222222');

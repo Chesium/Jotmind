@@ -85,6 +85,9 @@ export const proposalClaimChangeSchema = z.object({
   predicate: z.string().min(1).max(200),
   description: z.string().max(5000).optional(),
   confidence: z.number().min(0).max(1).optional(),
+  validStart: z.string().datetime().optional(),
+  validEnd: z.string().datetime().optional(),
+  properties: z.record(z.unknown()).optional(),
   arguments: z.array(proposalClaimArgumentSchema).min(1),
 });
 export type ProposalClaimChange = z.infer<typeof proposalClaimChangeSchema>;
@@ -116,12 +119,26 @@ export const proposalSourceChangeSchema = z.object({
 export type ProposalSourceChange = z.infer<typeof proposalSourceChangeSchema>;
 
 /** A single candidate change within a proposal. */
-export const proposalChangeSchema = z.discriminatedUnion('op', [
-  proposalEntityChangeSchema,
-  proposalClaimChangeSchema,
-  proposalNoteChangeSchema,
-  proposalSourceChangeSchema,
-]);
+function validTimeOrdered(data: { validStart?: string; validEnd?: string }): boolean {
+  if (!data.validStart || !data.validEnd) return true;
+  return Date.parse(data.validStart) <= Date.parse(data.validEnd);
+}
+
+export const proposalChangeSchema = z
+  .discriminatedUnion('op', [
+    proposalEntityChangeSchema,
+    proposalClaimChangeSchema,
+    proposalNoteChangeSchema,
+    proposalSourceChangeSchema,
+  ])
+  .superRefine((change, ctx) => {
+    if (change.op !== 'create_claim' || validTimeOrdered(change)) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'validStart must be on or before validEnd',
+      path: ['validEnd'],
+    });
+  });
 export type ProposalChange = z.infer<typeof proposalChangeSchema>;
 
 /** The full structured payload stored in `proposals.changes`. */

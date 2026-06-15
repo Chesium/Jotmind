@@ -935,8 +935,8 @@
         "Typecheck passes"
       ],
       "priority": 52,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Structured proposal editing is now available in apps/web/src/Proposals.tsx for create_entity, create_claim, create_note, and create_source items, with Advanced JSON retained as an escape hatch. Structured saves are client-validated with proposalChangesSchema before PATCH, while the API still re-validates edited changes and only applies pending proposals. Proposal claim changes now support validStart, validEnd, and properties; applyProposalChanges passes those into canonical claim creation. Focused web/schema/API tests plus full pnpm verify pass; browser verification was done with Playwright because dev-browser is unavailable in this environment."
     },
     {
       "id": "US-053",

@@ -26,12 +26,27 @@ describe('proposal changes', () => {
     const parsed = proposalChangeSchema.parse({
       op: 'create_claim',
       predicate: 'knows',
+      validStart: '2020-01-01T00:00:00.000Z',
+      validEnd: '2020-12-31T00:00:00.000Z',
+      properties: { sourceConfidence: 'high' },
       arguments: [
         { role: 'subject', kind: 'entity', ref: 'ada' },
         { role: 'object', kind: 'entity', ref: 'charles' },
       ],
     });
     expect(parsed.op).toBe('create_claim');
+    expect(parsed.properties?.sourceConfidence).toBe('high');
+  });
+
+  it('rejects a create_claim change with an invalid valid-time range', () => {
+    const result = proposalChangeSchema.safeParse({
+      op: 'create_claim',
+      predicate: 'knows',
+      validStart: '2021-01-01T00:00:00.000Z',
+      validEnd: '2020-01-01T00:00:00.000Z',
+      arguments: [{ role: 'subject', kind: 'entity', ref: 'ada' }],
+    });
+    expect(result.success).toBe(false);
   });
 
   it('requires a ref for an entity argument', () => {
