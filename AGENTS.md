@@ -647,6 +647,14 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   `command-submit`, `command-ai-status`, `command-interpretation`/`-intent`/
   `-interpreted-result-<kind>`, `command-no-interpretation`,
   `command-fallback`/`-fallback-result-<kind>`.
+- Frontend AI workflow coverage should stay deterministic and credential-free.
+  Use `apps/web/src/App.test.tsx` for `AiPolicySettings`/`KbAiPolicy` role
+  gates and `<CommandBox>` visible states (unavailable, interpreted search,
+  low-confidence fallback, create preview). Use
+  `apps/web/src/Proposals.test.tsx` for quick-capture extraction states
+  (`created|empty|unavailable|error`) and pending-proposal review controls. Mock
+  schema-valid API responses with mock/demo provider labels; never require
+  remote provider credentials or network calls for these frontend regressions.
 
 ## Provenance-aware AI answers (US-020)
 

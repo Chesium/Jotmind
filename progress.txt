@@ -3,6 +3,7 @@ Started: Sat 13 Jun 2026 08:14:49 PM +08
 ---
 
 ## Codebase Patterns
+- Frontend AI workflow coverage (US-053): keep deterministic, credential-free UI tests split by surface. `apps/web/src/App.test.tsx` covers `AiPolicySettings`/`KbAiPolicy` role gates and `<CommandBox>` states (AI unavailable, interpreted search, low-confidence fallback, create preview) with schema-valid mocked API responses. `apps/web/src/Proposals.test.tsx` covers quick-capture extraction outcomes (`created|empty|unavailable|error`) and proposal review controls. Use mock/demo provider labels; do not require remote credentials or network calls.
 - Proposal editing (US-052): `proposalChangesSchema` is the single source of truth for pending proposal edits. When adding fields/ops, update `packages/schemas/src/proposals.ts`, thread executable fields through `apps/api/src/proposals/index.ts applyProposalChanges`, update the structured editor in `apps/web/src/Proposals.tsx`, and cover it in `apps/web/src/Proposals.test.tsx`. Keep Advanced JSON available, but client-validate structured edits with `proposalChangesSchema` before `editProposal()`.
 - Command-created proposals (US-051): a command `create` interpretation is promoted through `POST /api/knowledge-bases/:kbId/proposals` with `createCommandProposalSchema` (editor+CSRF), creating a pending `kind:'command'` proposal only. Store structured `changes` plus allowlisted metadata (`query`/`explanation`/`confidence`/`demo`/`label`/`remoteConfirmation`) and provider/model; never write canonical graph rows or graph_outbox until proposal accept. Web uses `createCommandProposal()` from `CommandBox`, then publishes `['proposals','audit']` so `<Proposals>` refreshes without reload. `MockCommandInterpreter` emits deterministic create-entity suggestions for `create`/`add`/`new` commands so browser verification does not need a remote model.
 - Remote-per-request AI consent (US-050): every remote-capable request schema carries optional `remoteConfirmation` (provider/model/feature/contentCategories only). API routes must compute the expected confirmation with `buildRemoteConfirmation()` and return 409 via `remoteConfirmationRequiredBody()` BEFORE any remote provider call when `resolveAiPolicy(...).requiresPerRequestConfirmation`; verify retries with `remoteConfirmationMatches()`. Web API helpers throw `RemoteAiConfirmationRequiredError`; components call `confirmRemoteAiCall()` and retry with the exact server-supplied confirmation, never raw prompts/content. Remote-call audit goes through `dbRemoteAiAuditStore.recordRemoteCall()` + `buildRemoteAiAuditMetadata()` allowlist (`ai.remote_call`), never ad hoc metadata. Embedding jobs carry the confirmation in `embeddingIndexJobPayloadSchema` and the worker re-checks it before remote embedding generation; remote embeddings still require separate `remoteEmbeddingsAllowed` consent.
@@ -911,4 +912,19 @@ Thread: https://ampcode.com/threads/T-019ec6db-7bb1-77b5-b261-b477f45ef059
   - Proposal change schema extensions need three synchronized updates: shared schema, `applyProposalChanges`, and the structured web editor.
   - Store arbitrary proposal-item `properties` as editable JSON object text, but parse it before schema validation so invalid JSON never reaches the API.
   - During edit mode, hide accept/reject controls so a partially invalid draft cannot be executed accidentally; the server still re-validates on accept.
+---
+
+## Mon 15 Jun 2026 11:14 +0800 - US-053
+- Added focused frontend regression coverage for existing AI policy and AI workflow states.
+- `apps/web/src/App.test.tsx`: added helpers for schema-valid command/search/policy mock responses; covered server/user AI policy display and role gates, KB AI policy viewer/admin editing gates, and `<CommandBox>` states for AI unavailable, interpreted search, low-confidence fallback, and create-preview.
+- `apps/web/src/Proposals.test.tsx`: added capture fixtures and table-driven quick-capture tests for `created`, `empty`, `unavailable`, and `error` extraction outcomes; added proposal review behavior coverage for visible accept-selected, reject, and edit controls.
+- Updated `AGENTS.md` and the Codebase Patterns section with the reusable deterministic frontend AI workflow testing convention.
+- Marked `US-053` passing in `prd.json`.
+- Verified: targeted `pnpm --filter @jotmind/web test -- App.test.tsx Proposals.test.tsx`; `pnpm verify:quick`; full `pnpm verify` passed, including Playwright browser smoke. No remote provider credentials or network AI calls were required.
+- Files changed: `apps/web/src/App.test.tsx`, `apps/web/src/Proposals.test.tsx`, `AGENTS.md`, `prd.json`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Keep AI frontend workflow tests deterministic by mocking schema-valid API responses in component/app tests; do not depend on real AI provider env or network.
+  - Split coverage by surface: policy and command states in `App.test.tsx`; quick capture and proposal review controls in `Proposals.test.tsx`.
+  - Quick-capture `empty` and `error` states can still show the mock/demo label when extraction was available; only `unavailable` lacks a provider/demo label.
+  - Full `pnpm verify` is enough browser verification for this coverage-only frontend story because it runs the Playwright smoke test; `dev-browser` remains unavailable in this environment.
 ---

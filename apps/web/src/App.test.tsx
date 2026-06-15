@@ -1,12 +1,12 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
-import { AiProviderStatusPanel } from './AiPolicySettings.js';
+import { AiPolicySettings, AiProviderStatusPanel, KbAiPolicy } from './AiPolicySettings.js';
 import { EmbeddingsPanel } from './EmbeddingsPanel.js';
 import { Rules } from './Rules.js';
 import { Modules } from './Modules.js';
 import { InvalidationProvider, useInvalidationEffect } from './invalidation.js';
-import type { KnowledgeBase } from '@jotmind/schemas';
+import type { CommandResponse, KnowledgeBase, SearchResult } from '@jotmind/schemas';
 
 function mockFetch(
   handler: (url: string, init?: RequestInit) => { status?: number; body?: unknown },
@@ -23,6 +23,62 @@ function mockFetch(
       } as Response);
     }),
   );
+}
+
+const testNow = '2026-06-15T00:00:00.000Z';
+
+function searchHit(overrides: Partial<SearchResult> = {}): SearchResult {
+  return {
+    kind: 'entity',
+    id: '00000000-0000-0000-0000-000000000531',
+    knowledgeBaseId: '00000000-0000-0000-0000-000000000530',
+    title: 'Ada Lovelace',
+    snippet: 'first programmer',
+    type: 'Person',
+    tags: [],
+    confidence: null,
+    createdAt: testNow,
+    updatedAt: testNow,
+    ...overrides,
+  };
+}
+
+function fallback(results: SearchResult[] = []) {
+  return {
+    results,
+    vectorSearch: { available: false, reason: 'No embeddings.' },
+  };
+}
+
+function commandResponse(overrides: Partial<CommandResponse>): CommandResponse {
+  return {
+    query: 'ada',
+    ai: {
+      attempted: false,
+      available: false,
+      reason: 'AI is disabled by policy',
+      repaired: false,
+      lowConfidence: false,
+      provider: null,
+      model: null,
+      demo: false,
+      label: null,
+    },
+    interpretation: null,
+    interpretedResults: null,
+    fallback: fallback(),
+    ...overrides,
+  };
+}
+
+function resolvedPolicy(mode: 'off' | 'local_only' | 'remote_per_request' | 'remote_always') {
+  const remoteAllowed = mode === 'remote_per_request' || mode === 'remote_always';
+  return {
+    mode,
+    remoteAllowed,
+    remoteEmbeddingsAllowed: false,
+    requiresPerRequestConfirmation: mode === 'remote_per_request',
+  };
 }
 
 describe('App', () => {
@@ -1307,6 +1363,233 @@ describe('App', () => {
     expect(screen.getByTestId(`proposal-${proposalId}`)).toHaveTextContent('Ada Lovelace');
   });
 
+  it('renders command AI states for unavailable, interpreted search, low-confidence fallback, and create preview (US-053)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000530';
+    const interpreted = searchHit({ knowledgeBaseId: kbId, title: 'Ada Lovelace' });
+    const fallbackOnly = searchHit({
+      id: '00000000-0000-0000-0000-000000000532',
+      knowledgeBaseId: kbId,
+      title: 'Ada fallback result',
+    });
+    const responses: CommandResponse[] = [
+      commandResponse({
+        query: 'unavailable',
+        ai: {
+          attempted: false,
+          available: false,
+          reason: 'AI is disabled by policy',
+          repaired: false,
+          lowConfidence: false,
+          provider: null,
+          model: null,
+          demo: false,
+          label: null,
+        },
+      }),
+      commandResponse({
+        query: 'search ada',
+        ai: {
+          attempted: true,
+          available: true,
+          reason: null,
+          repaired: false,
+          lowConfidence: false,
+          provider: 'Mock Interpreter',
+          model: 'mock',
+          demo: true,
+          label: 'Mock AI / deterministic demo output',
+        },
+        interpretation: {
+          intent: 'search',
+          confidence: 0.91,
+          explanation: 'Search for Ada.',
+          filters: { q: 'ada', kinds: ['entity'] },
+        },
+        interpretedResults: [interpreted],
+        fallback: fallback([]),
+      }),
+      commandResponse({
+        query: 'maybe ada',
+        ai: {
+          attempted: true,
+          available: true,
+          reason: null,
+          repaired: false,
+          lowConfidence: true,
+          provider: 'Mock Interpreter',
+          model: 'mock',
+          demo: true,
+          label: 'Mock AI / deterministic demo output',
+        },
+        fallback: fallback([fallbackOnly]),
+      }),
+      commandResponse({
+        query: 'create ada',
+        ai: {
+          attempted: true,
+          available: true,
+          reason: null,
+          repaired: false,
+          lowConfidence: false,
+          provider: 'Mock Interpreter',
+          model: 'mock',
+          demo: true,
+          label: 'Mock AI / deterministic demo output',
+        },
+        interpretation: {
+          intent: 'create',
+          confidence: 0.88,
+          explanation: 'Create a Person entity.',
+          changes: {
+            items: [{ op: 'create_entity', ref: 'ada', type: 'Person', name: 'Ada Lovelace' }],
+          },
+        },
+      }),
+    ];
+    let commandCalls = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: testNow,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes('/api/ai/provider')) {
+          return respond(200, { configured: false, editable: false, configSource: 'environment' });
+        }
+        if (url.endsWith('/api/ai/policy')) {
+          const off = { mode: 'off', remoteEmbeddings: false };
+          return respond(200, { server: off, user: off, effective: resolvedPolicy('off') });
+        }
+        if (url.includes('/api/graph/projection/status')) {
+          return respond(200, {
+            state: 'synchronized',
+            projector: { name: 'age:jotmind_graph', stubbed: false },
+            counts: { pending: 0, processed: 0, failed: 0 },
+            activeKnowledgeBaseId: null,
+            lastJobId: null,
+            lastRebuildStartedAt: null,
+            lastSynchronizedAt: testNow,
+            failedAt: null,
+            lastError: null,
+            updatedAt: testNow,
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/command`)) {
+          return respond(200, responses[Math.min(commandCalls++, responses.length - 1)]);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/ai/policy`)) {
+          const off = { mode: 'off', remoteEmbeddings: false };
+          return respond(200, {
+            policy: off,
+            server: off,
+            user: off,
+            effective: resolvedPolicy('off'),
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/search`)) {
+          return respond(200, fallback([]));
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/embeddings`)) {
+          return respond(200, {
+            vectorSearchAvailable: false,
+            generationAvailable: false,
+            reason: 'No embedding provider is configured',
+            total: 0,
+            counts: { entity: 0, claim: 0, note: 0, source: 0 },
+            model: null,
+            dimensions: null,
+            lastIndexedAt: null,
+            providerKind: null,
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/jobs`)) return respond(200, { jobs: [] });
+        if (url.includes(`/api/knowledge-bases/${kbId}/imports`)) return respond(200, { jobs: [] });
+        if (
+          url.match(
+            new RegExp(
+              `/api/knowledge-bases/${kbId}/(entities|claims|notes|sources|source-excerpts|proposals|modules|rules|schema|audit)`,
+            ),
+          )
+        ) {
+          return respond(200, []);
+        }
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Command States KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: testNow,
+              updatedAt: testNow,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+    await waitFor(() => expect(screen.getByTestId('command-submit')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId('command-query'), { target: { value: 'unavailable' } });
+    fireEvent.click(screen.getByTestId('command-submit'));
+    await waitFor(() =>
+      expect(screen.getByTestId('command-ai-status')).toHaveTextContent(
+        'AI unavailable — AI is disabled by policy',
+      ),
+    );
+    expect(screen.getByTestId('command-no-interpretation')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('command-query'), { target: { value: 'search ada' } });
+    fireEvent.click(screen.getByTestId('command-submit'));
+    await waitFor(() => expect(screen.getByTestId('command-intent')).toHaveTextContent('search'));
+    expect(screen.getByTestId('command-interpreted-count')).toHaveTextContent(
+      '1 interpreted result',
+    );
+    expect(screen.getByTestId('command-interpreted-result-entity')).toHaveTextContent(
+      'Ada Lovelace',
+    );
+
+    fireEvent.change(screen.getByTestId('command-query'), { target: { value: 'maybe ada' } });
+    fireEvent.click(screen.getByTestId('command-submit'));
+    await waitFor(() =>
+      expect(screen.getByTestId('command-ai-status')).toHaveTextContent('low confidence'),
+    );
+    expect(screen.getByTestId('command-no-interpretation')).toHaveTextContent(
+      'showing search results',
+    );
+    expect(screen.getByTestId('command-fallback-result-entity')).toHaveTextContent(
+      'Ada fallback result',
+    );
+
+    fireEvent.change(screen.getByTestId('command-query'), { target: { value: 'create ada' } });
+    fireEvent.click(screen.getByTestId('command-submit'));
+    await waitFor(() => expect(screen.getByTestId('command-create-preview')).toBeInTheDocument());
+    expect(screen.getByTestId('command-create-preview')).toHaveTextContent('Ada Lovelace');
+    expect(screen.getByTestId('command-create-proposal')).toBeEnabled();
+  });
+
   it('invalidates claims and graph views after accepting an inferred result (US-041)', async () => {
     const kbId = '00000000-0000-0000-0000-000000000130';
     const ruleId = '00000000-0000-0000-0000-000000000131';
@@ -2094,6 +2377,163 @@ describe('AiProviderStatusPanel (US-046)', () => {
     );
     expect(screen.getByTestId('ai-provider-classification')).toHaveTextContent('Remote');
     expect(container.textContent ?? '').not.toMatch(/apiKey|sk-/);
+  });
+});
+
+describe('AI policy frontend states (US-053)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows server/user policy state and keeps server editing admin-only', async () => {
+    const updates: Array<{ url: string; body: unknown; csrf?: string }> = [];
+    const off = { mode: 'off', remoteEmbeddings: false };
+    const serverRemote = { mode: 'remote_always', remoteEmbeddings: false };
+
+    mockFetch((url, init) => {
+      if (url.includes('/api/ai/provider')) {
+        return { body: { configured: false, editable: false, configSource: 'environment' } };
+      }
+      if (url.endsWith('/api/ai/policy')) {
+        return {
+          body: { server: serverRemote, user: off, effective: resolvedPolicy('off') },
+        };
+      }
+      if (url.includes('/api/ai/policy/me')) {
+        updates.push({
+          url,
+          body: JSON.parse(String(init?.body ?? '{}')) as unknown,
+          csrf:
+            init?.headers && !Array.isArray(init.headers)
+              ? (init.headers as Record<string, string>)['x-csrf-token']
+              : undefined,
+        });
+        return { body: { mode: 'local_only', remoteEmbeddings: false } };
+      }
+      return { status: 404 };
+    });
+
+    render(<AiPolicySettings isAdmin={false} csrfToken="tok" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('ai-policy-effective')).toHaveTextContent('No AI'),
+    );
+    expect(screen.getByText('Server policy (read-only)')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-policy-server-mode')).toBeDisabled();
+    expect(screen.queryByTestId('ai-policy-server-save')).not.toBeInTheDocument();
+    expect(screen.getByTestId('ai-policy-user-save')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('ai-policy-user-mode'), {
+      target: { value: 'local_only' },
+    });
+    fireEvent.click(screen.getByTestId('ai-policy-user-save'));
+
+    await waitFor(() => expect(updates).toHaveLength(1));
+    expect(updates[0]).toEqual({
+      url: '/api/ai/policy/me',
+      body: { mode: 'local_only', remoteEmbeddings: false },
+      csrf: 'tok',
+    });
+  });
+
+  it('shows KB AI policy state and gates editing to KB admins', async () => {
+    const viewerKb: KnowledgeBase = {
+      id: '00000000-0000-0000-0000-000000000533',
+      name: 'Viewer Policy KB',
+      description: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      role: 'viewer',
+      createdAt: testNow,
+      updatedAt: testNow,
+    };
+    const off = { mode: 'off', remoteEmbeddings: false };
+
+    mockFetch((url) => {
+      if (url.includes(`/api/knowledge-bases/${viewerKb.id}/ai/policy`)) {
+        return {
+          body: {
+            policy: off,
+            server: off,
+            user: off,
+            effective: resolvedPolicy('off'),
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(
+      <InvalidationProvider>
+        <KbAiPolicy kb={viewerKb} csrfToken="tok" />
+      </InvalidationProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('kb-ai-policy-effective')).toHaveTextContent('No AI'),
+    );
+    expect(screen.getByText('This Knowledge Base (read-only)')).toBeInTheDocument();
+    expect(screen.getByTestId('kb-ai-policy-mode')).toBeDisabled();
+    expect(screen.queryByTestId('kb-ai-policy-save')).not.toBeInTheDocument();
+  });
+
+  it('lets KB admins edit the KB AI policy layer', async () => {
+    const adminKb: KnowledgeBase = {
+      id: '00000000-0000-0000-0000-000000000534',
+      name: 'Admin Policy KB',
+      description: null,
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      role: 'admin',
+      createdAt: testNow,
+      updatedAt: testNow,
+    };
+    const off = { mode: 'off', remoteEmbeddings: false };
+    const localOnly = { mode: 'local_only', remoteEmbeddings: false };
+    const updates: unknown[] = [];
+    let saved = false;
+
+    mockFetch((url, init) => {
+      if (url.includes(`/api/knowledge-bases/${adminKb.id}/ai/policy`)) {
+        if ((init?.method ?? 'GET') === 'PUT') {
+          updates.push(JSON.parse(String(init?.body ?? '{}')) as unknown);
+          saved = true;
+          return {
+            body: {
+              policy: localOnly,
+              server: off,
+              user: off,
+              effective: resolvedPolicy('local_only'),
+            },
+          };
+        }
+        const policy = saved ? localOnly : off;
+        return {
+          body: {
+            policy,
+            server: off,
+            user: off,
+            effective: resolvedPolicy(saved ? 'local_only' : 'off'),
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    render(
+      <InvalidationProvider>
+        <KbAiPolicy kb={adminKb} csrfToken="tok" />
+      </InvalidationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('kb-ai-policy-save')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('kb-ai-policy-mode'), {
+      target: { value: 'local_only' },
+    });
+    fireEvent.click(screen.getByTestId('kb-ai-policy-save'));
+
+    await waitFor(() => expect(updates).toEqual([{ mode: 'local_only', remoteEmbeddings: false }]));
+    await waitFor(() =>
+      expect(screen.getByTestId('kb-ai-policy-effective')).toHaveTextContent('Local only'),
+    );
   });
 });
 

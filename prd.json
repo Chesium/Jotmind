@@ -953,8 +953,8 @@
         "Typecheck passes"
       ],
       "priority": 53,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added focused frontend coverage for existing AI policy and AI workflow states. App.test.tsx now covers server/user AI policy display and editing gates, KB AI policy viewer/admin gates, and CommandBox states for AI unavailable, interpreted search, low-confidence fallback, and create preview using deterministic mocked responses. Proposals.test.tsx now covers quick-capture extraction outcomes (created, empty, unavailable, error) plus visible proposal accept-selected/reject/edit controls. Targeted web tests, pnpm verify:quick, and full pnpm verify (including Playwright browser smoke) pass without remote provider credentials."
     },
     {
       "id": "US-054",
