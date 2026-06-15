@@ -8,6 +8,7 @@ import {
   claimListSchema,
   claimSchema,
   commandResponseSchema,
+  createCommandProposalSchema,
   embeddingStatusSchema,
   reindexEmbeddingsResponseSchema,
   entityImpactSchema,
@@ -54,6 +55,7 @@ import {
   type CaptureRequest,
   type CaptureResponse,
   type CommandResponse,
+  type CreateCommandProposalRequest,
   type EmbeddingStatus,
   type ReindexEmbeddings,
   type ReindexEmbeddingsResponse,
@@ -609,6 +611,23 @@ export async function runCommand(
   await throwIfRemoteConfirmationRequired(res);
   if (!res.ok) throw new Error(await errorMessage(res));
   return commandResponseSchema.parse(await res.json());
+}
+
+/** Promote a command-box create interpretation into the pending proposal queue. */
+export async function createCommandProposal(
+  knowledgeBaseId: string,
+  input: CreateCommandProposalRequest,
+  csrfToken: string,
+): Promise<Proposal> {
+  const payload = createCommandProposalSchema.parse(input);
+  const res = await apiFetch(`/api/knowledge-bases/${knowledgeBaseId}/proposals`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return proposalSchema.parse(await res.json());
 }
 
 export async function answerQuestion(

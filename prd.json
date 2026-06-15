@@ -916,8 +916,8 @@
         "Typecheck passes"
       ],
       "priority": 51,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Command create interpretations now promote into pending `kind:'command'` proposals through an editor+CSRF `POST /api/knowledge-bases/:kbId/proposals` path using `createCommandProposalSchema`. The endpoint stores structured candidate changes plus allowlisted provider/model/provenance/confirmation metadata and only records `proposal.created`; it never writes canonical graph rows or graph_outbox events. CommandBox shows `Create proposal from suggestion` for editors, preview-only messaging for viewers, and invalidates `proposals`/`audit` so the Proposals panel refreshes without reload. MockCommandInterpreter now emits deterministic create-entity suggestions for `create`/`add`/`new` commands to support no-network browser verification. Tests, typecheck, lint, full verify, and real-browser verification pass."
     },
     {
       "id": "US-052",

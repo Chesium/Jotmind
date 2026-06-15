@@ -356,7 +356,7 @@ a:hover {
 
 .workflow-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.95fr) minmax(260px, 0.75fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 18px;
   align-items: start;
 }

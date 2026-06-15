@@ -1128,6 +1128,185 @@ describe('App', () => {
     });
   });
 
+  it('queues a command create suggestion as a proposal without reload (US-051)', async () => {
+    const kbId = '00000000-0000-0000-0000-000000000180';
+    const proposalId = '00000000-0000-0000-0000-000000000181';
+    const now = new Date().toISOString();
+    const proposal = {
+      id: proposalId,
+      knowledgeBaseId: kbId,
+      kind: 'command',
+      status: 'pending',
+      changes: {
+        items: [{ op: 'create_entity', ref: 'ada', type: 'Person', name: 'Ada Lovelace' }],
+      },
+      sourceNoteId: null,
+      sourceSourceId: null,
+      sourceExcerptId: null,
+      provider: 'Mock Interpreter',
+      model: 'mock',
+      reviewReason: null,
+      metadata: {
+        source: 'command',
+        query: 'create Ada',
+        confidence: 0.92,
+        demo: true,
+      },
+      createdBy: '00000000-0000-0000-0000-000000000001',
+      reviewedBy: null,
+      reviewedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    let proposalCreated = false;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = init?.method ?? 'GET';
+        const respond = (status: number, body: unknown) =>
+          Promise.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(body),
+          } as Response);
+
+        if (url.includes('/api/auth/me')) {
+          return respond(200, {
+            user: {
+              id: '00000000-0000-0000-0000-000000000001',
+              email: 'editor@example.com',
+              role: 'member',
+              createdAt: now,
+            },
+            csrfToken: 'tok',
+          });
+        }
+        if (url.includes('/api/graph/projection/status')) {
+          return respond(200, { id: 'default', state: 'synchronized', pendingEvents: 0 });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/command`)) {
+          return respond(200, {
+            query: 'create Ada',
+            ai: {
+              attempted: true,
+              available: true,
+              reason: null,
+              repaired: false,
+              lowConfidence: false,
+              provider: 'Mock Interpreter',
+              model: 'mock',
+              demo: true,
+              label: 'Mock AI / deterministic demo output',
+            },
+            interpretation: {
+              intent: 'create',
+              confidence: 0.92,
+              explanation: 'Create a Person entity.',
+              changes: proposal.changes,
+            },
+            interpretedResults: null,
+            fallback: {
+              results: [],
+              vectorSearch: { available: false, reason: 'No embeddings.' },
+            },
+          });
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/proposals`)) {
+          if (method === 'POST') {
+            const body = JSON.parse(String(init?.body ?? '{}')) as {
+              metadata?: Record<string, unknown>;
+            };
+            proposalCreated = true;
+            return respond(201, {
+              ...proposal,
+              metadata: { ...proposal.metadata, ...(body.metadata ?? {}) },
+            });
+          }
+          return respond(200, proposalCreated ? [proposal] : []);
+        }
+        if (
+          url.match(
+            new RegExp(
+              `/api/knowledge-bases/${kbId}/(entities|claims|notes|sources|source-excerpts|search|imports|audit|jobs|modules|rules|schema|embeddings)`,
+            ),
+          )
+        ) {
+          if (url.includes('/search')) {
+            return respond(200, {
+              results: [],
+              vectorSearch: { available: false, reason: 'No embeddings.' },
+            });
+          }
+          if (url.includes('/imports')) return respond(200, { jobs: [] });
+          if (url.includes('/jobs')) return respond(200, { jobs: [] });
+          if (url.includes('/audit')) return respond(200, []);
+          if (url.includes('/embeddings')) {
+            return respond(200, {
+              vectorSearchAvailable: false,
+              generationAvailable: false,
+              targetCounts: { entity: 0, claim: 0, note: 0, source: 0 },
+              totalEmbeddings: 0,
+              reason: 'No embeddings.',
+            });
+          }
+          return respond(200, []);
+        }
+        if (url.includes(`/api/knowledge-bases/${kbId}/ai/policy`)) {
+          const off = { mode: 'off', remoteEmbeddings: false };
+          return respond(200, {
+            policy: off,
+            server: off,
+            user: off,
+            effective: {
+              mode: 'off',
+              remoteAllowed: false,
+              remoteEmbeddingsAllowed: false,
+              requiresPerRequestConfirmation: false,
+            },
+          });
+        }
+        if (url.includes('/api/knowledge-bases') && !url.includes(`${kbId}/`)) {
+          return respond(200, [
+            {
+              id: kbId,
+              name: 'Command Proposal KB',
+              description: null,
+              createdBy: '00000000-0000-0000-0000-000000000001',
+              role: 'editor',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]);
+        }
+        return respond(404, {});
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId(`kb-select-${kbId}`)).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId(`kb-select-${kbId}`));
+
+    await waitFor(() => expect(screen.getByTestId('proposals-empty')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId('command-query'), { target: { value: 'create Ada' } });
+    fireEvent.click(screen.getByTestId('command-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('command-create-preview')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('command-create-proposal'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('command-create-proposal-result')).toHaveTextContent(
+        'queued for review',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId(`proposal-${proposalId}`)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId(`proposal-${proposalId}`)).toHaveTextContent('Ada Lovelace');
+  });
+
   it('invalidates claims and graph views after accepting an inferred result (US-041)', async () => {
     const kbId = '00000000-0000-0000-0000-000000000130';
     const ruleId = '00000000-0000-0000-0000-000000000131';

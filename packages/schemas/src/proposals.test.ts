@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   acceptProposalSchema,
   captureRequestSchema,
+  createCommandProposalSchema,
   editProposalSchema,
   proposalChangeSchema,
   proposalChangesSchema,
   proposalClaimArgumentSchema,
+  proposalKindSchema,
   rejectProposalSchema,
 } from './proposals.js';
 
@@ -66,6 +68,40 @@ describe('captureRequestSchema', () => {
   it('rejects empty content', () => {
     const result = captureRequestSchema.safeParse({ content: '' });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('command proposal schema (US-051)', () => {
+  it('accepts command as a proposal kind', () => {
+    expect(proposalKindSchema.parse('command')).toBe('command');
+  });
+
+  it('requires at least one candidate change', () => {
+    expect(createCommandProposalSchema.safeParse({ changes: { items: [] } }).success).toBe(false);
+  });
+
+  it('keeps only allowlisted command metadata', () => {
+    const parsed = createCommandProposalSchema.parse({
+      changes: { items: [{ op: 'create_entity', ref: 'ada', type: 'Person', name: 'Ada' }] },
+      provider: 'Mock',
+      model: 'mock',
+      metadata: {
+        query: 'create Ada',
+        confidence: 0.9,
+        remoteConfirmation: {
+          provider: 'Remote',
+          model: 'gpt-test',
+          feature: 'Command interpretation',
+          contentCategories: ['search_query'],
+        },
+        apiKey: 'must-not-survive',
+        rawPrompt: 'must-not-survive',
+      },
+    });
+    expect(parsed.metadata?.query).toBe('create Ada');
+    expect(parsed.metadata?.remoteConfirmation?.feature).toBe('Command interpretation');
+    expect(parsed.metadata).not.toHaveProperty('apiKey');
+    expect(parsed.metadata).not.toHaveProperty('rawPrompt');
   });
 });
 

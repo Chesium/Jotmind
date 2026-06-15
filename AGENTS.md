@@ -596,14 +596,24 @@ confirmationNote?}`. When adding new claim-creating flows that need provenance,
   `createdEntityIds`/`createdClaimIds`). Web helpers in `api.ts`:
   `acceptProposal`/`rejectProposal`/`editProposal`; `<ProposalItem>` renders
   per-item checkboxes + Accept all / Accept selected / Reject / Edit (JSON).
+- **Command-created proposals (US-051):** `POST /api/knowledge-bases/:kbId/proposals`
+  creates a pending `kind:'command'` proposal from `createCommandProposalSchema`
+  (editor+CSRF). It stores structured candidate `changes` plus allowlisted
+  command metadata (`query`/`explanation`/`confidence`/`demo`/`label`/
+  `remoteConfirmation`) and records `proposal.created`; it must NOT call
+  entity/claim/note/source stores or enqueue graph outbox. Web callers use
+  `createCommandProposal()` and then invalidate `['proposals','audit']` so
+  `<Proposals>` refreshes without reload.
 
 ## Universal command/search box (US-019)
 
 - One command box (`apps/api/src/command/`) accepts a natural-language query.
   `interpreter.ts` defines the `CommandInterpreter` interface +
   `MockCommandInterpreter` (deterministic demo, parses `type:`/`predicate:`/
-  `tag:`/`kind:` hints into search filters) + `LlmCommandInterpreter` (wraps an
-  `LlmProvider`, strict-JSON prompt validated by `commandInterpretationSchema`).
+  `tag:`/`kind:` hints into search filters; `create`/`add`/`new` plus optional
+  `type:`/`tag:` emits a simple create-entity suggestion for deterministic UI
+  tests) + `LlmCommandInterpreter` (wraps an `LlmProvider`, strict-JSON prompt
+  validated by `commandInterpretationSchema`).
   `resolveCommandInterpreterFromEnv` mirrors `resolveExtractorFromEnv` exactly
   (reads `AI_PROVIDER_CONFIG`; mock gated by `AI_DEMO_EXTRACTION`/non-prod).
 - `index.ts` `createCommandRouter` is mounted at

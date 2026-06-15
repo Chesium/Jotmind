@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import {
   acceptProposalSchema,
   captureRequestSchema,
+  createCommandProposalSchema,
   editProposalSchema,
   kbRoleSatisfies,
   proposalChangesSchema,
@@ -318,6 +319,38 @@ export function createProposalRouter(options: ProposalRouterOptions = {}): Route
       };
       const list = await store.listProposals(req.params.kbId as string, filter);
       res.json(list.map(toProposal));
+    }),
+  );
+
+  // Promote a command-box `create` interpretation into the normal pending
+  // proposal queue (US-051). This stores structured candidate changes only; it
+  // never writes canonical graph records until the proposal is reviewed.
+  router.post(
+    '/',
+    authed,
+    requireKbRole('editor'),
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const kbId = req.params.kbId as string;
+      const ctx = req.auth as AuthContext;
+      const parsed = createCommandProposalSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid command proposal' });
+        return;
+      }
+      const proposal = await store.createProposal({
+        knowledgeBaseId: kbId,
+        kind: 'command',
+        changes: parsed.data.changes,
+        provider: parsed.data.provider ?? null,
+        model: parsed.data.model ?? null,
+        metadata: {
+          source: 'command',
+          ...(parsed.data.metadata ?? {}),
+        },
+        actorUserId: ctx.user.id,
+      });
+      res.status(201).json(toProposal(proposal));
     }),
   );
 

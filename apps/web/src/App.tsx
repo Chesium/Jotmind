@@ -11,6 +11,7 @@ import {
   type Entity,
   type KnowledgeBase,
   type Note,
+  type RemoteCallConfirmation,
   type SearchResponse,
   type Source,
   type SourceExcerptView,
@@ -18,6 +19,7 @@ import {
 import {
   createAccount,
   createClaim,
+  createCommandProposal,
   createEntity,
   createKnowledgeBase,
   createNote,
@@ -454,7 +456,7 @@ function KnowledgeBases({
                 <AiPolicyInvalidator version={aiPolicyVersion} />
                 <div className="workflow-grid">
                   <div className="workflow-column primary-flow">
-                    <CommandBox kb={selectedKb} />
+                    <CommandBox kb={selectedKb} csrfToken={csrfToken} />
                     <Answers kb={selectedKb} />
                     <GraphViews kb={selectedKb} csrfToken={csrfToken} />
                     <Search kb={selectedKb} />
@@ -514,13 +516,19 @@ function KnowledgeBases({
  * are shown in clearly separated sections (AC6). Low-confidence/invalid AI
  * output is discarded server-side, leaving only the fallback (AC3/AC5).
  */
-function CommandBox({ kb }: { kb: KnowledgeBase }) {
+function CommandBox({ kb, csrfToken }: { kb: KnowledgeBase; csrfToken: string }) {
   const [q, setQ] = useState('');
   const [response, setResponse] = useState<CommandResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [proposalBusy, setProposalBusy] = useState(false);
+  const [proposalMessage, setProposalMessage] = useState<string | null>(null);
+  const [lastRemoteConfirmation, setLastRemoteConfirmation] =
+    useState<RemoteCallConfirmation | null>(null);
   const [stale, setStale] = useState(false);
   const [policyStale, setPolicyStale] = useState(false);
+  const invalidate = useInvalidate();
+  const canCreateProposal = kbRoleSatisfies(kb.role, 'editor');
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -528,6 +536,8 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
     if (!query) return;
     setBusy(true);
     setError(null);
+    setProposalMessage(null);
+    setLastRemoteConfirmation(null);
     try {
       setResponse(await runCommand(kb.id, query));
       setStale(false);
@@ -537,6 +547,7 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
         if (confirmRemoteAiCall(err.confirmation)) {
           try {
             setResponse(await runCommand(kb.id, query, err.confirmation));
+            setLastRemoteConfirmation(err.confirmation);
             setStale(false);
             setPolicyStale(false);
           } catch (retryErr) {
@@ -553,6 +564,39 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
       }
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function createProposalFromSuggestion() {
+    const interp = response?.interpretation;
+    if (!response || !interp || interp.intent !== 'create' || !canCreateProposal) return;
+    setProposalBusy(true);
+    setError(null);
+    setProposalMessage(null);
+    try {
+      const proposal = await createCommandProposal(
+        kb.id,
+        {
+          changes: interp.changes,
+          provider: response.ai.provider,
+          model: response.ai.model,
+          metadata: {
+            query: response.query,
+            explanation: interp.explanation,
+            confidence: interp.confidence,
+            demo: response.ai.demo,
+            label: response.ai.label,
+            ...(lastRemoteConfirmation ? { remoteConfirmation: lastRemoteConfirmation } : {}),
+          },
+        },
+        csrfToken,
+      );
+      setProposalMessage(`Proposal ${proposal.id} queued for review.`);
+      invalidate(['proposals', 'audit']);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create proposal');
+    } finally {
+      setProposalBusy(false);
     }
   }
 
@@ -628,8 +672,25 @@ function CommandBox({ kb }: { kb: KnowledgeBase }) {
                 </>
               ) : (
                 <div data-testid="command-create-preview">
-                  <p>AI suggests creating these records (review via Capture / Proposals):</p>
+                  <p>AI suggests creating these records:</p>
                   <pre>{JSON.stringify(interp.changes, null, 2)}</pre>
+                  {canCreateProposal ? (
+                    <button
+                      type="button"
+                      onClick={() => void createProposalFromSuggestion()}
+                      disabled={proposalBusy || interp.changes.items.length === 0}
+                      data-testid="command-create-proposal"
+                    >
+                      {proposalBusy ? 'Creating proposal...' : 'Create proposal from suggestion'}
+                    </button>
+                  ) : (
+                    <p data-testid="command-create-preview-only">
+                      Preview only. Editor role is required to queue this suggestion for review.
+                    </p>
+                  )}
+                  {proposalMessage && (
+                    <p data-testid="command-create-proposal-result">{proposalMessage}</p>
+                  )}
                 </div>
               )}
             </div>

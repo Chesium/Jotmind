@@ -588,6 +588,105 @@ describe('proposals + capture API', () => {
     expect(res.body[0].status).toBe('pending');
   });
 
+  it('creates a pending command proposal without writing canonical records (US-051)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        changes: {
+          items: [{ op: 'create_entity', ref: 'ada', type: 'Person', name: 'Ada Lovelace' }],
+        },
+        provider: 'Mock Interpreter',
+        model: 'mock',
+        metadata: {
+          query: 'create Ada',
+          explanation: 'Create a Person entity.',
+          confidence: 0.91,
+          demo: true,
+          label: 'Mock AI / deterministic demo output',
+          remoteConfirmation: {
+            provider: 'Mock Interpreter',
+            model: 'mock',
+            feature: 'Command interpretation',
+            contentCategories: ['search_query'],
+          },
+          rawPrompt: 'do not store me',
+        },
+      });
+
+    expect(res.status).toBe(201);
+    const body = proposalSchema.parse(res.body);
+    expect(body.kind).toBe('command');
+    expect(body.status).toBe('pending');
+    expect(body.provider).toBe('Mock Interpreter');
+    expect(body.model).toBe('mock');
+    expect(body.metadata).toMatchObject({
+      source: 'command',
+      query: 'create Ada',
+      explanation: 'Create a Person entity.',
+      confidence: 0.91,
+      demo: true,
+      remoteConfirmation: {
+        provider: 'Mock Interpreter',
+        model: 'mock',
+        feature: 'Command interpretation',
+        contentCategories: ['search_query'],
+      },
+    });
+    expect(body.metadata).not.toHaveProperty('rawPrompt');
+    expect(h.entityStore.created).toHaveLength(0);
+    expect(h.claimStore.created).toHaveLength(0);
+    expect(h.proposalStore.audits).toContain('proposal.created');
+  });
+
+  it('forbids viewers from creating command proposals (US-051)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'viewer');
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals`)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        changes: {
+          items: [{ op: 'create_entity', ref: 'ada', type: 'Person', name: 'Ada Lovelace' }],
+        },
+      });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('requires CSRF to create command proposals (US-051)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+
+    const res = await agent.post(`/api/knowledge-bases/${KB_ID}/proposals`).send({
+      changes: {
+        items: [{ op: 'create_entity', ref: 'ada', type: 'Person', name: 'Ada Lovelace' }],
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects empty command proposal changes (US-051)', async () => {
+    const app = makeApp(h, fakeExtractor());
+    const { agent, csrfToken, userId } = await setupAdminAgent(app);
+    h.kbStore.setRole(KB_ID, userId, 'editor');
+
+    const res = await agent
+      .post(`/api/knowledge-bases/${KB_ID}/proposals`)
+      .set('x-csrf-token', csrfToken)
+      .send({ changes: { items: [] } });
+
+    expect(res.status).toBe(400);
+  });
+
   // --- Review actions (US-018) ---------------------------------------------
 
   /** Seed a pending proposal with one entity + one claim referencing it. */

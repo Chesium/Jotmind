@@ -45,6 +45,25 @@ describe('MockCommandInterpreter (US-019)', () => {
     }
   });
 
+  it('emits a create-entity suggestion for simple create commands (US-051)', async () => {
+    const interp = new MockCommandInterpreter();
+    const { interpretation } = await interp.interpret(
+      'create type:Person tag:pioneer Ada Lovelace',
+    );
+    expect(interpretation?.intent).toBe('create');
+    if (interpretation?.intent === 'create') {
+      expect(interpretation.changes.items).toEqual([
+        {
+          op: 'create_entity',
+          ref: 'ada-lovelace',
+          type: 'Person',
+          name: 'Ada Lovelace',
+          tags: ['pioneer'],
+        },
+      ]);
+    }
+  });
+
   it('is marked as demo output', () => {
     const interp = new MockCommandInterpreter();
     expect(interp.demo).toBe(true);

@@ -45,8 +45,10 @@ export interface CommandInterpreter {
  * Deterministic mock interpreter. Parses `key:value` hints out of the query
  * (`type:Person`, `predicate:knows`, `tag:family`, `kind:claim`) into search
  * filters and uses the remaining words as the token query. Purely a function of
- * the input, so tests are reproducible and browser verification is stable. Only
- * ever emits a `search` intent. Its output is labeled {@link MOCK_EXTRACTION_LABEL}.
+ * the input, so tests are reproducible and browser verification is stable.
+ * `create`/`add`/`new` commands emit a simple create-entity suggestion; all
+ * other input emits a `search` intent. Its output is labeled
+ * {@link MOCK_EXTRACTION_LABEL}.
  */
 export class MockCommandInterpreter implements CommandInterpreter {
   readonly providerKind = 'mock' as const;
@@ -80,6 +82,30 @@ export class MockCommandInterpreter implements CommandInterpreter {
       }
       words.push(token);
     }
+
+    const [verb, ...rest] = words;
+    if (verb && ['create', 'add', 'new'].includes(verb.toLowerCase()) && rest.length > 0) {
+      const name = rest.join(' ');
+      const ref = slugRef(name);
+      const interpretation: CommandInterpretation = {
+        intent: 'create',
+        confidence: 0.85,
+        explanation: 'Mock interpreter mapped the command to a create-entity proposal.',
+        changes: {
+          items: [
+            {
+              op: 'create_entity',
+              ref,
+              type: filters.type ?? 'Concept',
+              name,
+              tags: filters.tag ? [filters.tag] : undefined,
+            },
+          ],
+        },
+      };
+      return Promise.resolve({ interpretation, repaired: false });
+    }
+
     if (words.length > 0) filters.q = words.join(' ');
 
     const interpretation: CommandInterpretation = {
@@ -90,6 +116,14 @@ export class MockCommandInterpreter implements CommandInterpreter {
     };
     return Promise.resolve({ interpretation, repaired: false });
   }
+}
+
+function slugRef(value: string): string {
+  const ref = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return ref || 'item';
 }
 
 const COMMAND_SYSTEM_PROMPT = [

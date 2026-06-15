@@ -19,7 +19,7 @@ import { noteSchema, proposalStatusSchema, sourceSchema } from './graph.js';
  */
 
 /** Where a proposal came from. `extraction` = AI capture (US-017). */
-export const PROPOSAL_KINDS = ['extraction', 'import'] as const;
+export const PROPOSAL_KINDS = ['extraction', 'import', 'command'] as const;
 export const proposalKindSchema = z.enum(PROPOSAL_KINDS);
 export type ProposalKind = (typeof PROPOSAL_KINDS)[number];
 
@@ -213,6 +213,36 @@ export const captureResponseSchema = z.object({
   extraction: captureExtractionResultSchema,
 });
 export type CaptureResponse = z.infer<typeof captureResponseSchema>;
+
+// --- Command-created proposals (US-051) ------------------------------------
+
+/**
+ * Safe provenance metadata the command box may attach when promoting a
+ * structured `create` interpretation into the review queue. This intentionally
+ * allowlists display/provenance fields only; raw model responses, prompts, and
+ * secrets are not accepted.
+ */
+export const commandProposalMetadataSchema = z.object({
+  query: z.string().trim().max(500).optional(),
+  explanation: z.string().max(500).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  demo: z.boolean().optional(),
+  label: z.string().max(200).nullable().optional(),
+  remoteConfirmation: remoteCallConfirmationSchema.optional(),
+});
+export type CommandProposalMetadata = z.infer<typeof commandProposalMetadataSchema>;
+
+/** Create a pending proposal from a command-box `create` interpretation. */
+export const createCommandProposalSchema = z.object({
+  changes: proposalChangesSchema.refine((changes) => changes.items.length > 0, {
+    message: 'At least one proposed change is required',
+    path: ['items'],
+  }),
+  provider: z.string().trim().max(200).nullable().optional(),
+  model: z.string().trim().max(200).nullable().optional(),
+  metadata: commandProposalMetadataSchema.optional(),
+});
+export type CreateCommandProposalRequest = z.infer<typeof createCommandProposalSchema>;
 
 // --- Proposal review (US-018) ----------------------------------------------
 //
